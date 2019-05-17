@@ -4,7 +4,6 @@
 #include <unordered_set>
 #include <cstring>
 #include <limits>
-#include <mpi.h>
 
 #include "bvh.h"
 #ifdef ENABLE_EMBREE_BVH
@@ -427,15 +426,13 @@ static void build_bvh(const obj::TriMesh& tri_mesh,
 }
 
 template <typename Node, typename Tri>
-static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris, int world_rank) {
-//    std::ofstream of("data/bvh" + std::to_string(world_rank) + ".bin", std::ios::app | std::ios::binary);
+static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris) {
     std::ofstream of("data/bvh.bin", std::ios::app | std::ios::binary);
     size_t node_size = sizeof(Node);
     size_t tri_size  = sizeof(Tri);
     of.write((char*)&node_size, sizeof(uint32_t));
     of.write((char*)&tri_size,  sizeof(uint32_t));
     write_buffer(of, nodes);
-//    info("node",nodes[0].bounds[0][0]);
     write_buffer(of, tris );
     info("BVH with ", nodes.size(), " node(s), ", tris.size(), " tri(s)");
 }
@@ -558,6 +555,7 @@ static size_t cleanup_obj(obj::File& obj_file, obj::MaterialLib& mtl_lib) {
     }
     return num_complex;
 }
+
 static bool must_build_bvh(const std::string& name, Target target) {
     std::ifstream bvh_stamp("data/bvh.stamp", std::fstream::in);
     if (bvh_stamp) {
@@ -573,16 +571,13 @@ static bool must_build_bvh(const std::string& name, Target target) {
     }
     return true;
 }
-static bool convert_obj(const std::string& file_name, Target target, size_t dev, size_t max_path_len, size_t spp, bool embree_bvh, bool fusion, std::ostream& os, int part_num) {
+
+static bool convert_obj(const std::string& file_name, Target target, size_t dev, size_t max_path_len, size_t spp, bool embree_bvh, bool fusion, std::ostream& os) {
     info("Converting OBJ file '", file_name, "'");
-    int world_size, world_rank;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath path(file_name);
-
-    if (!obj::load_obj(path, obj_file, world_rank, world_size)) {
+    if (!obj::load_obj(path, obj_file)) {
         error("Invalid OBJ file '", file_name, "'");
         return false;
     }
@@ -606,7 +601,7 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
         if (mat.map_ke != "") images.emplace(mat.map_ke, images.size()), has_map_ke = true;
     }
 
-    auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0);
+    auto tri_mesh = compute_tri_mesh(obj_file, 0);
     
     // Generate images
     std::vector<std::string> image_names(images.size());
@@ -625,11 +620,11 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
        << "    up: Vec3,\n"
        << "    right: Vec3,\n"
        << "    width: f32,\n"
-       << "    height: f32,\n"
-       << "    range: &[f32]\n"
+       << "    height: f32\n"
        << "};\n";
 
     os << "\nextern fn get_spp() -> i32 { " << spp << " }\n";
+
     os << "\nextern fn render(settings: &Settings, iter: i32) -> () {\n";
 
     assert(target != Target(0));
@@ -637,12 +632,11 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
                           target == Target::NVVM_MEGAKERNEL  ||
                           target == Target::AMDGPU_STREAMING ||
                           target == Target::AMDGPU_MEGAKERNEL;
-    
     switch (target) {
         case Target::GENERIC:           os << "    let device   = make_cpu_default_device();\n";               break;
-        case Target::AVX2:              os << "    let device   = make_avx2_device(false);\n";     break;
-        case Target::AVX2_EMBREE:       os << "    let device   = make_avx2_device(true);\n";      break;
-        case Target::AVX:               os << "    let device   = make_avx_device();\n";             break;
+        case Target::AVX2:              os << "    let device   = make_avx2_device(false);\n";                 break;
+        case Target::AVX2_EMBREE:       os << "    let device   = make_avx2_device(true);\n";                  break;
+        case Target::AVX:               os << "    let device   = make_avx_device();\n";                       break;
         case Target::SSE42:             os << "    let device   = make_sse42_device();\n";                     break;
         case Target::ASIMD:             os << "    let device   = make_asimd_device();\n";                     break;
         case Target::NVVM_STREAMING:    os << "    let device   = make_nvvm_device(" << dev <<", true);\n";    break;
@@ -653,15 +647,9 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
             assert(false);
             break;
     }
-    
-    os << "    let renderer = make_path_tracing_renderer(" << max_path_len << " /*max_path_len*/, " << 32 << " /*spp*/);\n"
+
+    os << "    let renderer = make_path_tracing_renderer(" << max_path_len << " /*max_path_len*/, " << spp << " /*spp*/);\n"
        << "    let math     = device.intrinsics;\n";
-    
-    os << "    let mut mpi_id = -1; \n"
-       << "    let mut mpi_size = -1; \n"
-       << "    let mpi = comm();\n"
-       << "    mpi.comm_rank(mpi.comms.world, &mut mpi_id);\n"
-       << "    mpi.comm_size(mpi.comms.world, &mut mpi_size);\n";
 
     // Setup camera
     os << "\n    // Camera\n"
@@ -670,10 +658,7 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
        << "        settings.eye,\n"
        << "        make_mat3x3(settings.right, settings.up, settings.dir),\n"
        << "        settings.width,\n"
-       << "        settings.height,\n"
-       << "        settings.range,\n"
-       << "        mpi_id,\n"
-       << "        mpi_size\n"
+       << "        settings.height\n"
        << "    );\n";
 
     // Setup triangle mesh
@@ -693,9 +678,8 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
        << "        num_attrs:    1,\n"
        << "        num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
        << "    };\n"
-       << "    let bvh = device.load_bvh(\"data/bvh.bin\");\n"
-       << "    let node = bvh.node(0); \n"
-       << "    let bbox = node.bbox(0);   \n";
+       << "    let bvh = device.load_bvh(\"data/bvh.bin\");\n";
+
     // Simplify materials if necessary
     num_complex = fusion ? num_complex : num_mats;
     bool has_simple = num_complex < num_mats;
@@ -728,32 +712,38 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
     write_tri_mesh(tri_mesh, enable_padding);
 
     // Generate BVHs
-    info("Generating BVH for '", file_name, "'");
-    std::remove("data/bvh.bin");
-    if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
-        target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-        std::vector<typename BvhNTriM<2, 1>::Node> nodes;
-        std::vector<typename BvhNTriM<2, 1>::Tri> tris;
-        build_bvh<2, 1>(tri_mesh, nodes, tris);
-        write_bvh(nodes, tris, world_rank);
-    } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-        std::vector<typename BvhNTriM<4, 4>::Node> nodes;
-        std::vector<typename BvhNTriM<4, 4>::Tri> tris;
+    if (must_build_bvh(file_name, target)) {
+        info("Generating BVH for '", file_name, "'");
+        std::remove("data/bvh.bin");
+        if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
+            target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
+            std::vector<typename BvhNTriM<2, 1>::Node> nodes;
+            std::vector<typename BvhNTriM<2, 1>::Tri> tris;
+            build_bvh<2, 1>(tri_mesh, nodes, tris);
+            write_bvh(nodes, tris);
+        } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
+            std::vector<typename BvhNTriM<4, 4>::Node> nodes;
+            std::vector<typename BvhNTriM<4, 4>::Tri> tris;
 #ifdef ENABLE_EMBREE_BVH
-        if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
-        else
+            if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
+            else
 #endif
-        build_bvh<4, 4>(tri_mesh, nodes, tris);
-        write_bvh(nodes, tris, world_rank);
+            build_bvh<4, 4>(tri_mesh, nodes, tris);
+            write_bvh(nodes, tris);
+        } else {
+            std::vector<typename BvhNTriM<8, 4>::Node> nodes;
+            std::vector<typename BvhNTriM<8, 4>::Tri> tris;
+#ifdef ENABLE_EMBREE_BVH
+            if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
+            else
+#endif
+            build_bvh<8, 4>(tri_mesh, nodes, tris);
+            write_bvh(nodes, tris);
+        }
+        std::ofstream bvh_stamp("data/bvh.stamp");
+        bvh_stamp << int(target) << " " << file_name;
     } else {
-        std::vector<typename BvhNTriM<8, 4>::Node> nodes;
-        std::vector<typename BvhNTriM<8, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-        if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
-        else
-#endif
-        build_bvh<8, 4>(tri_mesh, nodes, tris);
-        write_bvh(nodes, tris, world_rank);
+        info("Reusing existing BVH for '", file_name, "'");
     }
 
 
@@ -777,6 +767,7 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
             os << "dummy_image; // Cannot determine image type for " << name << "\n";
         }
     }
+
     // Lights
     std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
     os << "\n    // Lights\n";
@@ -839,7 +830,6 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
             os << "    let lights = @ |_| make_point_light(math, make_vec3(0.0f, 0.0f, 0.0f), black);\n";
         }
     } else {
-        printf("light %f %f %f \n", light_verts[0].x, light_verts[0].y, light_verts[0].z);
         write_buffer("data/light_verts.bin",  pad_buffer(light_verts,  enable_padding, sizeof(float) * 4));
         write_buffer("data/light_areas.bin",  light_areas);
         write_buffer("data/light_norms.bin",  pad_buffer(light_norms,  enable_padding, sizeof(float) * 4));
@@ -976,7 +966,7 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
        << "    renderer(scene, device, iter);\n"
        << "    device.present();\n"
        << "}\n";
-       
+
     info("Scene was converted successfully");
     return true;
 }
@@ -1013,13 +1003,10 @@ int main(int argc, char** argv) {
         std::cerr << "Not enough arguments. Run with --help to get a list of options." << std::endl;
         return 1;
     }
-    MPI_Init(NULL, NULL); 
-    int world_size, world_rank;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
     std::string obj_file;
     size_t dev = 0;
-    size_t spp = 256;
+    size_t spp = 4;
     size_t max_path_len = 64;
     auto target = Target::INVALID;
     bool embree_bvh = false;
@@ -1100,8 +1087,7 @@ int main(int argc, char** argv) {
     }
 
     std::ofstream of("main.impala");
-    if (!convert_obj(obj_file, target, dev, max_path_len, spp, embree_bvh, fusion, of, 8))
+    if (!convert_obj(obj_file, target, dev, max_path_len, spp, embree_bvh, fusion, of))
         return 1;
     return 0;
-    MPI_Finalize();
 }

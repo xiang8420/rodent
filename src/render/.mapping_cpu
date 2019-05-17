@@ -281,6 +281,8 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
             let mat    = geom.shader(ray, hit, surf);
 
             // Execute hit point shading, and add the contribution of each lane to the frame buffer
+// 	    let mut hit_color =  make_color(0.0f, 100.0f, 0.0f);   
+
             let mut hit_color;
             for once() {
                 @@(path_tracer.on_hit)(ray, hit, &mut state, surf, mat, @ |color| -> ! {
@@ -354,6 +356,8 @@ fn @cpu_trace( scene: Scene
              ) -> () {
     let (film_pixels, film_width, film_height) = cpu_get_film_data();
    
+    print_i32(film_width);
+    print_i32(film_height); 
     fn @accumulate(pixel: i32, color: Color) -> () {
         let inv = 1.0f / (spp as f32);
         film_pixels(pixel * 3 + 0) += color.r * inv;
@@ -372,7 +376,21 @@ fn @cpu_trace( scene: Scene
     mpi.comm_rank(mpi.comms.world, &mut mpi_id);
     mpi.comm_size(mpi.comms.world, &mut mpi_size);
 
+//   let image_range = scene.camera.decomposition_binary(film_width, film_height);
+//    scene.camera.gridtree.treeadjust(); 
+ //   let image_range = scene.camera.gridtree.getgrid(mpi_id);  
     let image_range = scene.camera.range;
+
+
+    print_string("image_range");
+    print_f32(image_range(0));
+    print_string(" ");
+    print_f32(image_range(2));
+    print_string(" ");
+    print_f32(image_range(1));
+    print_string(" ");
+    print_f32(image_range(3));
+    print_string("\n");
     for xmin, ymin, xmax, ymax in cpu_parallel_tiles(film_width, film_height, tile_size, tile_size, num_cores, image_range) {
         with cpu_profile(&mut total_counter) {
             // Get ray streams/states from the CPU driver
@@ -443,6 +461,17 @@ fn @cpu_trace( scene: Scene
             }
         }
     }
+/*    let image_data_num = film_width * film_height * 3;
+    let mut recv_pixels: [f32 * 3145728]; 
+    mpi.reduce(film_pixels as COMM_Buf, &mut recv_pixels as COMM_Buf, image_data_num, mpi.float_t, mpi.ops.sum, 0, mpi.comms.world);
+
+    
+    if mpi_id == 0 {
+        for i in range(0, image_data_num) { 
+            film_pixels(i) = recv_pixels(i);
+        }
+    }
+*/
     if cpu_profiling_enabled {
         fn print_counter(counter: i64, total: i64, name: &[u8]) -> () {
             print_string(name);

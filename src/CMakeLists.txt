@@ -1,11 +1,11 @@
 set(CPUINFO_PATH "/proc/cpuinfo" CACHE STRING "Path to the CPU info file on the system")
 set(TARGET_PLATFORM "" CACHE STRING "Target platform for the converter tool. Leave empty to autodetect CPU. Use converter --help to list possible platforms.")
-set(TARGET_DEVICE "" CACHE STRING "Target device on the selected platform. Leave empty to use the default.")
-set(SCENE_FILE "${PROJECT_SOURCE_DIR}/testing/cornell_box.obj" CACHE FILEPATH "Absolute path to an OBJ scene")
+set(TARGET_DEVICE "AVX" CACHE STRING "Target device on the selected platform. Leave empty to use the default.")
+set(SCENE_FILE "${PROJECT_SOURCE_DIR}/bench_scenes/bedroom/bedroom.obj" CACHE FILEPATH "Absolute path to an OBJ scene")
 set(MEGAKERNEL_FUSION ON CACHE BOOLEAN "Set to true to enable simple shader fusion for megakernel mappings")
 set(MAX_PATH_LEN "64" CACHE STRING "Maximum path length")
-set(DISABLE_GUI OFF CACHE BOOLEAN "Set to true to disable GUI")
-set(SPP "4" CACHE STRING "Samples per pixel")
+set(DISABLE_GUI TRUE CACHE BOOLEAN "Set to true to disable GUI")
+set(SPP "256" CACHE STRING "Samples per pixel")
 if (SCENE_FILE STREQUAL "")
     message(FATAL_ERROR "Please specify a valid OBJ scene in the SCENE_FILE variable")
 endif()
@@ -41,7 +41,9 @@ set(RODENT_SRCS
     traversal/intersection.impala
     traversal/stack.impala
     traversal/mapping_cpu.impala
-    traversal/mapping_gpu.impala)
+    traversal/mapping_gpu.impala
+    driver/mpi.impala
+    )
 
 set(DRIVER_SRCS
     driver/driver.cpp
@@ -57,7 +59,10 @@ set(DRIVER_SRCS
     driver/float4.h
     driver/file_path.h
     driver/common.h
-    driver/color.h)
+    driver/color.h
+    driver/mpi.cpp
+    driver/grid.h
+    )
 
 set(CONVERTER_SRCS
     driver/converter.cpp
@@ -66,6 +71,14 @@ set(CONVERTER_SRCS
     driver/file_path.h
     driver/interface.h
     driver/bvh.h)
+
+
+find_package(MPI REQUIRED)
+if (MPI_FOUND)
+    include_directories(SYSTEM ${MPI_INCLUDE_PATH})
+else (MPI_FOUND)
+    message(SEND_ERROR "This application cannot compile without MPI")
+endif (MPI_FOUND)
 
 anydsl_runtime_wrap(RODENT_OBJS
     NAME "rodent"
@@ -78,6 +91,7 @@ anydsl_runtime_wrap(DISCARD_TMP_OBJS
     FILES ${RODENT_SRCS} dummy_main.impala
     INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/driver/interface)
 
+
 if (NOT DISABLE_GUI)
     find_package(SDL2 REQUIRED)
 endif()
@@ -87,7 +101,8 @@ find_package(TBB REQUIRED)
 find_package(LZ4 REQUIRED)
 
 add_executable(converter ${CONVERTER_SRCS})
-target_link_libraries(converter ${LZ4_LIBRARY})
+target_link_libraries(converter ${LZ4_LIBRARY} ${MPI_LIBRARIES})
+target_include_directories(converter PUBLIC ${LZ4_INCLUDE_DIR})
 target_compile_definitions(converter PUBLIC -DCPUINFO_PATH="${CPUINFO_PATH}")
 if (COLORIZE)
     target_compile_definitions(converter PUBLIC -DCOLORIZE)
@@ -104,7 +119,8 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/main.impala
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     DEPENDS ${SCENE_FILE} converter)
 
-add_custom_target(convert DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/main.impala)
+MESSAGE( STATUS "converter ${SCENE_FILE} ${CONVERTER_OPTIONS} --max-path-len ${MAX_PATH_LEN} --samples-per-pixel ${SPP}")
+
 
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/main.impala PROPERTIES GENERATED TRUE)
 
@@ -115,14 +131,15 @@ if (EMBREE_FOUND)
     target_compile_definitions(driver PUBLIC -DENABLE_EMBREE_DEVICE)
 endif()
 if (NOT DISABLE_GUI)
-    target_include_directories(driver PUBLIC ${SDL2_INCLUDE_DIRS})
+    target_include_directories(driver PUBLIC ${SDL2_INCLUDE_DIRS} ${LZ4_INCLUDE_DIR} )
     target_link_libraries(driver ${SDL2_LIBRARY})
 else()
-    target_compile_definitions(driver PUBLIC -DDISABLE_GUI)
+    target_include_directories(driver PUBLIC ${SDL2_INCLUDE_DIRS} ${LZ4_INCLUDE_DIR} )
+    target_compile_definitions(driver PUBLIC -DDISABLE_GUI )
 endif()
 if (COLORIZE)
     target_compile_definitions(driver PUBLIC -DCOLORIZE)
 endif()
 
-add_executable(rodent ${RODENT_OBJS})
-target_link_libraries(rodent driver ${AnyDSL_runtime_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TBB_LIBRARIES} ${LZ4_LIBRARY})
+add_executable(rodent driver/mpi.cpp ${RODENT_OBJS})
+target_link_libraries(rodent driver ${AnyDSL_runtime_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TBB_LIBRARIES} ${LZ4_LIBRARY} ${MPI_LIBRARIES})

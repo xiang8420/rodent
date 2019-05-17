@@ -5,6 +5,7 @@
 #include <cstring>
 #include <chrono>
 #include <cmath>
+#include <mpi.h>
 
 #ifndef DISABLE_GUI
 #include <SDL2/SDL.h>
@@ -14,7 +15,7 @@
 #include "float3.h"
 #include "common.h"
 #include "image.h"
-
+#include "grid.h"
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
 #include <x86intrin.h>
 #endif
@@ -27,8 +28,9 @@ struct Camera {
     float3 right;
     float3 up;
     float w, h;
+    ImageGridTree *tree;
 
-    Camera(const float3& e, const float3& d, const float3& u, float fov, float ratio) {
+    Camera(const float3& e, const float3& d, const float3& u, float fov, float ratio, float width, float height) {
         eye = e;
         dir = normalize(d);
         right = normalize(cross(dir, u));
@@ -36,6 +38,7 @@ struct Camera {
 
         w = std::tan(fov * pi / 360.0f);
         h = w / ratio;
+        tree = new ImageGridTree(width, height);
     }
 
     void rotate(float yaw, float pitch) {
@@ -49,6 +52,7 @@ struct Camera {
     void move(float x, float y, float z) {
         eye += right * x + up * y + dir * z;
     }
+    
 };
 
 void setup_interface(size_t, size_t);
@@ -135,20 +139,20 @@ static void update_texture(uint32_t* buf, SDL_Texture* texture, size_t width, si
 }
 #endif
 
-static void save_image(const std::string& out_file, size_t width, size_t height, uint32_t iter) {
+static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
     img.width = width;
     img.height = height;
     img.pixels.reset(new uint8_t[width * height * 4]);
 
-    auto film = get_pixels();
+//    auto film = get_pixels();
     auto inv_iter = 1.0f / iter;
     auto inv_gamma = 1.0f / 2.2f;
     for (size_t y = 0; y < height; ++y) {
         for (size_t x = 0; x < width; ++x) {
-            auto r = film[(y * width + x) * 3 + 0];
-            auto g = film[(y * width + x) * 3 + 1];
-            auto b = film[(y * width + x) * 3 + 2];
+            auto r = result[(y * width + x) * 3 + 0];
+            auto g = result[(y * width + x) * 3 + 1];
+            auto b = result[(y * width + x) * 3 + 2];
 
             img.pixels[4 * (y * width + x) + 0] = clamp(std::pow(r * inv_iter, inv_gamma), 0.0f, 1.0f) * 255.0f;
             img.pixels[4 * (y * width + x) + 1] = clamp(std::pow(g * inv_iter, inv_gamma), 0.0f, 1.0f) * 255.0f;
@@ -183,10 +187,11 @@ static inline void usage() {
 int main(int argc, char** argv) {
     std::string out_file;
     size_t bench_iter = 0;
-    size_t width  = 1080;
-    size_t height = 720;
+    size_t width  = 1024;
+    size_t height = 1024;
     float fov = 60.0f;
-    float3 eye(0.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
+//    float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
+    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
 
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] == '-') {
@@ -230,12 +235,12 @@ int main(int argc, char** argv) {
         }
         error("Unexpected argument '", argv[i], "'");
     }
-    Camera cam(eye, dir, up, fov, (float)width / (float)height);
+    Camera cam(eye, dir, up, fov, (float)width / (float)height, (float)width, (float)height);
 
 #ifdef DISABLE_GUI
     info("Running in console-only mode (compiled with -DDISABLE_GUI).");
     if (bench_iter == 0) {
-        warn("Benchmark iterations not set. Defaulting to 1.");
+        warn("Benchmark iterations no set. Defaulting to 1.");
         bench_iter = 1;
     }
 #else
@@ -265,6 +270,7 @@ int main(int argc, char** argv) {
 
     setup_interface(width, height);
 
+    auto film = get_pixels();
     // Force flush to zero mode for denormals
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
     _mm_setcsr(_mm_getcsr() | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
@@ -276,75 +282,69 @@ int main(int argc, char** argv) {
     uint32_t frames = 0;
     uint32_t iter = 0;
     std::vector<double> samples_sec;
-    while (!done) {
-#ifndef DISABLE_GUI
-        done = handle_events(iter, cam);
-#endif
+    
+    int  world_rank = -1, world_size = -1;
+    MPI_Init(NULL, NULL); 
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    float *proc_time = new float[world_size];
+    float elapsed_ms = 1;  //avoid div 0
+//    cam.rotate(-0.25f, 0.0f);
+    float *reduce_buffer = NULL;
+    int pixel_num = width * height * 3;
+    if (world_rank==0)
+        reduce_buffer = new float[pixel_num];
+
+    while (frames < 5) {
         if (iter == 0)
             clear_pixels();
-
+//        cam.rotate(0.05f, 0.0f);
+        MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
+        float range[4]; 
+        cam.tree->getgrid(world_rank, world_size, proc_time, range); 
+        printf("range %f %f %f %f \n", range[0], range[1], range[2], range[3]);
         Settings settings {
             Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },
             Vec3 { cam.dir.x, cam.dir.y, cam.dir.z },
             Vec3 { cam.up.x, cam.up.y, cam.up.z },
             Vec3 { cam.right.x, cam.right.y, cam.right.z },
             cam.w,
-            cam.h
+            cam.h,
+            &range[0]
         };
-
+        for (int i = 0; i < world_size; i++)
+                printf("%f|",proc_time[i]);
+              
         auto ticks = std::chrono::high_resolution_clock::now();
-        render(&settings, iter++);
-        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+        render(&settings, 0); //iter++);
+        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+        
+        film = get_pixels(); 
+        MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
 
-        if (bench_iter != 0) {
-            samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
-            if (samples_sec.size() == bench_iter)
-                break;
-        }
-
+        printf("proc %d time %f", world_rank, float(elapsed_ms));
+        samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
         frames++;
         timing += elapsed_ms;
-        if (frames > 10 || timing >= 2500) {
-            auto frames_sec = double(frames) * 1000.0 / double(timing);
-#ifndef DISABLE_GUI
-            std::ostringstream os;
-            os << "Rodent [" << frames_sec << " FPS, "
-               << iter * spp << " " << "sample" << (iter * spp > 1 ? "s" : "") << "]";
-            SDL_SetWindowTitle(window, os.str().c_str());
-#endif
-            frames = 0;
-            timing = 0;
+    
+        std::string out = out_file + std::to_string(frames);
+        out += ".png";
+        if (world_rank == 0 && out_file != "") {
+            info("0 image wirting\n");
+       //     film = get_pixels();
+            save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
+            info("Image saved to '", out, "'");
         }
-
-#ifndef DISABLE_GUI
-        update_texture(buf.get(), texture, width, height, iter);
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-        SDL_RenderPresent(renderer);
-#endif
     }
-
-#ifndef DISABLE_GUI
-    SDL_DestroyTexture(texture);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-#endif
-
-    if (out_file != "") {
-        save_image(out_file, width, height, iter);
-        info("Image saved to '", out_file, "'");
-    }
-
+    delete [] proc_time; 
+    MPI_Finalize(); 
     cleanup_interface();
 
-    if (bench_iter != 0) {
-        auto inv = 1.0e-6;
-        std::sort(samples_sec.begin(), samples_sec.end());
-        info("# ", samples_sec.front() * inv,
-             "/", samples_sec[samples_sec.size() / 2] * inv,
-             "/", samples_sec.back() * inv,
-             " (min/med/max Msamples/s)");
-    }
+    auto inv = 1.0e-6;
+    std::sort(samples_sec.begin(), samples_sec.end());
+    info("# ", samples_sec.front() * inv,
+         "/", samples_sec[samples_sec.size() / 2] * inv,
+         "/", samples_sec.back() * inv,
+         " (min/med/max Msamples/s)");
     return 0;
 }
