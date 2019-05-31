@@ -211,7 +211,7 @@ fn @cpu_generate_rays( primary: PrimaryStream
     let (tile_width, tile_height) = (xmax - xmin, ymax - ymin);
     let num_rays = cpu_intrinsics.min(spp * tile_width * tile_height - first_id, capacity - primary.size);
     let tile_div = make_fast_div(tile_width as u32);
-    for i, _ in vectorized_range(1, 0, num_rays) {
+    for i, _ in vectorized_range(vector_width, 0, num_rays) {
         let in_tile_id = first_id + i;
         // Compute x, y of ray within tile
         let sample = in_tile_id % spp;
@@ -281,6 +281,8 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
             let mat    = geom.shader(ray, hit, surf);
 
             // Execute hit point shading, and add the contribution of each lane to the frame buffer
+// 	    let mut hit_color =  make_color(0.0f, 100.0f, 0.0f);   
+
             let mut hit_color;
             for once() {
                 @@(path_tracer.on_hit)(ray, hit, &mut state, surf, mat, @ |color| -> ! {
@@ -354,6 +356,8 @@ fn @cpu_trace( scene: Scene
              ) -> () {
     let (film_pixels, film_width, film_height) = cpu_get_film_data();
    
+    print_i32(film_width);
+    print_i32(film_height); 
     fn @accumulate(pixel: i32, color: Color) -> () {
         let inv = 1.0f / (spp as f32);
         film_pixels(pixel * 3 + 0) += color.r * inv;
@@ -366,13 +370,12 @@ fn @cpu_trace( scene: Scene
     let mut shading_counter = 0i64;
     let mut total_counter   = 0i64;
 
-    let mut mpi_id = -1;
-    let mut mpi_size = -1;
-    let mpi = comm(); 
-    mpi.comm_rank(mpi.comms.world, &mut mpi_id);
-    mpi.comm_size(mpi.comms.world, &mut mpi_size);
-
-    let image_range = scene.camera.range;
+    let spp = scene.camera.spp;
+    let mut image_range:[f32 * 4];
+    let range_t = scene.camera.range;
+    image_range(0) = range_t.x; image_range(1) = range_t.y;
+    image_range(2) = range_t.z; image_range(3) = range_t.w;   
+    
     for xmin, ymin, xmax, ymax in cpu_parallel_tiles(film_width, film_height, tile_size, tile_size, num_cores, image_range) {
         with cpu_profile(&mut total_counter) {
             // Get ray streams/states from the CPU driver
@@ -385,10 +388,11 @@ fn @cpu_trace( scene: Scene
             let num_rays = spp * (ymax - ymin) * (xmax - xmin);
             while id < num_rays || primary.size > 0 {
                 let first = id == 0;
-
+                    
                 // (Re-)generate primary rays
                 if primary.size < capacity {
-                    primary.size = cpu_generate_rays(primary, capacity, path_tracer, &mut id, xmin, ymin, xmax, ymax, film_width, film_height, spp, vector_width);
+                    primary.size = cpu_generate_rays(primary, capacity, path_tracer, &mut id, xmin, ymin, xmax, ymax, 
+                                                film_width, film_height, spp, vector_width);
                  }
                 // Trace primary rays
                 with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {

@@ -1,5 +1,4 @@
 #include <vector>
-#define DEP 2
 //Splitting bounding box for distributed computing
 struct Grid3{
     float3 min;
@@ -9,7 +8,6 @@ struct Grid3{
     float w;    //weight to adjust
 
     Grid3() {}
-    Grid3(BBox bbox) : min(bbox.min), max(bbox.max){}
     Grid3(float3& min, float3& max) : min(min), max(max){}
     Grid3(float3& min, float3& max, float w) : min(min), max(max), w(w){}
     Grid3(float *value){
@@ -17,11 +15,11 @@ struct Grid3{
         max.x = value[3]; max.y = value[4]; max.z = value[5];
     } 
     bool is_leaf(){return children[0] == -1 && children[1] == -1;}
-    int longaxis(){
-        float lenth[] = {max.x - min.x, max.y - min.y, max.z - min.z};
-        float maxlenth = -FLT_MAX;
-        int axis;
-        for(int i = 0; i < 3; i++){
+    int longestAxis(){
+        float lenth[] = {0, max.y - min.y, max.z - min.z};
+        float maxlenth = max.x - min.x;
+        int axis = 0;
+        for(int i = 1; i < 3; i++){
             if(lenth[i] > maxlenth){
                 axis = i;
                 maxlenth = lenth[i];
@@ -29,7 +27,23 @@ struct Grid3{
         }
        return axis;
     }
+    int shortestAxis(){
+        float lenth[] = {0, max.y - min.y, max.z - min.z};
+        float minlenth = max.x - min.x;
+        int axis = 0;
+        for(int i = 1; i < 3; i++){
+            if(lenth[i] < minlenth){
+                axis = i;
+                minlenth = lenth[i];
+            }
+        }
+        return axis;
+    }
 };
+struct SceneGridTree{
+
+};
+
 struct Grid2{
     int children[2];
     float w;   //area weight 
@@ -37,7 +51,7 @@ struct Grid2{
     float axis;  // axis
 
     Grid2(float w, float t, float axis): w(w), t(t), axis(axis) {}
-    bool is_leaf(){return children[0] == -1 && children[1] == -1;}
+    bool isleaf(){return children[0] == -1 && children[1] == -1;}
 };
 
 // Grid hierarchy for scheduling
@@ -45,6 +59,7 @@ struct ImageGridTree {
     std::vector<Grid2> grids;
     int count;
     int width, height;
+    int dep;
 
     int build(int axis, int iter){
         if(iter == -1) // or w  
@@ -58,10 +73,13 @@ struct ImageGridTree {
         return cur;
     
     }
-    ImageGridTree(int w, int h): width(w), height(h){
+    ImageGridTree(int w, int h, int proc_num): width(w), height(h){
         //split grid and build gridtree
         count = 0;
-        build(0, DEP);
+        if(proc_num == 4) dep = 2;
+        else if(proc_num == 2) dep = 1;
+        else dep = 4;
+        build(0, dep);
         grids.at(0).w = 1.0;
     }
     float treeupdate(int cur, int &leafnum, float* proc_time, int axis, int iter){
@@ -78,7 +96,7 @@ struct ImageGridTree {
             float t2 = treeupdate(node.children[1], leafnum, proc_time, 1 - axis, iter - 1);
 
             // updata child weight
-     //       child1.w = child1.w + (t2 - t1) / (t2 + t1) * 0.5;
+//            child1.w = child1.w + (t2 - t1) / (t2 + t1) * 0.5;
             child1.w = child1.w * (1 + (t2 - t1) / t1 * 0.5);
             child1.w = (child1.w + 0.5) * 0.5;
             
@@ -92,7 +110,7 @@ struct ImageGridTree {
         range[0] = 0; range[1] = 0;
         range[2] = width; range[3] = height;
         int leaf = 0;
-        treeupdate(0, leaf, proc_time, 0, DEP);
+        treeupdate(0, leaf, proc_time, 0, dep);
         Grid2 *curnode = &grids.at(0);
         int axis = 0;
         while(1){

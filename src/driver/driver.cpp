@@ -30,7 +30,7 @@ struct Camera {
     float w, h;
     ImageGridTree *tree;
 
-    Camera(const float3& e, const float3& d, const float3& u, float fov, float ratio, float width, float height) {
+    Camera(const float3& e, const float3& d, const float3& u, float fov, float ratio, float width, float height, int proc_num) {
         eye = e;
         dir = normalize(d);
         right = normalize(cross(dir, u));
@@ -38,7 +38,7 @@ struct Camera {
 
         w = std::tan(fov * pi / 360.0f);
         h = w / ratio;
-        tree = new ImageGridTree(width, height);
+        tree = new ImageGridTree(width, height, proc_num);
     }
 
     void rotate(float yaw, float pitch) {
@@ -190,9 +190,8 @@ int main(int argc, char** argv) {
     size_t width  = 1024;
     size_t height = 1024;
     float fov = 60.0f;
-//    float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
-    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
-
+    float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
+//    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] == '-') {
             if (!strcmp(argv[i], "--width")) {
@@ -235,7 +234,11 @@ int main(int argc, char** argv) {
         }
         error("Unexpected argument '", argv[i], "'");
     }
-    Camera cam(eye, dir, up, fov, (float)width / (float)height, (float)width, (float)height);
+    int  world_rank = -1, world_size = -1;
+    MPI_Init(NULL, NULL); 
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    Camera cam(eye, dir, up, fov, (float)width / (float)height, (float)width, (float)height, world_size);
 
 #ifdef DISABLE_GUI
     info("Running in console-only mode (compiled with -DDISABLE_GUI).");
@@ -283,11 +286,8 @@ int main(int argc, char** argv) {
     uint32_t iter = 0;
     std::vector<double> samples_sec;
     
-    int  world_rank = -1, world_size = -1;
-    MPI_Init(NULL, NULL); 
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     float *proc_time = new float[world_size];
+    int spp_old = spp / world_size;
     float elapsed_ms = 1;  //avoid div 0
 //    cam.rotate(-0.25f, 0.0f);
     float *reduce_buffer = NULL;
@@ -300,9 +300,23 @@ int main(int argc, char** argv) {
             clear_pixels();
 //        cam.rotate(0.05f, 0.0f);
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
-        float range[4]; 
-        cam.tree->getgrid(world_rank, world_size, proc_time, range); 
-        printf("range %f %f %f %f \n", range[0], range[1], range[2], range[3]);
+        float range[] = {0.0, 0.0, width, height}; 
+        int spp_cur;
+        bool splitimage = true;
+        if(splitimage){
+            spp_cur = spp;
+            cam.tree->getgrid(world_rank, world_size, proc_time, range); 
+        }
+        else{
+            float total = 0;
+            for(int i = 0; i < world_size; i++){
+                total += proc_time[i];
+            }
+            float average = total / world_size; //average speed
+            spp_cur = spp_old / proc_time[world_rank] * average;
+        }
+        printf("range %f %f %f %f %d \n", range[0], range[1], range[2], range[3], spp_cur);
+        
         Settings settings {
             Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },
             Vec3 { cam.dir.x, cam.dir.y, cam.dir.z },
@@ -310,13 +324,14 @@ int main(int argc, char** argv) {
             Vec3 { cam.right.x, cam.right.y, cam.right.z },
             cam.w,
             cam.h,
-            &range[0]
+            Vec4 { range[0], range[1], range[2], range[3]},
+            spp_cur
         };
         for (int i = 0; i < world_size; i++)
                 printf("%f|",proc_time[i]);
               
         auto ticks = std::chrono::high_resolution_clock::now();
-        render(&settings, 0); //iter++);
+        render(&settings, world_rank); //iter++);
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         
         film = get_pixels(); 
