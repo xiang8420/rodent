@@ -401,12 +401,22 @@ static std::vector<uint8_t> pad_buffer(const std::vector<T>& elems, bool enable,
     return new_elems;
 }
 
-static void write_tri_mesh(const obj::TriMesh& tri_mesh, bool enable_padding) {
-    write_buffer("data/vertices.bin",     pad_buffer(tri_mesh.vertices,     enable_padding, sizeof(float) * 4));
-    write_buffer("data/normals.bin",      pad_buffer(tri_mesh.normals,      enable_padding, sizeof(float) * 4));
-    write_buffer("data/face_normals.bin", pad_buffer(tri_mesh.face_normals, enable_padding, sizeof(float) * 4));
+template <typename Array>
+static void write_buffer_hetero(char* file_name,const Array& array, unsigned short padding_flag) {
+    if(padding_flag & 1){
+        write_buffer(std::string(file_name) + ".bin", pad_buffer(array, false, sizeof(float) * 4));
+    }
+    if(padding_flag & 2){
+        write_buffer(std::string(file_name) + "_gpu.bin", pad_buffer(array, true, sizeof(float) * 4));
+    }
+}
+
+static void write_tri_mesh(const obj::TriMesh& tri_mesh, unsigned short padding_flag) {
+    write_buffer_hetero("data/vertices",     tri_mesh.vertices,     padding_flag);
+    write_buffer_hetero("data/normals",      tri_mesh.normals,      padding_flag);
+    write_buffer_hetero("data/face_normals", tri_mesh.face_normals, padding_flag);
+    write_buffer_hetero("data/texcoords",    tri_mesh.texcoords,    padding_flag);
     write_buffer("data/indices.bin",      tri_mesh.indices);
-    write_buffer("data/texcoords.bin",    pad_buffer(tri_mesh.texcoords,    enable_padding, sizeof(float) * 4));
 }
 
 
@@ -427,9 +437,9 @@ static void build_bvh(const obj::TriMesh& tri_mesh,
 }
 
 template <typename Node, typename Tri>
-static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris, int world_rank) {
-//    std::ofstream of("data/bvh" + std::to_string(world_rank) + ".bin", std::ios::app | std::ios::binary);
-    std::ofstream of("data/bvh.bin", std::ios::app | std::ios::binary);
+static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris, std::string bvh_flag) {
+    std::ofstream of("data/bvh_" + bvh_flag + ".bin", std::ios::app | std::ios::binary);
+//    std::ofstream of("data/bvh.bin", std::ios::app | std::ios::binary);
     size_t node_size = sizeof(Node);
     size_t tri_size  = sizeof(Tri);
     of.write((char*)&node_size, sizeof(uint32_t));
@@ -558,31 +568,17 @@ static size_t cleanup_obj(obj::File& obj_file, obj::MaterialLib& mtl_lib) {
     }
     return num_complex;
 }
-static bool must_build_bvh(const std::string& name, Target target) {
-    std::ifstream bvh_stamp("data/bvh.stamp", std::fstream::in);
-    if (bvh_stamp) {
-        int bvh_target;
-        bvh_stamp >> bvh_target;
-        if (bvh_target != (int)target)
-            return true;
-        std::string bvh_name;
-        bvh_stamp >> bvh_name;
-        if (bvh_name != name)
-            return true;
-        return false;
-    }
-    return true;
-}
-static bool convert_obj(const std::string& file_name, Target target, size_t dev, size_t max_path_len, size_t spp, bool embree_bvh, bool fusion, std::ostream& os, int part_num) {
+
+static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, int part_num) {
     info("Converting OBJ file '", file_name, "'");
-    int world_size, world_rank;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    int mpi_size, mpi_id;
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_id);
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath path(file_name);
 
-    if (!obj::load_obj(path, obj_file, world_rank, world_size)) {
+    if (!obj::load_obj(path, obj_file, mpi_id, mpi_size)) {
         error("Invalid OBJ file '", file_name, "'");
         return false;
     }
@@ -626,76 +622,96 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
        << "    right: Vec3,\n"
        << "    width: f32,\n"
        << "    height: f32,\n"
-       << "    range: &[f32]\n"
+       << "    range: Vec4,\n"
+       << "    spp: i32\n"
        << "};\n";
 
     os << "\nextern fn get_spp() -> i32 { " << spp << " }\n";
     os << "\nextern fn render(settings: &Settings, iter: i32) -> () {\n";
 
-    assert(target != Target(0));
-    bool enable_padding = target == Target::NVVM_STREAMING   ||
-                          target == Target::NVVM_MEGAKERNEL  ||
-                          target == Target::AMDGPU_STREAMING ||
-                          target == Target::AMDGPU_MEGAKERNEL;
-    
-    switch (target) {
-        case Target::GENERIC:           os << "    let device   = make_cpu_default_device();\n";               break;
-        case Target::AVX2:              os << "    let device   = make_avx2_device(false);\n";     break;
-        case Target::AVX2_EMBREE:       os << "    let device   = make_avx2_device(true);\n";      break;
-        case Target::AVX:               os << "    let device   = make_avx_device();\n";             break;
-        case Target::SSE42:             os << "    let device   = make_sse42_device();\n";                     break;
-        case Target::ASIMD:             os << "    let device   = make_asimd_device();\n";                     break;
-        case Target::NVVM_STREAMING:    os << "    let device   = make_nvvm_device(" << dev <<", true);\n";    break;
-        case Target::NVVM_MEGAKERNEL:   os << "    let device   = make_nvvm_device(" << dev <<", false);\n";   break;
-        case Target::AMDGPU_STREAMING:  os << "    let device   = make_amdgpu_device(" << dev <<", true);\n";  break;
-        case Target::AMDGPU_MEGAKERNEL: os << "    let device   = make_amdgpu_device(" << dev <<", false);\n"; break;
-        default:
-            assert(false);
-            break;
-    }
-    
-    os << "    let renderer = make_path_tracing_renderer(" << max_path_len << " /*max_path_len*/, " << 32 << " /*spp*/);\n"
-       << "    let math     = device.intrinsics;\n";
-    
     os << "    let mut mpi_id = -1; \n"
        << "    let mut mpi_size = -1; \n"
        << "    let mpi = comm();\n"
        << "    mpi.comm_rank(mpi.comms.world, &mut mpi_id);\n"
-       << "    mpi.comm_size(mpi.comms.world, &mut mpi_size);\n";
+       << "    mpi.comm_size(mpi.comms.world, &mut mpi_size);\n\n"
+       << "    let spp      = settings.spp  / "<< dev_num <<";\n"
+       << "    let renderer = make_path_tracing_renderer(" << max_path_len << " /*max_path_len*/, " << spp << " /*spp*/);\n";
+    
+    int gpu_num = 0; 
+    for(int dev_id = 0; dev_id < dev_num; dev_id++){
+        auto target = target_list[dev_id];
+        auto dev = dev_list[dev_id];
+        assert(target != Target(0));
+        if (target == Target::NVVM_STREAMING   ||
+            target == Target::NVVM_MEGAKERNEL  ||
+            target == Target::AMDGPU_STREAMING ||
+            target == Target::AMDGPU_MEGAKERNEL){
+            gpu_num++; 
+        }
+
+        switch (target) {
+            case Target::GENERIC:           os << "    let device" << dev_id << "  = make_cpu_default_device();\n";               break;
+            case Target::AVX2:              os << "    let device" << dev_id << "  = make_avx2_device(false);\n";     break;
+            case Target::AVX2_EMBREE:       os << "    let device" << dev_id << "  = make_avx2_device(true);\n";      break;
+            case Target::AVX:               os << "    let device" << dev_id << "  = make_avx_device();\n";             break;
+            case Target::SSE42:             os << "    let device" << dev_id << "  = make_sse42_device();\n";                     break;
+            case Target::ASIMD:             os << "    let device" << dev_id << "  = make_asimd_device();\n";                     break;
+            case Target::NVVM_STREAMING:    os << "    let device" << dev_id << "  = make_nvvm_device(" << dev <<", true);\n";    break;
+            case Target::NVVM_MEGAKERNEL:   os << "    let device" << dev_id << "  = make_nvvm_device(" << dev <<", false);\n";   break;
+            case Target::AMDGPU_STREAMING:  os << "    let device" << dev_id << "  = make_amdgpu_device(" << dev <<", true);\n";  break;
+            case Target::AMDGPU_MEGAKERNEL: os << "    let device" << dev_id << "  = make_amdgpu_device(" << dev <<", false);\n"; break;
+            default:
+                assert(false);
+                break;
+        }
+    }
+    unsigned short padding_flag = 0;
+    if(gpu_num > 0){
+        padding_flag |= 2;
+    }
+    if(gpu_num != dev_num){
+        padding_flag |= 1;
+    }
+
+    os << "    fn @make_scene(device: Device, bvh_path: &[u8], vertices: &[u8], normals: &[u8], face_normals: &[u8],\n" 
+       << "                   texcoords: &[u8], light_verts: &[u8], light_norms: &[u8], light_colors: &[u8],\n"
+       << "                   simple_kd: &[u8], simple_ks: &[u8])-> Scene {\n"
+       << "        let math     = device.intrinsics;\n";
 
     // Setup camera
-    os << "\n    // Camera\n"
-       << "    let camera = make_perspective_camera(\n"
-       << "        math,\n"
-       << "        settings.eye,\n"
-       << "        make_mat3x3(settings.right, settings.up, settings.dir),\n"
-       << "        settings.width,\n"
-       << "        settings.height,\n"
-       << "        settings.range,\n"
-       << "        mpi_id,\n"
-       << "        mpi_size\n"
-       << "    );\n";
+    os << "    // Camera\n"
+       << "        let camera = make_perspective_camera(\n"
+       << "            math,\n"
+       << "            settings.eye,\n"
+       << "            make_mat3x3(settings.right, settings.up, settings.dir),\n"
+       << "            settings.width,\n"
+       << "            settings.height,\n"
+       << "            settings.range,\n"
+       << "            spp,\n"
+       << "            mpi_id,\n"
+       << "            mpi_size\n"
+       << "        );\n";
 
     // Setup triangle mesh
     info("Generating triangle mesh for '", file_name, "'");
-    os << "\n    // Triangle mesh\n"
-       << "    let vertices     = device.load_buffer(\"data/vertices.bin\");\n"
-       << "    let normals      = device.load_buffer(\"data/normals.bin\");\n"
-       << "    let face_normals = device.load_buffer(\"data/face_normals.bin\");\n"
-       << "    let indices      = device.load_buffer(\"data/indices.bin\");\n"
-       << "    let texcoords    = device.load_buffer(\"data/texcoords.bin\");\n"
-       << "    let tri_mesh     = TriMesh {\n"
-       << "        vertices:     @ |i| vertices.load_vec3(i),\n"
-       << "        normals:      @ |i| normals.load_vec3(i),\n"
-       << "        face_normals: @ |i| face_normals.load_vec3(i),\n"
-       << "        triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
-       << "        attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
-       << "        num_attrs:    1,\n"
-       << "        num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
-       << "    };\n"
-       << "    let bvh = device.load_bvh(\"data/bvh.bin\");\n"
-       << "    let node = bvh.node(0); \n"
-       << "    let bbox = node.bbox(0);   \n";
+    os << "\n        // Triangle mesh\n"
+       << "        let vertices     = device.load_buffer(vertices);\n"
+       << "        let normals      = device.load_buffer(normals);\n"
+       << "        let face_normals = device.load_buffer(face_normals);\n"
+       << "        let texcoords    = device.load_buffer(texcoords);\n"
+       << "        let indices      = device.load_buffer(\"data/indices.bin\");\n"
+       << "        let tri_mesh     = TriMesh {\n"
+       << "            vertices:     @ |i| vertices.load_vec3(i),\n"
+       << "            normals:      @ |i| normals.load_vec3(i),\n"
+       << "            face_normals: @ |i| face_normals.load_vec3(i),\n"
+       << "            triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
+       << "            attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
+       << "            num_attrs:    1,\n"
+       << "            num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
+       << "        };\n"
+       << "        let bvh = device.load_bvh(bvh_path);\n"
+       << "        let node = bvh.node(0); \n"
+       << "        let bbox = node.bbox(0);   \n";
     // Simplify materials if necessary
     num_complex = fusion ? num_complex : num_mats;
     bool has_simple = num_complex < num_mats;
@@ -720,66 +736,82 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
                 simple_ns[j] = 1.0f;
             }
         }
-        write_buffer("data/simple_kd.bin", pad_buffer(simple_kd, enable_padding, sizeof(float) * 4));
-        write_buffer("data/simple_ks.bin", pad_buffer(simple_ks, enable_padding, sizeof(float) * 4));
+        
+        write_buffer_hetero("data/simple_kd", simple_kd, padding_flag);
+        write_buffer_hetero("data/simple_ks", simple_ks, padding_flag);
         write_buffer("data/simple_ns.bin", simple_ns);
     }
 
-    write_tri_mesh(tri_mesh, enable_padding);
-
-    // Generate BVHs
-    info("Generating BVH for '", file_name, "'");
-    std::remove("data/bvh.bin");
-    if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
-        target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-        std::vector<typename BvhNTriM<2, 1>::Node> nodes;
-        std::vector<typename BvhNTriM<2, 1>::Tri> tris;
-        build_bvh<2, 1>(tri_mesh, nodes, tris);
-        write_bvh(nodes, tris, world_rank);
-    } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-        std::vector<typename BvhNTriM<4, 4>::Node> nodes;
-        std::vector<typename BvhNTriM<4, 4>::Tri> tris;
+    write_tri_mesh(tri_mesh, padding_flag);
+        
+    unsigned short bvh_export = 0;
+    for(int dev_id = 0; dev_id < dev_num; dev_id++){
+        Target target = target_list[dev_id];
+        info("Generating BVH for '", file_name, "'");
+        std::remove("data/bvh.bin");
+        if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
+            target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
+            printf("nvvm\n");
+            if(!(bvh_export&1)){
+                std::vector<typename BvhNTriM<2, 1>::Node> nodes;
+                std::vector<typename BvhNTriM<2, 1>::Tri> tris;
+                build_bvh<2, 1>(tri_mesh, nodes, tris);
+                write_bvh(nodes, tris, "gpu");
+                bvh_export ++;
+            }
+        } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
+            printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
+            if(!(bvh_export&2)){
+                std::vector<typename BvhNTriM<4, 4>::Node> nodes;
+                std::vector<typename BvhNTriM<4, 4>::Tri> tris;
 #ifdef ENABLE_EMBREE_BVH
-        if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
-        else
+                if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
+                else
 #endif
-        build_bvh<4, 4>(tri_mesh, nodes, tris);
-        write_bvh(nodes, tris, world_rank);
-    } else {
-        std::vector<typename BvhNTriM<8, 4>::Node> nodes;
-        std::vector<typename BvhNTriM<8, 4>::Tri> tris;
+                build_bvh<4, 4>(tri_mesh, nodes, tris);
+                write_bvh(nodes, tris, "sse");
+                bvh_export += 2;
+            }
+        } else {
+            printf("avx \n");
+            if(!(bvh_export&4)){
+                std::vector<typename BvhNTriM<8, 4>::Node> nodes;
+                std::vector<typename BvhNTriM<8, 4>::Tri> tris;
 #ifdef ENABLE_EMBREE_BVH
-        if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
-        else
+                if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
+                else
 #endif
-        build_bvh<8, 4>(tri_mesh, nodes, tris);
-        write_bvh(nodes, tris, world_rank);
+                build_bvh<8, 4>(tri_mesh, nodes, tris);
+                write_bvh(nodes, tris, "avx");
+                bvh_export += 4;
+            }
+        }
     }
-
 
     // Generate images
     info("Generating images for '", file_name, "'");
-    os << "\n    // Images\n"
-       << "    let dummy_image = make_image(@ |x, y| make_color(0.0f, 0.0f, 0.0f), 1, 1);\n";
+    os << "\n        // Images\n"
+       << "        let dummy_image = make_image(@ |x, y| make_color(0.0f, 0.0f, 0.0f), 1, 1);\n";
     for (size_t i = 0; i < images.size(); i++) {
         auto name = fix_file(image_names[i]);
         copy_file(path.base_name() + "/" + name, "data/" + name);
-        os << "    let image_" << make_id(name) << " = ";
+        os << "        let image_" << make_id(name) << " = ";
         if (ends_with(name, ".png")) {
-            os << "device.load_png(\"data/" << name << "\");\n";
+            os << "    device.load_png(\"data/" << name << "\");\n";
         } else if (ends_with(name, ".tga")) {
-            os << "device.load_tga(\"data/" << name << "\");\n";
+            os << "    device.load_tga(\"data/" << name << "\");\n";
         } else if (ends_with(name, ".tiff")) {
-            os << "device.load_tga(\"data/" << name << "\");\n";
+            os << "    device.load_tga(\"data/" << name << "\");\n";
         } else if (ends_with(name, ".jpeg") || ends_with(name, ".jpg")) {
-            os << "device.load_jpg(\"data/" << name << "\");\n";
+            os << "    device.load_jpg(\"data/" << name << "\");\n";
         } else {
-            os << "dummy_image; // Cannot determine image type for " << name << "\n";
+            os << "    dummy_image; // Cannot determine image type for " << name << "\n";
         }
     }
+
     // Lights
     std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
-    os << "\n    // Lights\n";
+    os << "\n        // Lights\n";
     size_t num_lights = 0;
     std::vector<rgb>    light_colors;
     std::vector<float3> light_verts;
@@ -802,17 +834,17 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
 
         light_ids[i / 4] = num_lights++;
         if (has_map_ke) {
-            os << "    let light" << num_lights - 1 << " = make_triangle_light(\n"
-               << "        math,\n"
-               << "        make_vec3(" << v0.x << "f, " << v0.y << "f, " << v0.z << "f),\n"
-               << "        make_vec3(" << v1.x << "f, " << v1.y << "f, " << v1.z << "f),\n"
-               << "        make_vec3(" << v2.x << "f, " << v2.y << "f, " << v2.z << "f),\n";
+            os << "        let light" << num_lights - 1 << " = make_triangle_light(\n"
+               << "            math,\n"
+               << "            make_vec3(" << v0.x << "f, " << v0.y << "f, " << v0.z << "f),\n"
+               << "            make_vec3(" << v1.x << "f, " << v1.y << "f, " << v1.z << "f),\n"
+               << "            make_vec3(" << v2.x << "f, " << v2.y << "f, " << v2.z << "f),\n";
             if (mat.map_ke != "") {
-                os << "        make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ke]]) <<")\n";
-            } else {
-                os << "        make_color(" << mat.ke.x << "f, " << mat.ke.y << "f, " << mat.ke.z << "f)\n";
-            }
-            os << "    );\n";
+                os << "             make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ke]]) <<")\n";
+            } else { 
+                os << "              make_color(" << mat.ke.x << "f, " << mat.ke.y << "f, " << mat.ke.z << "f)\n";
+            } 
+            os << "        );\n";
         } else {
             auto n = cross(v1 - v0, v2 - v0);
             auto inv_area = 1.0f / (0.5f * length(n));
@@ -827,48 +859,47 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
     }
     if (has_map_ke || num_lights == 0) {
         if (num_lights != 0) {
-            os << "    let lights = @ |i| match i {\n";
+            os << "            let lights = @ |i| match i {\n";
             for (size_t i = 0; i < num_lights; ++i) {
                 if (i == num_lights - 1)
-                    os << "        _ => light" << i << "\n";
+                    os << "                _ => light" << i << "\n";
                 else
-                    os << "        " << i << " => light" << i << ",\n";
+                    os << "                " << i << " => light" << i << ",\n";
             }
-            os << "    };\n";
+            os << "          };\n";
         } else {
-            os << "    let lights = @ |_| make_point_light(math, make_vec3(0.0f, 0.0f, 0.0f), black);\n";
+            os << "            let lights = @ |_| make_point_light(math, make_vec3(0.0f, 0.0f, 0.0f), black);\n";
         }
     } else {
-        printf("light %f %f %f \n", light_verts[0].x, light_verts[0].y, light_verts[0].z);
-        write_buffer("data/light_verts.bin",  pad_buffer(light_verts,  enable_padding, sizeof(float) * 4));
         write_buffer("data/light_areas.bin",  light_areas);
-        write_buffer("data/light_norms.bin",  pad_buffer(light_norms,  enable_padding, sizeof(float) * 4));
-        write_buffer("data/light_colors.bin", pad_buffer(light_colors, enable_padding, sizeof(float) * 4));
-        os << "    let light_verts = device.load_buffer(\"data/light_verts.bin\");\n"
-           << "    let light_areas = device.load_buffer(\"data/light_areas.bin\");\n"
-           << "    let light_norms = device.load_buffer(\"data/light_norms.bin\");\n"
-           << "    let light_colors = device.load_buffer(\"data/light_colors.bin\");\n"
-           << "    let lights = @ |i| {\n"
-           << "        make_precomputed_triangle_light(\n"
-           << "            math,\n"
-           << "            light_verts.load_vec3(i * 3 + 0),\n"
-           << "            light_verts.load_vec3(i * 3 + 1),\n"
-           << "            light_verts.load_vec3(i * 3 + 2),\n"
-           << "            light_norms.load_vec3(i),\n"
-           << "            light_areas.load_f32(i),\n"
-           << "            vec3_to_color(light_colors.load_vec3(i))\n"
-           << "        )\n"
-           << "    };\n";
+        write_buffer_hetero("data/light_verts",  light_verts,  padding_flag);
+        write_buffer_hetero("data/light_norms",  light_norms,  padding_flag);
+        write_buffer_hetero("data/light_colors", light_colors, padding_flag);
+        os << "        let light_verts = device.load_buffer(light_verts);\n"
+           << "        let light_areas = device.load_buffer(\"data/light_areas.bin\");\n"
+           << "        let light_norms = device.load_buffer(light_norms);\n"
+           << "        let light_colors = device.load_buffer(light_colors);\n"
+           << "        let lights = @ |i| {\n"
+           << "            make_precomputed_triangle_light(\n"
+           << "                math,\n"
+           << "                light_verts.load_vec3(i * 3 + 0),\n"
+           << "                light_verts.load_vec3(i * 3 + 1),\n"
+           << "                light_verts.load_vec3(i * 3 + 2),\n"
+           << "                light_norms.load_vec3(i),\n"
+           << "                light_areas.load_f32(i),\n"
+           << "                vec3_to_color(light_colors.load_vec3(i))\n"
+           << "            )\n"
+           << "        };\n";
     }
 
     write_buffer("data/light_ids.bin", light_ids);
 
-    os << "\n    // Mapping from primitive to light source\n"
-       << "    let light_ids = device.load_buffer(\"data/light_ids.bin\");\n";
+    os << "\n        // Mapping from primitive to light source\n"
+       << "        let light_ids = device.load_buffer(\"data/light_ids.bin\");\n";
 
     // Generate shaders
     info("Generating materials for '", file_name, "'");
-    os << "\n    // Shaders\n";
+    os << "\n        // Shaders\n";
     for (auto& mtl_name : obj_file.materials) {
         auto it = mtl_lib.find(mtl_name);
         assert(it != mtl_lib.end());
@@ -879,42 +910,42 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
             break;
 
         bool has_emission = mat.ke != rgb(0.0f) || mat.map_ke != "";
-        os << "    let shader_" << make_id(mtl_name) << " : Shader = @ |ray, hit, surf| {\n";
+        os << "        let shader_" << make_id(mtl_name) << " : Shader = @ |ray, hit, surf| {\n";
         if (mat.illum == 5) {
-            os << "        let bsdf = make_mirror_bsdf(math, surf, make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f));\n";
+            os << "            let bsdf = make_mirror_bsdf(math, surf, make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f));\n";
         } else if (mat.illum == 7) {
-            os << "        let bsdf = make_glass_bsdf(math, surf, 1.0f, " << mat.ni << "f, " << "make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f), make_color(" << mat.tf.x << "f, " << mat.tf.y << "f, " << mat.tf.z << "f));\n";
+            os << "            let bsdf = make_glass_bsdf(math, surf, 1.0f, " << mat.ni << "f, " << "make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f), make_color(" << mat.tf.x << "f, " << mat.tf.y << "f, " << mat.tf.z << "f));\n";
         } else {
             bool has_diffuse  = mat.kd != rgb(0.0f) || mat.map_kd != "";
             bool has_specular = mat.ks != rgb(0.0f) || mat.map_ks != "";
 
             if (has_diffuse) {
                 if (mat.map_kd != "") {
-                    os << "        let diffuse_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_kd]]) << ");\n";
-                    os << "        let kd = diffuse_texture(vec4_to_2(surf.attr(0)));\n";
+                    os << "            let diffuse_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_kd]]) << ");\n";
+                    os << "            let kd = diffuse_texture(vec4_to_2(surf.attr(0)));\n";
                 } else {
-                    os << "        let kd = make_color(" << mat.kd.x << "f, " << mat.kd.y << "f, " << mat.kd.z << "f);\n";
+                    os << "            let kd = make_color(" << mat.kd.x << "f, " << mat.kd.y << "f, " << mat.kd.z << "f);\n";
                 }
-                os << "        let diffuse = make_diffuse_bsdf(math, surf, kd);\n";
+                os << "            let diffuse = make_diffuse_bsdf(math, surf, kd);\n";
             }
             if (has_specular) {
                 if (mat.map_ks != "") {
-                    os << "        let specular_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ks]]) << ");\n";
-                    os << "        let ks = specular_texture(vec4_to_2(surf.attr(0)));\n";
+                    os << "            let specular_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ks]]) << ");\n";
+                    os << "            let ks = specular_texture(vec4_to_2(surf.attr(0)));\n";
                 } else {
-                    os << "        let ks = make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f);\n";
+                    os << "            let ks = make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f);\n";
                 }
-                os << "        let ns = " << mat.ns << "f;\n";
-                os << "        let specular = make_phong_bsdf(math, surf, ks, ns);\n";
+                os << "            let ns = " << mat.ns << "f;\n";
+                os << "            let specular = make_phong_bsdf(math, surf, ks, ns);\n";
             }
-            os << "        let bsdf = ";
+            os << "            let bsdf = ";
             if (has_diffuse && has_specular) {
                 os << "{\n"
-                   << "            let lum_ks = color_luminance(ks);\n"
-                   << "            let lum_kd = color_luminance(kd);\n"
-                   << "            let k = select(lum_ks + lum_kd == 0.0f, 0.0f, lum_ks / (lum_ks + lum_kd));\n"
-                   << "            make_mix_bsdf(diffuse, specular, k)\n"
-                   << "        };\n";
+                   << "                let lum_ks = color_luminance(ks);\n"
+                   << "                let lum_kd = color_luminance(kd);\n"
+                   << "                let k = select(lum_ks + lum_kd == 0.0f, 0.0f, lum_ks / (lum_ks + lum_kd));\n"
+                   << "                make_mix_bsdf(diffuse, specular, k)\n"
+                   << "            };\n";
             } else if (has_diffuse || has_specular) {
                 if (has_specular) os << "specular;\n";
                 else              os << "diffuse;\n";
@@ -923,30 +954,30 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
             }
         }
         if (has_emission) {
-            os << "        make_emissive_material(surf, bsdf, lights(light_ids.load_i32(hit.prim_id)))\n";
+            os << "            make_emissive_material(surf, bsdf, lights(light_ids.load_i32(hit.prim_id)))\n";
         } else {
-            os << "        make_material(bsdf)\n";
+            os << "            make_material(bsdf)\n";
         }
-        os << "    };\n";
+        os << "        };\n";
     }
 
     if (has_simple) {
         os << "\n    // Simple materials data\n"
-           << "    let simple_kd = device.load_buffer(\"data/simple_kd.bin\");\n"
-           << "    let simple_ks = device.load_buffer(\"data/simple_ks.bin\");\n"
-           << "    let simple_ns = device.load_buffer(\"data/simple_ns.bin\");\n";
+           << "        let simple_kd = device.load_buffer(\"data/simple_kd.bin\");\n"
+           << "        let simple_ks = device.load_buffer(\"data/simple_ks.bin\");\n"
+           << "        let simple_ns = device.load_buffer(\"data/simple_ns.bin\");\n";
     }
 
     // Generate geometries
     os << "\n    // Geometries\n"
-       << "    let geometries = @ |i| match i {\n";
+       << "        let geometries = @ |i| match i {\n";
     for (uint32_t mat = 0; mat < num_complex; ++mat) {
         os << "        ";
         if (mat != num_complex - 1 || has_simple)
             os << mat;
         else
             os << "_";
-        os << " => make_tri_mesh_geometry(math, tri_mesh, shader_" << make_id(obj_file.materials[mat]) << "),\n";
+        os << "        => make_tri_mesh_geometry(math, tri_mesh, shader_" << make_id(obj_file.materials[mat]) << "),\n";
     }
     if (has_simple)
         os << "        _ => make_tri_mesh_geometry(math, tri_mesh, @ |ray, hit, surf| {\n"
@@ -959,23 +990,42 @@ static bool convert_obj(const std::string& file_name, Target target, size_t dev,
            << "            let lum_kd = color_luminance(kd);\n"
            << "            make_material(make_mix_bsdf(diffuse, specular, lum_ks / (lum_ks + lum_kd)))\n"
            << "        })\n";
-    os << "    };\n";
+    os << "        };\n";
 
     // Scene
-    os << "\n    // Scene\n"
-       << "    let scene = Scene {\n"
-       << "        num_geometries: " << std::min(num_complex + 1, num_mats) << ",\n"
-       << "        num_lights:     " << num_lights << ",\n"
-       << "        geometries:     @ |i| geometries(i),\n"
-       << "        lights:         @ |i| lights(i),\n"
-       << "        camera:         camera,\n"
-       << "        bvh:            bvh\n"
-       << "    };\n";
+    os << "\n       // Scene\n"
+       << "        Scene {\n"
+       << "            num_geometries: " << std::min(num_complex + 1, num_mats) << ",\n"
+       << "            num_lights:     " << num_lights << ",\n"
+       << "            geometries:     @ |i| geometries(i),\n"
+       << "            lights:         @ |i| lights(i),\n"
+       << "            camera:         camera,\n"
+       << "            bvh:            bvh\n"
+       << "        }\n"
+       << "    }\n";
+    
+    for(int dev_id = 0; dev_id < dev_num; dev_id++){
+        Target target = target_list[dev_id];
+        if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
+            target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
+            os << "    let scene"<< dev_id <<" = make_scene(device" << dev_id << ", \"data/bvh_gpu.bin\", \"data/vertices_gpu.bin\", \"data/normals_gpu.bin\", \"data/face_normals_gpu.bin\", \n"
+               << "                            \"data/texcoords_gpu.bin\", \"data/light_verts_gpu.bin\", \"data/light_norms_gpu.bin\", \"data/light_colors_gpu.bin\",\n"
+               << "                            \"data/simple_kd_gpu.bin\", \"data/simple_ks_gpu.bin\");\n";
+        } else {
+            std::string bvh = "\"data/bvh_avx.bin\"";
+            if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
+                bvh = "\"data/bvh_sse.bin\"";
+            }
+            os << "    let scene"<< dev_id <<" = make_scene(device" << dev_id << ", "<< bvh <<", \"data/vertices.bin\", \"data/normals.bin\", \"data/face_normals.bin\", \n"
+               << "                            \"data/texcoords.bin\", \"data/light_verts.bin\", \"data/light_norms.bin\", \"data/light_colors.bin\", \n"
+               << "                            \"data/simple_kd.bin\", \"data/simple_ks.bin\");\n";
+        }
+        os << "    renderer(scene"<< dev_id << ", device" << dev_id << ", iter);\n"
+           << "    device" << dev_id << ".present();\n";
+    }
 
-    os << "\n"
-       << "    renderer(scene, device, iter);\n"
-       << "    device.present();\n"
-       << "}\n";
+        
+    os << "}\n";
        
     info("Scene was converted successfully");
     return true;
@@ -1018,54 +1068,81 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     std::string obj_file;
-    size_t dev = 0;
+    
+    size_t dev_num = 1;
+    size_t dev[5];   // 5 device max
+    Target target[5];
+    bool fusion;
+
     size_t spp = 256;
     size_t max_path_len = 64;
-    auto target = Target::INVALID;
     bool embree_bvh = false;
-    bool fusion = false;
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] == '-') {
             if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
                 usage();
                 return 0;
-            } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--target")) {
+            } else if (!strcmp(argv[i], "--dev-num")){
                 if (!check_option(i++, argc, argv)) return 1;
-                if (!strcmp(argv[i], "sse42"))
-                    target = Target::SSE42;
-                else if (!strcmp(argv[i], "avx"))
-                    target = Target::AVX;
-                else if (!strcmp(argv[i], "avx2"))
-                    target = Target::AVX2;
-                else if (!strcmp(argv[i], "avx2-embree"))
-                    target = Target::AVX2_EMBREE;
-                else if (!strcmp(argv[i], "asimd"))
-                    target = Target::ASIMD;
-                else if (!strcmp(argv[i], "nvvm") || !strcmp(argv[i], "nvvm-streaming"))
-                    target = Target::NVVM_STREAMING;
-                else if (!strcmp(argv[i], "nvvm-megakernel"))
-                    target = Target::NVVM_MEGAKERNEL;
-                else if (!strcmp(argv[i], "amdgpu") || !strcmp(argv[i], "amdgpu-streaming"))
-                    target = Target::AMDGPU_STREAMING;
-                else if (!strcmp(argv[i], "amdgpu-megakernel"))
-                    target = Target::AMDGPU_MEGAKERNEL;
-                else if (!strcmp(argv[i], "generic"))
-                    target = Target::GENERIC;
-                else {
-                    std::cerr << "Unknown target '" << argv[i] << "'. Aborting." << std::endl;
-                    return 1;
+                dev_num = strtoul(argv[i++], NULL, 10); 
+                for(int j = 0; j < dev_num; j++){
+                    if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--target")) {
+                         if (!check_option(i++, argc, argv)) return 1;
+                         if (!strcmp(argv[i], "sse42"))
+                             target[j] = Target::SSE42;
+                         else if (!strcmp(argv[i], "avx"))
+                             target[j] = Target::AVX;
+                         else if (!strcmp(argv[i], "avx2"))
+                             target[j] = Target::AVX2;
+                         else if (!strcmp(argv[i], "avx2-embree"))
+                             target[j] = Target::AVX2_EMBREE;
+                         else if (!strcmp(argv[i], "asimd"))
+                             target[j] = Target::ASIMD;
+                         else if (!strcmp(argv[i], "nvvm") || !strcmp(argv[i], "nvvm-streaming"))
+                             target[j] = Target::NVVM_STREAMING;
+                         else if (!strcmp(argv[i], "nvvm-megakernel"))
+                             target[j] = Target::NVVM_MEGAKERNEL;
+                         else if (!strcmp(argv[i], "amdgpu") || !strcmp(argv[i], "amdgpu-streaming"))
+                             target[j] = Target::AMDGPU_STREAMING;
+                         else if (!strcmp(argv[i], "amdgpu-megakernel"))
+                             target[j] = Target::AMDGPU_MEGAKERNEL;
+                         else if (!strcmp(argv[i], "generic"))
+                             target[j] = Target::GENERIC;
+                         else {
+                             std::cerr << "Unknown target '" << argv[i] << "'. Aborting." << std::endl;
+                             return 1;
+                         }
+                         ++i; 
+                    } else {
+                        target[j] = j==0?cpuid():target[j - 1];
+                        if (target[j] == Target::GENERIC)
+                            warn("No vector instruction set detected. Select the target platform manually to improve performance.");
+                    }
+                    if(!strcmp(argv[i], "-d") || !strcmp(argv[i], "--device")) { 
+                        if (!check_option(i++, argc, argv)) return 1;
+                        dev[j] = strtoul(argv[i++], NULL, 10);
+                    } 
+                    else {
+                        dev[j] = j==0?0:dev[j - 1];
+                    }
+                    if (!strcmp(argv[i], "--fusion")) {
+                        fusion = true;
+                        if (target[j] != Target::NVVM_MEGAKERNEL && target[j] != Target::AMDGPU_MEGAKERNEL) {
+                            std::cerr << "Fusion is only available for megakernel targets. Aborting." << std::endl;
+                            return 1;
+                        }
+                        ++i;
+                    } else {
+                        fusion = false;
+                    }
                 }
-            } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--device")) {
-                if (!check_option(i++, argc, argv)) return 1;
-                dev = strtoul(argv[i], NULL, 10);
+                --i; 
             } else if (!strcmp(argv[i], "-spp") || !strcmp(argv[i], "--samples-per-pixel")) {
                 if (!check_option(i++, argc, argv)) return 1;
                 spp = strtol(argv[i], NULL, 10);
             } else if (!strcmp(argv[i], "--max-path-len")) {
                 if (!check_option(i++, argc, argv)) return 1;
                 max_path_len = strtol(argv[i], NULL, 10);
-            } else if (!strcmp(argv[i], "--fusion")) {
-                fusion = true;
 #ifdef ENABLE_EMBREE_BVH
             } else if (!strcmp(argv[i], "--embree-bvh")) {
                 embree_bvh = true;
@@ -1083,24 +1160,13 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (fusion && target != Target::NVVM_MEGAKERNEL && target != Target::AMDGPU_MEGAKERNEL) {
-        std::cerr << "Fusion is only available for megakernel targets. Aborting." << std::endl;
-        return 1;
-    }
 
     if (obj_file == "") {
         std::cerr << "Please specify an OBJ file to convert. Aborting." << std::endl;
         return 1;
     }
-
-    if (target == Target::INVALID) {
-        target = cpuid();
-        if (target == Target::GENERIC)
-            warn("No vector instruction set detected. Select the target platform manually to improve performance.");
-    }
-
     std::ofstream of("main.impala");
-    if (!convert_obj(obj_file, target, dev, max_path_len, spp, embree_bvh, fusion, of, 8))
+    if (!convert_obj(obj_file, dev_num, target, dev, fusion, max_path_len, spp, embree_bvh, of, 8))
         return 1;
     return 0;
     MPI_Finalize();
