@@ -11,6 +11,8 @@
 #include <SDL2/SDL.h>
 #endif
 
+#include <thread>
+
 #include "interface.h"
 #include "float3.h"
 #include "common.h"
@@ -190,6 +192,8 @@ int main(int argc, char** argv) {
     size_t width  = 1024;
     size_t height = 1024;
     float fov = 60.0f;
+    bool splitimage = false;
+    int dev_num = 1;
     float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
 //    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
     for (int i = 1; i < argc; ++i) {
@@ -227,6 +231,12 @@ int main(int argc, char** argv) {
             } else if (!strcmp(argv[i], "--help")) {
                 usage();
                 return 0;
+            } else if (!strcmp(argv[i], "--grid")){
+                check_arg(argc, argv, i, 1);
+                splitimage = strtoul(argv[++i], nullptr, 10);
+            } else if (!strcmp(argv[i], "--dev")){
+                check_arg(argc, argv, i, 1);
+                dev_num = strtoul(argv[++i], nullptr, 10);
             } else {
                 error("Unknown option '", argv[i], "'");
             }
@@ -241,11 +251,11 @@ int main(int argc, char** argv) {
     Camera cam(eye, dir, up, fov, (float)width / (float)height, (float)width, (float)height, world_size);
 
 #ifdef DISABLE_GUI
-    info("Running in console-only mode (compiled with -DDISABLE_GUI).");
-    if (bench_iter == 0) {
-        warn("Benchmark iterations no set. Defaulting to 1.");
-        bench_iter = 1;
-    }
+//    info("Running in console-only mode (compiled with -DDISABLE_GUI).");
+//    if (bench_iter == 0) {
+//        warn("Benchmark iterations no set. Defaulting to 1.");
+//        bench_iter = 1;
+//    }
 #else
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
         error("Cannot initialize SDL.");
@@ -294,15 +304,19 @@ int main(int argc, char** argv) {
     int pixel_num = width * height * 3;
     if (world_rank==0)
         reduce_buffer = new float[pixel_num];
-
-    while (frames < 5) {
+    if(splitimage){
+        printf("distributed image grid\n");
+    } else {
+        printf("distributed spp \n");
+    }
+    std::thread *thread[5];
+    while (frames < 7) {
         if (iter == 0)
             clear_pixels();
-//        cam.rotate(0.05f, 0.0f);
+        cam.rotate(0.05f, 0.0f);
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
         float range[] = {0.0, 0.0, width, height}; 
         int spp_cur;
-        bool splitimage = true;
         if(splitimage){
             spp_cur = spp;
             cam.tree->getgrid(world_rank, world_size, proc_time, range); 
@@ -315,8 +329,6 @@ int main(int argc, char** argv) {
             float average = total / world_size; //average speed
             spp_cur = spp_old / proc_time[world_rank] * average;
         }
-        printf("range %f %f %f %f %d \n", range[0], range[1], range[2], range[3], spp_cur);
-        
         Settings settings {
             Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },
             Vec3 { cam.dir.x, cam.dir.y, cam.dir.z },
@@ -327,17 +339,28 @@ int main(int argc, char** argv) {
             Vec4 { range[0], range[1], range[2], range[3]},
             spp_cur
         };
+
+#ifdef DEBUG    
+        printf("range %f %f %f %f %d \n", range[0], range[1], range[2], range[3], spp_cur);
         for (int i = 0; i < world_size; i++)
                 printf("%f|",proc_time[i]);
+#endif
               
         auto ticks = std::chrono::high_resolution_clock::now();
-        render(&settings, world_rank); //iter++);
+        
+        for(int i = 0; i < dev_num; i++){
+            thread[i] = new std::thread(render, &settings, world_rank, i);    
+        } 
+        for(int i = 0; i < dev_num; i++){
+            thread[i]->join();
+        }
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         
         film = get_pixels(); 
         MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
-
+#ifdef DEBUG        
         printf("proc %d time %f", world_rank, float(elapsed_ms));
+#endif
         samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
         frames++;
         timing += elapsed_ms;
@@ -345,10 +368,12 @@ int main(int argc, char** argv) {
         std::string out = out_file + std::to_string(frames);
         out += ".png";
         if (world_rank == 0 && out_file != "") {
-            info("0 image wirting\n");
+//            info("0 image wirting\n");
+            float total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
        //     film = get_pixels();
             save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
-            info("Image saved to '", out, "'");
+//            info("Image saved to '", out, "'");
+            printf("0 node proc time %f \n", total_ms);
         }
     }
     delete [] proc_time; 

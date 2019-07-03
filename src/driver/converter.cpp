@@ -627,7 +627,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "};\n";
 
     os << "\nextern fn get_spp() -> i32 { " << spp << " }\n";
-    os << "\nextern fn render(settings: &Settings, iter: i32) -> () {\n";
+    os << "\nextern fn render(settings: &Settings, iter: i32, dev: i32) -> () {\n";
 
     os << "    let mut mpi_id = -1; \n"
        << "    let mut mpi_size = -1; \n"
@@ -640,29 +640,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     int gpu_num = 0; 
     for(int dev_id = 0; dev_id < dev_num; dev_id++){
         auto target = target_list[dev_id];
-        auto dev = dev_list[dev_id];
         assert(target != Target(0));
         if (target == Target::NVVM_STREAMING   ||
             target == Target::NVVM_MEGAKERNEL  ||
             target == Target::AMDGPU_STREAMING ||
             target == Target::AMDGPU_MEGAKERNEL){
             gpu_num++; 
-        }
-
-        switch (target) {
-            case Target::GENERIC:           os << "    let device" << dev_id << "  = make_cpu_default_device();\n";               break;
-            case Target::AVX2:              os << "    let device" << dev_id << "  = make_avx2_device(false);\n";     break;
-            case Target::AVX2_EMBREE:       os << "    let device" << dev_id << "  = make_avx2_device(true);\n";      break;
-            case Target::AVX:               os << "    let device" << dev_id << "  = make_avx_device();\n";             break;
-            case Target::SSE42:             os << "    let device" << dev_id << "  = make_sse42_device();\n";                     break;
-            case Target::ASIMD:             os << "    let device" << dev_id << "  = make_asimd_device();\n";                     break;
-            case Target::NVVM_STREAMING:    os << "    let device" << dev_id << "  = make_nvvm_device(" << dev <<", true);\n";    break;
-            case Target::NVVM_MEGAKERNEL:   os << "    let device" << dev_id << "  = make_nvvm_device(" << dev <<", false);\n";   break;
-            case Target::AMDGPU_STREAMING:  os << "    let device" << dev_id << "  = make_amdgpu_device(" << dev <<", true);\n";  break;
-            case Target::AMDGPU_MEGAKERNEL: os << "    let device" << dev_id << "  = make_amdgpu_device(" << dev <<", false);\n"; break;
-            default:
-                assert(false);
-                break;
         }
     }
     unsigned short padding_flag = 0;
@@ -748,7 +731,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     for(int dev_id = 0; dev_id < dev_num; dev_id++){
         Target target = target_list[dev_id];
         info("Generating BVH for '", file_name, "'");
-        std::remove("data/bvh.bin");
         if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
             target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
             printf("nvvm\n");
@@ -762,6 +744,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
             printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
             if(!(bvh_export&2)){
+                std::remove("data/bvh2.bin");
                 std::vector<typename BvhNTriM<4, 4>::Node> nodes;
                 std::vector<typename BvhNTriM<4, 4>::Tri> tris;
 #ifdef ENABLE_EMBREE_BVH
@@ -775,6 +758,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         } else {
             printf("avx \n");
             if(!(bvh_export&4)){
+                std::remove("data/bvh4.bin");
                 std::vector<typename BvhNTriM<8, 4>::Node> nodes;
                 std::vector<typename BvhNTriM<8, 4>::Tri> tris;
 #ifdef ENABLE_EMBREE_BVH
@@ -1006,9 +990,32 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     
     for(int dev_id = 0; dev_id < dev_num; dev_id++){
         Target target = target_list[dev_id];
+        auto dev = dev_list[dev_id];
+        if(dev_id == 0){
+            os << "    if dev == 0 { \n"; 
+        }else if (dev_id == dev_num){
+            os << "    else { \n"; 
+        } else {
+            os << "    else if dev == "<< dev_id  <<" { \n"; 
+        }
+        switch (target) {
+            case Target::GENERIC:           os << "        let device" << dev_id << "  = make_cpu_default_device();\n";               break;
+            case Target::AVX2:              os << "        let device" << dev_id << "  = make_avx2_device(false);\n";     break;
+            case Target::AVX2_EMBREE:       os << "        let device" << dev_id << "  = make_avx2_device(true);\n";      break;
+            case Target::AVX:               os << "        let device" << dev_id << "  = make_avx_device();\n";             break;
+            case Target::SSE42:             os << "        let device" << dev_id << "  = make_sse42_device();\n";                     break;
+            case Target::ASIMD:             os << "        let device" << dev_id << "  = make_asimd_device();\n";                     break;
+            case Target::NVVM_STREAMING:    os << "        let device" << dev_id << "  = make_nvvm_device(" << dev <<", true);\n";    break;
+            case Target::NVVM_MEGAKERNEL:   os << "        let device" << dev_id << "  = make_nvvm_device(" << dev <<", false);\n";   break;
+            case Target::AMDGPU_STREAMING:  os << "        let device" << dev_id << "  = make_amdgpu_device(" << dev <<", true);\n";  break;
+            case Target::AMDGPU_MEGAKERNEL: os << "        let device" << dev_id << "  = make_amdgpu_device(" << dev <<", false);\n"; break;
+            default:
+                assert(false);
+                break;
+        }
         if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
             target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-            os << "    let scene"<< dev_id <<" = make_scene(device" << dev_id << ", \"data/bvh_gpu.bin\", \"data/vertices_gpu.bin\", \"data/normals_gpu.bin\", \"data/face_normals_gpu.bin\", \n"
+            os << "        let scene"<< dev_id <<" = make_scene(device" << dev_id << ", \"data/bvh_gpu.bin\", \"data/vertices_gpu.bin\", \"data/normals_gpu.bin\", \"data/face_normals_gpu.bin\", \n"
                << "                            \"data/texcoords_gpu.bin\", \"data/light_verts_gpu.bin\", \"data/light_norms_gpu.bin\", \"data/light_colors_gpu.bin\",\n"
                << "                            \"data/simple_kd_gpu.bin\", \"data/simple_ks_gpu.bin\");\n";
         } else {
@@ -1016,12 +1023,13 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
                 bvh = "\"data/bvh_sse.bin\"";
             }
-            os << "    let scene"<< dev_id <<" = make_scene(device" << dev_id << ", "<< bvh <<", \"data/vertices.bin\", \"data/normals.bin\", \"data/face_normals.bin\", \n"
+            os << "        let scene"<< dev_id <<" = make_scene(device" << dev_id << ", "<< bvh <<", \"data/vertices.bin\", \"data/normals.bin\", \"data/face_normals.bin\", \n"
                << "                            \"data/texcoords.bin\", \"data/light_verts.bin\", \"data/light_norms.bin\", \"data/light_colors.bin\", \n"
                << "                            \"data/simple_kd.bin\", \"data/simple_ks.bin\");\n";
         }
-        os << "    renderer(scene"<< dev_id << ", device" << dev_id << ", iter);\n"
-           << "    device" << dev_id << ".present();\n";
+        os << "            renderer(scene"<< dev_id << ", device" << dev_id << ", iter);\n"
+           << "            device" << dev_id << ".present();\n"
+           << "    }\n";
     }
 
         
