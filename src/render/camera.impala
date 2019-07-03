@@ -9,7 +9,8 @@ struct Camera {
     // Computes the local camera geometry for a point on the image plane
     geometry: fn (f32, f32) -> CameraGeometry,
     //image decomposition according to privious process time
-    range:&[f32]
+    range: Vec4,
+    spp: i32
 }
 
 // Local geometry of the camera lens
@@ -27,12 +28,13 @@ fn @make_camera_geometry(cos_dir: f32, dist: f32, area: f32) -> CameraGeometry {
     }
 }
 // Creates a perspective camera
-fn @make_perspective_camera(math: Intrinsics, eye: Vec3, view: Mat3x3, w: f32, h: f32, Range: &[f32], proc_id: i32, proc_num: i32) -> Camera {
+fn @make_perspective_camera(math: Intrinsics, eye: Vec3, view: Mat3x3, w: f32, h: f32, Range: Vec4, spp_cur: i32, proc_id: i32, proc_num: i32) -> Camera {
     let dir   = view.col(2);
     let right = view.col(0);
     let up    = view.col(1);
     Camera {
         range: Range,
+        spp: spp_cur,
         generate_ray: @ |x, y| {
             let d = vec3_normalize(math,
                 vec3_add(
