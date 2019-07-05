@@ -161,7 +161,7 @@ static void jpeg_output_message(j_common_ptr) {}
 
 static void jpeg_no_op(j_decompress_ptr) {}
 
-static int jpeg_fill_input_buffer(j_decompress_ptr cinfo) {
+static boolean jpeg_fill_input_buffer(j_decompress_ptr cinfo) {
     auto enhanced = static_cast<enhanced_jpeg_decompress_struct*>(cinfo);
     enhanced->is->read((char*)enhanced->src_buf, 1024);
     cinfo->src->bytes_in_buffer = enhanced->is->gcount();
@@ -181,7 +181,6 @@ static void jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes) {
         }
     }
 }
-
 bool load_jpg(const FilePath& path, ImageRgba32& image) {
     std::ifstream file(path, std::ifstream::binary);
     if (!file)
@@ -211,7 +210,7 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
     src.bytes_in_buffer   = 0;
     cinfo.src = &src;
 
-    jpeg_read_header(&cinfo, true);
+    jpeg_read_header(&cinfo, TRUE);
     jpeg_start_decompress(&cinfo);
     image.width  = cinfo.output_width;
     image.height = cinfo.output_height;
@@ -236,3 +235,4 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
     gamma_correct(image);
     return true;
 }
+   
