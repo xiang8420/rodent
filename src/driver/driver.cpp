@@ -185,7 +185,10 @@ static inline void usage() {
               << "   --bench  iterations Enables benchmarking mode and sets the number of iterations\n"
               << "   -o       image.png  Writes the output image to a file" << std::endl;
 }
-
+void render_spawn(struct Settings const* settings, int iter, int dev, int *tag){
+    render(settings, iter + dev, dev);
+    *tag = 0;
+}
 int main(int argc, char** argv) {
     std::string out_file;
     size_t bench_iter = 0;
@@ -193,7 +196,7 @@ int main(int argc, char** argv) {
     size_t height = 1024;
     float fov = 60.0f;
     bool splitimage = false;
-    int dev_num = 1;
+    int granularity = 1; 
     float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
 //    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
     for (int i = 1; i < argc; ++i) {
@@ -228,15 +231,15 @@ int main(int argc, char** argv) {
             } else if (!strcmp(argv[i], "-o")) {
                 check_arg(argc, argv, i, 1);
                 out_file = argv[++i];
+            } else if (!strcmp(argv[i], "-g")) {
+                check_arg(argc, argv, i, 1);
+                granularity = strtoul(argv[++i], nullptr, 10);
             } else if (!strcmp(argv[i], "--help")) {
                 usage();
                 return 0;
             } else if (!strcmp(argv[i], "--grid")){
                 check_arg(argc, argv, i, 1);
                 splitimage = strtoul(argv[++i], nullptr, 10);
-            } else if (!strcmp(argv[i], "--dev")){
-                check_arg(argc, argv, i, 1);
-                dev_num = strtoul(argv[++i], nullptr, 10);
             } else {
                 error("Unknown option '", argv[i], "'");
             }
@@ -289,7 +292,8 @@ int main(int argc, char** argv) {
     _mm_setcsr(_mm_getcsr() | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
 #endif
 
-    auto spp = get_spp();
+    auto spp_g = get_spp();
+    auto dev_num = get_dev_num();
     bool done = false;
     uint64_t timing = 0;
     uint32_t frames = 0;
@@ -297,7 +301,7 @@ int main(int argc, char** argv) {
     std::vector<double> samples_sec;
     
     float *proc_time = new float[world_size];
-    int spp_old = spp / world_size;
+    int spp_old = spp_g / world_size;
     float elapsed_ms = 1;  //avoid div 0
 //    cam.rotate(-0.25f, 0.0f);
     float *reduce_buffer = NULL;
@@ -310,15 +314,16 @@ int main(int argc, char** argv) {
         printf("distributed spp \n");
     }
     std::thread *thread[5];
+    int task_num = granularity * dev_num; //
     while (frames < 7) {
         if (iter == 0)
             clear_pixels();
         cam.rotate(0.05f, 0.0f);
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
-        float range[] = {0.0, 0.0, width, height}; 
+        float range[] = {0.0, 0.0,float(width), float(height)}; 
         int spp_cur;
         if(splitimage){
-            spp_cur = spp;
+            spp_cur = spp_g;
             cam.tree->getgrid(world_rank, world_size, proc_time, range); 
         }
         else{
@@ -329,6 +334,7 @@ int main(int argc, char** argv) {
             float average = total / world_size; //average speed
             spp_cur = spp_old / proc_time[world_rank] * average;
         }
+        spp_cur = spp_cur / (granularity * dev_num);
         Settings settings {
             Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },
             Vec3 { cam.dir.x, cam.dir.y, cam.dir.z },
@@ -347,10 +353,22 @@ int main(int argc, char** argv) {
 #endif
               
         auto ticks = std::chrono::high_resolution_clock::now();
-        
-        for(int i = 0; i < dev_num; i++){
-            thread[i] = new std::thread(render, &settings, world_rank, i);    
-        } 
+        int tag[] = {-1, -1, -1, -1, -1}; 
+        int finished = 0;
+        while(finished != task_num){
+            for(int t = 0; t < dev_num; t ++){
+                if(tag[t] <= 0){
+                    if(tag[t] == 0){
+                        thread[t]->join();
+                    }
+                    tag[t] = 1;
+                    printf("work dev %d\n", t);
+                    thread[t] = new std::thread(render_spawn, &settings, world_rank, t, &tag[t]);
+                    finished ++;
+                } 
+
+            }
+        }
         for(int i = 0; i < dev_num; i++){
             thread[i]->join();
         }
@@ -361,18 +379,15 @@ int main(int argc, char** argv) {
 #ifdef DEBUG        
         printf("proc %d time %f", world_rank, float(elapsed_ms));
 #endif
-        samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
+        samples_sec.emplace_back(1000.0 * double(spp_g * width * height) / double(elapsed_ms));
         frames++;
         timing += elapsed_ms;
     
         std::string out = out_file + std::to_string(frames);
         out += ".png";
         if (world_rank == 0 && out_file != "") {
-//            info("0 image wirting\n");
             float total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
-       //     film = get_pixels();
             save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
-//            info("Image saved to '", out, "'");
             printf("0 node proc time %f \n", total_ms);
         }
     }

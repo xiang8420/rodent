@@ -402,7 +402,7 @@ static std::vector<uint8_t> pad_buffer(const std::vector<T>& elems, bool enable,
 }
 
 template <typename Array>
-static void write_buffer_hetero(char* file_name,const Array& array, unsigned short padding_flag) {
+static void write_buffer_hetero(std::string file_name,const Array& array, unsigned short padding_flag) {
     if(padding_flag & 1){
         write_buffer(std::string(file_name) + ".bin", pad_buffer(array, false, sizeof(float) * 4));
     }
@@ -578,7 +578,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     obj::MaterialLib mtl_lib;
     FilePath path(file_name);
 
-    if (!obj::load_obj(path, obj_file, mpi_id, mpi_size)) {
+    if (!obj::load_obj(path, obj_file)) {
         error("Invalid OBJ file '", file_name, "'");
         return false;
     }
@@ -602,7 +602,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         if (mat.map_ke != "") images.emplace(mat.map_ke, images.size()), has_map_ke = true;
     }
 
-    auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0);
+    auto tri_mesh = compute_tri_mesh(obj_file, 0);
     
     // Generate images
     std::vector<std::string> image_names(images.size());
@@ -626,7 +626,9 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "    spp: i32\n"
        << "};\n";
 
-    os << "\nextern fn get_spp() -> i32 { " << spp << " }\n";
+    os << "\nextern fn get_spp() -> i32 { " << spp << " } \n"
+       << "extern fn get_dev_num() -> i32{ " << dev_num << " }\n";
+    
     os << "\nextern fn render(settings: &Settings, iter: i32, dev: i32) -> () {\n";
 
     os << "    let mut mpi_id = -1; \n"
@@ -634,7 +636,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "    let mpi = comm();\n"
        << "    mpi.comm_rank(mpi.comms.world, &mut mpi_id);\n"
        << "    mpi.comm_size(mpi.comms.world, &mut mpi_size);\n\n"
-       << "    let spp      = settings.spp  / "<< dev_num <<";\n"
+       << "    let spp      = settings.spp;\n"
        << "    let renderer = make_path_tracing_renderer(" << max_path_len << " /*max_path_len*/, " << spp << " /*spp*/);\n";
     
     int gpu_num = 0; 

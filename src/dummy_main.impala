@@ -6,8 +6,11 @@ struct Settings {
     up: Vec3,
     right: Vec3,
     width: f32,
-    height: f32
+    height: f32,
+    range: Vec4,
+    spp_cur: i32
 }
 
 extern fn get_spp() -> i32 { 1 }
-extern fn render(settings: &Settings, iter: i32) -> () {}
+extern fn get_dev_num() -> i32 { 1 }
+extern fn render(settings: &Settings, iter: i32, dev: i32) -> () {}
