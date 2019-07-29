@@ -12,19 +12,25 @@ struct BBox {
     BBox() {}
     BBox(const float3& f) : min(f), max(f) {}
     BBox(const float3& min, const float3& max) : min(min), max(max) {}
+    BBox(float *value){
+        min.x = value[0]; min.y = value[1]; min.z = value[2];
+        max.x = value[3]; max.y = value[4]; max.z = value[5];
+    }
 
     BBox& extend(const BBox& bb) {
         min = ::min(min, bb.min);
         max = ::max(max, bb.max);
         return *this;
     }
-
+    void ToFloat(float *value){
+        value[0] = min.x; value[1] = min.y; value[2] = min.z;
+        value[3] = max.x; value[4] = max.y; value[5] = max.z;
+    }
     BBox& extend(const float3& v) {
         min = ::min(min, v);
         max = ::max(max, v);
         return *this;
     }
-
     float half_area() const {
         const float3 len = max - min;
         const float kx = std::max(len.x, 0.0f);
@@ -32,7 +38,7 @@ struct BBox {
         const float kz = std::max(len.z, 0.0f);
         return kx * (ky + kz) + ky * kz;
     }
-
+    
     BBox& overlap(const BBox& bb) {
         min = ::max(min, bb.min);
         max = ::min(max, bb.max);
@@ -56,7 +62,6 @@ struct BBox {
                min.y <= bb.max.y && max.y >= bb.min.y &&
                min.z <= bb.max.z && max.z >= bb.min.z;
     }
-
     static BBox empty() { return BBox(float3(FLT_MAX), float3(-FLT_MAX)); }
     static BBox full() { return BBox(float3(-FLT_MAX), float3(FLT_MAX)); }
 };

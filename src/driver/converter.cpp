@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <mpi.h>
+#include <algorithm>
 
 #include "bvh.h"
 #ifdef ENABLE_EMBREE_BVH
@@ -13,7 +14,7 @@
 #include "interface.h"
 #include "obj.h"
 #include "buffer.h"
-
+#include "schduler.h"
 #ifdef WIN32
 #include <direct.h>
 #define create_directory(d) _mkdir(d)
@@ -141,8 +142,8 @@ public:
         : nodes_(nodes), tris_(tris)
     {}
 
-    void build(const obj::TriMesh& tri_mesh, const std::vector<::Tri>& tris) {
-        builder_.build(tris, NodeWriter(*this), LeafWriter(*this, tris, tri_mesh.indices), M / 2);
+    void build(const std::vector<uint32_t>& indices, const std::vector<::Tri>& tris) {
+        builder_.build(tris, NodeWriter(*this), LeafWriter(*this, tris, indices), M / 2);
     }
 
 #ifdef STATISTICS
@@ -285,8 +286,8 @@ public:
         : nodes_(nodes), tris_(tris)
     {}
 
-    void build(const obj::TriMesh& tri_mesh, const std::vector<::Tri>& tris) {
-        builder_.build(tris, NodeWriter(*this), LeafWriter(*this, tris, tri_mesh.indices), 2);
+    void build(const std::vector<uint32_t>& indices, const std::vector<::Tri>& tris) {
+        builder_.build(tris, NodeWriter(*this), LeafWriter(*this, tris, indices), 2);
     }
 
 #ifdef STATISTICS
@@ -402,21 +403,21 @@ static std::vector<uint8_t> pad_buffer(const std::vector<T>& elems, bool enable,
 }
 
 template <typename Array>
-static void write_buffer_hetero(std::string file_name,const Array& array, unsigned short padding_flag) {
+static void write_buffer_hetero(std::string path, std::string file_name, const Array& array, unsigned short padding_flag) {
     if(padding_flag & 1){
-        write_buffer(std::string(file_name) + ".bin", pad_buffer(array, false, sizeof(float) * 4));
+        write_buffer(path + "cpu/" + file_name, pad_buffer(array, false, sizeof(float) * 4));
     }
     if(padding_flag & 2){
-        write_buffer(std::string(file_name) + "_gpu.bin", pad_buffer(array, true, sizeof(float) * 4));
+        write_buffer(path + "gpu/" + file_name, pad_buffer(array, true, sizeof(float) * 4));
     }
 }
 
-static void write_tri_mesh(const obj::TriMesh& tri_mesh, unsigned short padding_flag) {
-    write_buffer_hetero("data/vertices",     tri_mesh.vertices,     padding_flag);
-    write_buffer_hetero("data/normals",      tri_mesh.normals,      padding_flag);
-    write_buffer_hetero("data/face_normals", tri_mesh.face_normals, padding_flag);
-    write_buffer_hetero("data/texcoords",    tri_mesh.texcoords,    padding_flag);
-    write_buffer("data/indices.bin",      tri_mesh.indices);
+static void write_tri_mesh(std::string path, const obj::TriMesh& tri_mesh, unsigned short padding_flag ) {
+    write_buffer_hetero(path,  "tri_vert.bin",     tri_mesh.vertices,     padding_flag);
+    write_buffer_hetero(path,  "tri_norm.bin",      tri_mesh.normals,      padding_flag);
+    write_buffer_hetero(path,  "face_nor.bin", tri_mesh.face_normals, padding_flag);
+    write_buffer_hetero(path,  "text_cod.bin",    tri_mesh.texcoords,    padding_flag);
+    write_buffer(path + "tri_indx.bin",      tri_mesh.indices);
 }
 
 
@@ -433,19 +434,40 @@ static void build_bvh(const obj::TriMesh& tri_mesh,
         auto& v2 = tri_mesh.vertices[tri_mesh.indices[i * 4 + 2]];
         in_tris[i] = Tri(v0, v1, v2);
     }
-    adapter.build(tri_mesh, in_tris);
+    adapter.build(tri_mesh.indices, in_tris);
+}
+
+template <size_t N, size_t M>
+static void build_muti_bvh(const obj::TriMesh& tri_mesh, obj::File& file, 
+                      std::vector<typename BvhNTriM<N, M>::Node>& nodes,
+                      std::vector<typename BvhNTriM<N, M>::Tri>& tris) {
+    BvhNTriMAdapter<N, M> adapter(nodes, tris);
+    
+    auto num_tris = tri_mesh.indices.size() / 4;
+    std::vector<::Tri> in_tris; //(num_tris);
+    std::vector<uint32_t> indices; //(tri_mesh.indices.size());
+    for (size_t i = 0; i < num_tris; i++) {
+        auto& v0 = tri_mesh.vertices[tri_mesh.indices[i * 4 + 0]];
+        auto& v1 = tri_mesh.vertices[tri_mesh.indices[i * 4 + 1]];
+        auto& v2 = tri_mesh.vertices[tri_mesh.indices[i * 4 + 2]];
+        in_tris.push_back(Tri(v0, v1, v2));
+        for(size_t j = 0; j < 4; j++){
+            uint32_t id = tri_mesh.indices.at(i * 4 + j); 
+            indices.push_back(id);
+        }
+    }
+    adapter.build(indices, in_tris);
 }
 
 template <typename Node, typename Tri>
-static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris, std::string bvh_flag) {
-    std::ofstream of("data/bvh_" + bvh_flag + ".bin", std::ios::app | std::ios::binary);
+static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris, std::string path) {
+    std::ofstream of(path, std::ios::app | std::ios::binary);
 //    std::ofstream of("data/bvh.bin", std::ios::app | std::ios::binary);
     size_t node_size = sizeof(Node);
     size_t tri_size  = sizeof(Tri);
     of.write((char*)&node_size, sizeof(uint32_t));
     of.write((char*)&tri_size,  sizeof(uint32_t));
     write_buffer(of, nodes);
-//    info("node",nodes[0].bounds[0][0]);
     write_buffer(of, tris );
     info("BVH with ", nodes.size(), " node(s), ", tris.size(), " tri(s)");
 }
@@ -576,14 +598,14 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     MPI_Comm_rank(MPI_COMM_WORLD, &mpi_id);
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
-    FilePath path(file_name);
+    FilePath scene_path(file_name);
 
-    if (!obj::load_obj(path, obj_file)) {
+    if (!obj::load_obj(scene_path, obj_file, mpi_id, mpi_size)) {
         error("Invalid OBJ file '", file_name, "'");
         return false;
     }
     for (auto lib_name : obj_file.mtl_libs) {
-        auto mtl_name = path.base_name() + "/" + lib_name;
+        auto mtl_name = scene_path.base_name() + "/" + lib_name;
         if (!obj::load_mtl(mtl_name, mtl_lib)) {
             error("Invalid MTL file '", mtl_name, "'");
             return false;
@@ -601,18 +623,14 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         if (mat.map_ks != "") images.emplace(mat.map_kd, images.size());
         if (mat.map_ke != "") images.emplace(mat.map_ke, images.size()), has_map_ke = true;
     }
-
-    auto tri_mesh = compute_tri_mesh(obj_file, 0);
     
     // Generate images
     std::vector<std::string> image_names(images.size());
     for (auto& pair : images)
         image_names[pair.second] = pair.first;
 
-    create_directory("data/");
-
     os << "//------------------------------------------------------------------------------------\n"
-       << "// Generated from '" << path.file_name() << "' with the scene conversion tool\n"
+       << "// Generated from '" << scene_path.file_name() << "' with the scene conversion tool\n"
        << "//------------------------------------------------------------------------------------\n\n";
 
     os << "struct Settings {\n"
@@ -629,7 +647,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     os << "\nextern fn get_spp() -> i32 { " << spp << " } \n"
        << "extern fn get_dev_num() -> i32{ " << dev_num << " }\n";
     
-    os << "\nextern fn render(settings: &Settings, iter: i32, dev: i32) -> () {\n";
+    os << "\nextern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32) -> () {\n";
 
     os << "    let mut mpi_id = -1; \n"
        << "    let mut mpi_size = -1; \n"
@@ -658,9 +676,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         padding_flag |= 1;
     }
 
-    os << "    fn @make_scene(device: Device, bvh_path: &[u8], vertices: &[u8], normals: &[u8], face_normals: &[u8],\n" 
-       << "                   texcoords: &[u8], light_verts: &[u8], light_norms: &[u8], light_colors: &[u8],\n"
-       << "                   simple_kd: &[u8], simple_ks: &[u8])-> Scene {\n"
+    os << "    fn @make_scene(device: Device, file: File_path)-> Scene {\n"
        << "        let math     = device.intrinsics;\n";
 
     // Setup camera
@@ -677,14 +693,15 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "            mpi_size\n"
        << "        );\n";
 
+    MeshChunk chunk = MeshChunk(obj_file);
     // Setup triangle mesh
     info("Generating triangle mesh for '", file_name, "'");
     os << "\n        // Triangle mesh\n"
-       << "        let vertices     = device.load_buffer(vertices);\n"
-       << "        let normals      = device.load_buffer(normals);\n"
-       << "        let face_normals = device.load_buffer(face_normals);\n"
-       << "        let texcoords    = device.load_buffer(texcoords);\n"
-       << "        let indices      = device.load_buffer(\"data/indices.bin\");\n"
+       << "        let vertices     = device.load_buffer(file.vertices);\n"
+       << "        let normals      = device.load_buffer(file.normals);\n"
+       << "        let face_normals = device.load_buffer(file.face_normals);\n"
+       << "        let texcoords    = device.load_buffer(file.texcoords);\n"
+       << "        let indices      = device.load_buffer(file.indices);\n"
        << "        let tri_mesh     = TriMesh {\n"
        << "            vertices:     @ |i| vertices.load_vec3(i),\n"
        << "            normals:      @ |i| normals.load_vec3(i),\n"
@@ -692,158 +709,178 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "            triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
        << "            attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
        << "            num_attrs:    1,\n"
-       << "            num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
+       << "            global_bbox:  make_bbox(make_vec3(" << chunk.bbox.min[0] << " as f32, "<< chunk.bbox.min[1] << " as f32, "<< chunk.bbox.min[2] << " as f32), make_vec3("
+       <<                                                     chunk.bbox.max[0] << " as f32, "<< chunk.bbox.max[1] << " as f32, "<< chunk.bbox.max[2] << " as f32)),\n"
+       << "            scale:        make_vec3i("<< chunk.scale[0]<<", "<<chunk.scale[1] << ", "<<chunk.scale[2] <<"),\n"     
+       << "            num_tris:     27\n"  //fake num tris
+ //      << "            num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
        << "        };\n"
-       << "        let bvh = device.load_bvh(bvh_path);\n"
+       << "        let bvh = device.load_bvh(file.bvh);\n"
        << "        let node = bvh.node(0); \n"
        << "        let bbox = node.bbox(0);   \n";
-    // Simplify materials if necessary
-    num_complex = fusion ? num_complex : num_mats;
-    bool has_simple = num_complex < num_mats;
-    if (has_simple) {
-        info("Simple materials will be fused");
-        size_t num_tris = tri_mesh.indices.size() / 4;
-        std::vector<rgb> simple_kd(num_tris);
-        std::vector<rgb> simple_ks(num_tris);
-        std::vector<float> simple_ns(num_tris);
-        for (size_t i = 0, j = 0; i < tri_mesh.indices.size(); i += 4, j++) {
-            auto& geom_id = tri_mesh.indices[i + 3];
-            if (geom_id >= num_complex) {
-                auto& mat = mtl_lib[obj_file.materials[geom_id]];
-                assert(is_simple(mat));
-                simple_kd[j] = mat.kd;
-                simple_ks[j] = mat.ks;
-                simple_ns[j] = mat.ns;
-                geom_id = num_complex;
-            } else {
-                simple_kd[j] = rgb(0.1f, 0.05f, 0.01f);
-                simple_ks[j] = rgb(0.1f, 0.05f, 0.01f);
-                simple_ns[j] = 1.0f;
-            }
-        }
-        
-        write_buffer_hetero("data/simple_kd", simple_kd, padding_flag);
-        write_buffer_hetero("data/simple_ks", simple_ks, padding_flag);
-        write_buffer("data/simple_ns.bin", simple_ns);
-    }
-
-    write_tri_mesh(tri_mesh, padding_flag);
-        
-    unsigned short bvh_export = 0;
-    for(int dev_id = 0; dev_id < dev_num; dev_id++){
-        Target target = target_list[dev_id];
-        info("Generating BVH for '", file_name, "'");
-        if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
-            target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-            printf("nvvm\n");
-            if(!(bvh_export&1)){
-                std::vector<typename BvhNTriM<2, 1>::Node> nodes;
-                std::vector<typename BvhNTriM<2, 1>::Tri> tris;
-                build_bvh<2, 1>(tri_mesh, nodes, tris);
-                write_bvh(nodes, tris, "gpu");
-                bvh_export ++;
-            }
-        } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-            printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
-            if(!(bvh_export&2)){
-                std::remove("data/bvh2.bin");
-                std::vector<typename BvhNTriM<4, 4>::Node> nodes;
-                std::vector<typename BvhNTriM<4, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-                if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
-                else
-#endif
-                build_bvh<4, 4>(tri_mesh, nodes, tris);
-                write_bvh(nodes, tris, "sse");
-                bvh_export += 2;
-            }
-        } else {
-            printf("avx \n");
-            if(!(bvh_export&4)){
-                std::remove("data/bvh4.bin");
-                std::vector<typename BvhNTriM<8, 4>::Node> nodes;
-                std::vector<typename BvhNTriM<8, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-                if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
-                else
-#endif
-                build_bvh<8, 4>(tri_mesh, nodes, tris);
-                write_bvh(nodes, tris, "avx");
-                bvh_export += 4;
-            }
-        }
-    }
-
-    // Generate images
-    info("Generating images for '", file_name, "'");
-    os << "\n        // Images\n"
-       << "        let dummy_image = make_image(@ |x, y| make_color(0.0f, 0.0f, 0.0f), 1, 1);\n";
-    for (size_t i = 0; i < images.size(); i++) {
-        auto name = fix_file(image_names[i]);
-        copy_file(path.base_name() + "/" + name, "data/" + name);
-        os << "        let image_" << make_id(name) << " = ";
-        if (ends_with(name, ".png")) {
-            os << "    device.load_png(\"data/" << name << "\");\n";
-        } else if (ends_with(name, ".tga")) {
-            os << "    device.load_tga(\"data/" << name << "\");\n";
-        } else if (ends_with(name, ".tiff")) {
-            os << "    device.load_tga(\"data/" << name << "\");\n";
-        } else if (ends_with(name, ".jpeg") || ends_with(name, ".jpg")) {
-            os << "    device.load_jpg(\"data/" << name << "\");\n";
-        } else {
-            os << "    dummy_image; // Cannot determine image type for " << name << "\n";
-        }
-    }
-
-    // Lights
-    std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
-    os << "\n        // Lights\n";
+    
+    create_directory("data/");
+    std::string data_path  = "data/"; 
+    bool has_simple = false;
+    
+    // Lights global data
     size_t num_lights = 0;
     std::vector<rgb>    light_colors;
     std::vector<float3> light_verts;
     std::vector<float3> light_norms;
     std::vector<float>  light_areas;
-    for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
-        // Do not leave this array undefined, even if this triangle is not a light
-        light_ids[i / 4] = 0;
+    std::vector<obj::Material> light_mats;
+    for(int c = 0, n = chunk.size(); c < n; c++){
+        auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c));
+        // if chunk is empty ??
 
-        auto& mtl_name = obj_file.materials[tri_mesh.indices[i + 3]];
-        if (mtl_name == "")
-            continue;
-        auto& mat = mtl_lib.find(mtl_name)->second;
-        if (mat.ke == rgb(0.0f) && mat.map_ke == "")
-            continue;
-
-        auto& v0 = tri_mesh.vertices[tri_mesh.indices[i + 0]];
-        auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
-        auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
-
-        light_ids[i / 4] = num_lights++;
-        if (has_map_ke) {
-            os << "        let light" << num_lights - 1 << " = make_triangle_light(\n"
-               << "            math,\n"
-               << "            make_vec3(" << v0.x << "f, " << v0.y << "f, " << v0.z << "f),\n"
-               << "            make_vec3(" << v1.x << "f, " << v1.y << "f, " << v1.z << "f),\n"
-               << "            make_vec3(" << v2.x << "f, " << v2.y << "f, " << v2.z << "f),\n";
-            if (mat.map_ke != "") {
-                os << "             make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ke]]) <<")\n";
-            } else { 
-                os << "              make_color(" << mat.ke.x << "f, " << mat.ke.y << "f, " << mat.ke.z << "f)\n";
-            } 
-            os << "        );\n";
-        } else {
-            auto n = cross(v1 - v0, v2 - v0);
-            auto inv_area = 1.0f / (0.5f * length(n));
-            n = normalize(n);
-            light_verts.emplace_back(v0);
-            light_verts.emplace_back(v1);
-            light_verts.emplace_back(v2);
-            light_norms.emplace_back(n);
-            light_areas.emplace_back(inv_area);
-            light_colors.emplace_back(mat.ke);
+        std::string chunk_path = c > 9 ? "data/0" : "data/00";
+        chunk_path = chunk_path + std::to_string(c) + "/";
+        
+        create_directory(chunk_path.c_str());
+        num_complex = fusion ? num_complex : num_mats;
+        has_simple |= num_complex < num_mats;
+        // Simplify materials if necessary
+        if (has_simple) {
+            info("Simple materials will be fused");
+            size_t num_tris = tri_mesh.indices.size() / 4;
+            std::vector<rgb> simple_kd(num_tris);
+            std::vector<rgb> simple_ks(num_tris);
+            std::vector<float> simple_ns(num_tris);
+            for (size_t i = 0, j = 0; i < tri_mesh.indices.size(); i += 4, j++) {
+                auto& geom_id = tri_mesh.indices[i + 3];
+                if (geom_id >= num_complex) {
+                    auto& mat = mtl_lib[obj_file.materials[geom_id]];
+                    assert(is_simple(mat));
+                    simple_kd[j] = mat.kd;
+                    simple_ks[j] = mat.ks;
+                    simple_ns[j] = mat.ns;
+                    geom_id = num_complex;
+                } else {
+                    simple_kd[j] = rgb(0.1f, 0.05f, 0.01f);
+                    simple_ks[j] = rgb(0.1f, 0.05f, 0.01f);
+                    simple_ns[j] = 1.0f;
+                }
+            }
+            
+            write_buffer_hetero(chunk_path, "simpl_kd.bin", simple_kd, padding_flag);
+            write_buffer_hetero(chunk_path, "simpl_ks.bin", simple_ks, padding_flag);
+            write_buffer(chunk_path + "simpl_ns.bin", simple_ns);
         }
+        write_tri_mesh(chunk_path, tri_mesh, padding_flag);
+        
+        unsigned short bvh_export = 0;
+        for(int dev_id = 0; dev_id < dev_num; dev_id++){
+            Target target = target_list[dev_id];
+            info("Generating BVH for '", file_name, "'");
+            if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
+                target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
+                printf("nvvm\n");
+                if(!(bvh_export&1)){
+                    create_directory((chunk_path + "gpu/").c_str());
+                    create_directory((data_path + "gpu/").c_str());
+                    std::remove((chunk_path + "bvh_nvvm.bin").c_str());
+                    std::vector<typename BvhNTriM<2, 1>::Node> nodes;
+                    std::vector<typename BvhNTriM<2, 1>::Tri> tris;
+                    build_bvh<2, 1>(tri_mesh, nodes, tris);
+                    printf("bvh built\n");
+                    write_bvh(nodes, tris, chunk_path + "bvh_nvvm.bin");
+                    bvh_export ++;
+                }
+            } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
+                printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
+                if(!(bvh_export&2)){
+                    create_directory((chunk_path + "cpu/").c_str());
+                    create_directory((data_path + "cpu/").c_str());
+                    std::remove((chunk_path + "bvh_sse_.bin").c_str());
+                    std::vector<typename BvhNTriM<4, 4>::Node> nodes;
+                    std::vector<typename BvhNTriM<4, 4>::Tri> tris;
+#ifdef ENABLE_EMBREE_BVH
+                    if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
+                    else
+#endif
+                    build_bvh<4, 4>(tri_mesh, nodes, tris);
+                    write_bvh(nodes, tris, chunk_path + "bvh_sse_.bin");
+                    bvh_export += 2;
+                }
+            } else {
+                printf("avx \n");
+                if(!(bvh_export&4)){
+                    create_directory((chunk_path + "cpu/").c_str());
+                    create_directory((data_path + "cpu/").c_str());
+                    std::remove((chunk_path + "bvh_avx_.bin").c_str());
+                    std::vector<typename BvhNTriM<8, 4>::Node> nodes;
+                    std::vector<typename BvhNTriM<8, 4>::Tri> tris;
+#ifdef ENABLE_EMBREE_BVH
+                    if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
+                    else
+#endif
+                    build_bvh<8, 4>(tri_mesh, nodes, tris);
+                    write_bvh(nodes, tris, chunk_path + "bvh_avx_.bin");
+                    bvh_export += 4;
+                }
+            }
+        }
+           
+        //Local Light data light id
+        std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
+        for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
+            // Do not leave this array undefined, even if this triangle is not a light
+            light_ids[i / 4] = 0;
+
+            auto& mtl_name = obj_file.materials[tri_mesh.indices[i + 3]];
+            if (mtl_name == "")
+                continue;
+            auto& mat = mtl_lib.find(mtl_name)->second;
+            if (mat.ke == rgb(0.0f) && mat.map_ke == "")
+                continue;
+
+            auto& v0 = tri_mesh.vertices[tri_mesh.indices[i + 0]];
+            auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
+            auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
+
+            int light_id = 0;
+            for(int light_id = 0; light_id < num_lights; light_id++){
+                int vert_id = light_id * 3;
+                if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
+                    break;
+            } 
+            light_ids[i / 4] = light_id;
+            if(light_id != num_lights)
+                continue;
+           
+            num_lights++;
+
+            if (has_map_ke){
+                os << "        let light" << i << " = make_triangle_light(\n"
+                   << "            math,\n"
+                   << "            make_vec3(" << light_verts[i * 3].x << "f, " << light_verts[i * 3].y << "f, " << light_verts[i * 3].z << "f),\n"
+                   << "            make_vec3(" << light_verts[i * 3 + 1].x << "f, " << light_verts[i * 3 + 1].y << "f, " << light_verts[i * 3 + 1].z << "f),\n"
+                   << "            make_vec3(" << light_verts[i * 3 + 2].x << "f, " << light_verts[i * 3 + 2].y << "f, " << light_verts[i * 3 + 2].z << "f),\n";
+                if (light_mats[i].map_ke != "") {
+                    os << "             make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[light_mats[i].map_ke]]) <<")\n";
+                } else { 
+                    os << "              make_color(" << light_colors[i].x << "f, " << light_colors[i].y << "f, " << light_colors[i].z << "f)\n";
+                } 
+                os << "        );\n";
+            } else {
+                auto n = cross(v1 - v0, v2 - v0);
+                auto inv_area = 1.0f / (0.5f * length(n));
+                n = normalize(n);
+                light_verts.emplace_back(v0);
+                light_verts.emplace_back(v1);
+                light_verts.emplace_back(v2);
+                light_norms.emplace_back(n);
+                light_areas.emplace_back(inv_area);
+                light_colors.emplace_back(mat.ke);
+            }
+        }
+        write_buffer(chunk_path + "ligt_ids.bin", light_ids);
+
     }
-    if (has_map_ke || num_lights == 0) {
+
+    os << "\n        // Lights\n";
+    if (has_map_ke || num_lights == 0){
         if (num_lights != 0) {
             os << "            let lights = @ |i| match i {\n";
             for (size_t i = 0; i < num_lights; ++i) {
@@ -857,14 +894,15 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             os << "            let lights = @ |_| make_point_light(math, make_vec3(0.0f, 0.0f, 0.0f), black);\n";
         }
     } else {
-        write_buffer("data/light_areas.bin",  light_areas);
-        write_buffer_hetero("data/light_verts",  light_verts,  padding_flag);
-        write_buffer_hetero("data/light_norms",  light_norms,  padding_flag);
-        write_buffer_hetero("data/light_colors", light_colors, padding_flag);
-        os << "        let light_verts = device.load_buffer(light_verts);\n"
-           << "        let light_areas = device.load_buffer(\"data/light_areas.bin\");\n"
-           << "        let light_norms = device.load_buffer(light_norms);\n"
-           << "        let light_colors = device.load_buffer(light_colors);\n"
+//        write_buffer("data/light_areas.bin",  light_areas);
+        write_buffer_hetero(data_path, "ligt_are.bin",  light_areas,  padding_flag);
+        write_buffer_hetero(data_path, "ligt_ver.bin",  light_verts,  padding_flag);
+        write_buffer_hetero(data_path, "ligt_nor.bin",  light_norms,  padding_flag);
+        write_buffer_hetero(data_path, "ligt_col.bin",  light_colors, padding_flag);
+        os << "        let light_verts = device.load_buffer(file.light_verts);\n"
+           << "        let light_areas = device.load_buffer(file.light_areas);\n"
+           << "        let light_norms = device.load_buffer(file.light_norms);\n"
+           << "        let light_colors = device.load_buffer(file.light_colors);\n"
            << "        let lights = @ |i| {\n"
            << "            make_precomputed_triangle_light(\n"
            << "                math,\n"
@@ -876,12 +914,33 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
            << "                vec3_to_color(light_colors.load_vec3(i))\n"
            << "            )\n"
            << "        };\n";
+
     }
 
-    write_buffer("data/light_ids.bin", light_ids);
 
     os << "\n        // Mapping from primitive to light source\n"
-       << "        let light_ids = device.load_buffer(\"data/light_ids.bin\");\n";
+       << "        let light_ids = device.load_buffer(file.light_ids);\n";
+
+    // Generate images
+    info("Generating images for '", file_name, "'");
+    os << "\n        // Images\n"
+       << "        let dummy_image = make_image(@ |x, y| make_color(0.0f, 0.0f, 0.0f), 1, 1);\n";
+    for (size_t i = 0; i < images.size(); i++) {
+        auto name = fix_file(image_names[i]);
+        copy_file(scene_path.base_name() + "/" + name, "data/" + name);
+        os << "        let image_" << make_id(name) << " = ";
+        if (ends_with(name, ".png")) {
+            os << "    device.load_png(\"data/" << name << "\");\n";
+        } else if (ends_with(name, ".tga")) {
+            os << "    device.load_tga(\"data/" << name << "\");\n";
+        } else if (ends_with(name, ".tiff")) {
+            os << "    device.load_tga(\"data/" << name << "\");\n";
+        } else if (ends_with(name, ".jpeg") || ends_with(name, ".jpg")) {
+            os << "    device.load_jpg(\"data/" << name << "\");\n";
+        } else {
+            os << "    dummy_image; // Cannot determine image type for " << name << "\n";
+        }
+    }
 
     // Generate shaders
     info("Generating materials for '", file_name, "'");
@@ -1001,36 +1060,30 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             os << "    else if dev == "<< dev_id  <<" { \n"; 
         }
         switch (target) {
-            case Target::GENERIC:           os << "        let device" << dev_id << "  = make_cpu_default_device();\n";               break;
-            case Target::AVX2:              os << "        let device" << dev_id << "  = make_avx2_device(false);\n";     break;
-            case Target::AVX2_EMBREE:       os << "        let device" << dev_id << "  = make_avx2_device(true);\n";      break;
-            case Target::AVX:               os << "        let device" << dev_id << "  = make_avx_device();\n";             break;
-            case Target::SSE42:             os << "        let device" << dev_id << "  = make_sse42_device();\n";                     break;
-            case Target::ASIMD:             os << "        let device" << dev_id << "  = make_asimd_device();\n";                     break;
-            case Target::NVVM_STREAMING:    os << "        let device" << dev_id << "  = make_nvvm_device(" << dev <<", true);\n";    break;
-            case Target::NVVM_MEGAKERNEL:   os << "        let device" << dev_id << "  = make_nvvm_device(" << dev <<", false);\n";   break;
-            case Target::AMDGPU_STREAMING:  os << "        let device" << dev_id << "  = make_amdgpu_device(" << dev <<", true);\n";  break;
-            case Target::AMDGPU_MEGAKERNEL: os << "        let device" << dev_id << "  = make_amdgpu_device(" << dev <<", false);\n"; break;
+            case Target::GENERIC:           os << "        let device = make_cpu_default_device();\n";               break;
+            case Target::AVX2:              os << "        let device = make_avx2_device(false);\n";     break;
+            case Target::AVX2_EMBREE:       os << "        let device = make_avx2_device(true);\n";      break;
+            case Target::AVX:               os << "        let device = make_avx_device();\n";             break;
+            case Target::SSE42:             os << "        let device = make_sse42_device();\n";                     break;
+            case Target::ASIMD:             os << "        let device = make_asimd_device();\n";                     break;
+            case Target::NVVM_STREAMING:    os << "        let device = make_nvvm_device(" << dev <<", true);\n";    break;
+            case Target::NVVM_MEGAKERNEL:   os << "        let device = make_nvvm_device(" << dev <<", false);\n";   break;
+            case Target::AMDGPU_STREAMING:  os << "        let device = make_amdgpu_device(" << dev <<", true);\n";  break;
+            case Target::AMDGPU_MEGAKERNEL: os << "        let device = make_amdgpu_device(" << dev <<", false);\n"; break;
             default:
                 assert(false);
                 break;
         }
         if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
             target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-            os << "        let scene"<< dev_id <<" = make_scene(device" << dev_id << ", \"data/bvh_gpu.bin\", \"data/vertices_gpu.bin\", \"data/normals_gpu.bin\", \"data/face_normals_gpu.bin\", \n"
-               << "                            \"data/texcoords_gpu.bin\", \"data/light_verts_gpu.bin\", \"data/light_norms_gpu.bin\", \"data/light_colors_gpu.bin\",\n"
-               << "                            \"data/simple_kd_gpu.bin\", \"data/simple_ks_gpu.bin\");\n";
+            os << "        let scene  = make_scene(device, make_file_path(0, chunk));\n";    
+        } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
+            os << "        let scene  = make_scene(device, make_file_path(2, chunk));\n";    
         } else {
-            std::string bvh = "\"data/bvh_avx.bin\"";
-            if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-                bvh = "\"data/bvh_sse.bin\"";
-            }
-            os << "        let scene"<< dev_id <<" = make_scene(device" << dev_id << ", "<< bvh <<", \"data/vertices.bin\", \"data/normals.bin\", \"data/face_normals.bin\", \n"
-               << "                            \"data/texcoords.bin\", \"data/light_verts.bin\", \"data/light_norms.bin\", \"data/light_colors.bin\", \n"
-               << "                            \"data/simple_kd.bin\", \"data/simple_ks.bin\");\n";
+            os << "        let scene  = make_scene(device, make_file_path(1, chunk));\n";   
         }
-        os << "            renderer(scene"<< dev_id << ", device" << dev_id << ", iter);\n"
-           << "            device" << dev_id << ".present();\n"
+        os << "        renderer(scene, device, iter);\n"
+           << "        device.present();\n"
            << "    }\n";
     }
 

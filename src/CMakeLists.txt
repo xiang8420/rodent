@@ -1,6 +1,6 @@
 set(CPUINFO_PATH "/proc/cpuinfo" CACHE STRING "Path to the CPU info file on the system")
 set(TARGET_PLATFORM "" CACHE STRING "Target platform for the converter tool. Leave empty to autodetect CPU. Use converter --help to list possible platforms.")
-set(TARGET_DEVICE "AVX" CACHE STRING "Target device on the selected platform. Leave empty to use the default.")
+set(TARGET_DEVICE "" CACHE STRING "Target device on the selected platform. Leave empty to use the default.")
 set(SCENE_FILE "${PROJECT_SOURCE_DIR}/bench_scenes/bedroom/bedroom.obj" CACHE FILEPATH "Absolute path to an OBJ scene")
 set(MEGAKERNEL_FUSION ON CACHE BOOLEAN "Set to true to enable simple shader fusion for megakernel mappings")
 set(MAX_PATH_LEN "64" CACHE STRING "Maximum path length")
@@ -10,8 +10,9 @@ if (SCENE_FILE STREQUAL "")
     message(FATAL_ERROR "Please specify a valid OBJ scene in the SCENE_FILE variable")
 endif()
 set(CONVERTER_OPTIONS "")
+set(CONVERTER_OPTIONS "--dev-num" "1")
 if (NOT TARGET_PLATFORM STREQUAL "")
-    set(CONVERTER_OPTIONS "--target" "${TARGET_PLATFORM}")
+    set(CONVERTER_OPTIONS ${CONVERTER_OPTIONS} "--target" "${TARGET_PLATFORM}")
 endif()
 if (NOT TARGET_DEVICE STREQUAL "")
     set(CONVERTER_OPTIONS ${CONVERTER_OPTIONS} "--device" "${TARGET_DEVICE}")
@@ -28,6 +29,7 @@ set(RODENT_SRCS
     core/random.impala
     core/sort.impala
     core/vector.impala
+    core/file.impala
     render/image.impala
     render/camera.impala
     render/geometry.impala
@@ -61,7 +63,8 @@ set(DRIVER_SRCS
     driver/common.h
     driver/color.h
     driver/mpi.cpp
-    driver/grid.h
+    driver/schduler.h
+    driver/buffer.h
     )
 
 set(CONVERTER_SRCS
@@ -70,7 +73,9 @@ set(CONVERTER_SRCS
     driver/obj.h
     driver/file_path.h
     driver/interface.h
-    driver/bvh.h)
+    driver/bvh.h
+    driver/schduler.h
+    )
 
 
 find_package(MPI REQUIRED)
@@ -113,14 +118,11 @@ if (EMBREE_FOUND)
     target_compile_definitions(converter PUBLIC ${EMBREE_DEFINITIONS} -DENABLE_EMBREE_BVH)
 endif()
 
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/main.impala
-    COMMAND converter ${SCENE_FILE} ${CONVERTER_OPTIONS} --max-path-len ${MAX_PATH_LEN} --samples-per-pixel ${SPP}
-    COMMAND ${CMAKE_COMMAND} -E rename ${CMAKE_BINARY_DIR}/main.impala ${CMAKE_CURRENT_BINARY_DIR}/main.impala
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    DEPENDS ${SCENE_FILE} converter)
-
-MESSAGE( STATUS "converter ${SCENE_FILE} ${CONVERTER_OPTIONS} --max-path-len ${MAX_PATH_LEN} --samples-per-pixel ${SPP}")
-
+#add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/main.impala
+#    COMMAND converter ${SCENE_FILE} ${CONVERTER_OPTIONS} --max-path-len ${MAX_PATH_LEN} --samples-per-pixel ${SPP}
+#    COMMAND ${CMAKE_COMMAND} -E rename ${CMAKE_BINARY_DIR}/main.impala ${CMAKE_CURRENT_BINARY_DIR}/main.impala
+#    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+#    DEPENDS ${SCENE_FILE} converter)
 
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/main.impala PROPERTIES GENERATED TRUE)
 
@@ -142,4 +144,4 @@ if (COLORIZE)
 endif()
 
 add_executable(rodent driver/mpi.cpp ${RODENT_OBJS})
-target_link_libraries(rodent driver ${AnyDSL_runtime_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TBB_LIBRARIES} ${LZ4_LIBRARY} ${MPI_LIBRARIES})
+target_link_libraries(rodent driver ${AnyDSL_runtime_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TBB_LIBRARIES} ${LZ4_LIBRARY} ${MPI_LIBRARIES} -lpthread)

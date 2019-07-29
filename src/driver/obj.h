@@ -8,6 +8,7 @@
 #include "float3.h"
 #include "color.h"
 #include "file_path.h"
+#include "bbox.h"
 
 namespace obj {
 
@@ -54,6 +55,8 @@ struct File {
     std::vector<float2>      texcoords;
     std::vector<std::string> materials;
     std::vector<std::string> mtl_libs;
+    
+    BBox bbox;
 };
 
 typedef std::unordered_map<std::string, Material> MaterialLib;
@@ -66,10 +69,10 @@ struct TriMesh {
     std::vector<float2>   texcoords;
 };
 
-bool load_obj(const FilePath&, File&);
+bool load_obj(const FilePath&, File&, int, int);
 bool load_mtl(const FilePath&, MaterialLib&);
-TriMesh compute_tri_mesh(const File&, size_t);
-
+TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&);
+bool chunk_division(File& file);
 } // namespace obj
 
 #endif // LOAD_OBJ_H

@@ -6,7 +6,7 @@
 
 #include "common.h"
 #include "obj.h"
-
+#include "schduler.h"
 namespace obj {
 
 struct TriIdx {
@@ -100,8 +100,7 @@ inline bool read_index(char** ptr, obj::Index& idx) {
 
     return true;
 }
-
-static bool parse_obj(std::istream& stream, obj::File& file) {
+static bool parse_obj(std::istream& stream, obj::File& file, int rank, int size) {
     // Add an empty object to the scene
     int cur_object = 0;
     file.objects.emplace_back();
@@ -122,6 +121,9 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
     int err_count = 0, cur_line = 0;
     const int max_line = 1024;
     char line[max_line];
+
+    // global bounding box    
+    file.bbox = BBox::empty(); 
 
     while (stream.getline(line, max_line)) {
         cur_line++;
@@ -146,6 +148,7 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
                         v.y = std::strtof(ptr, &ptr);
                         v.z = std::strtof(ptr, &ptr);
                         file.vertices.push_back(v);
+                        file.bbox.extend(v);            
                     }
                     break;
                 case 'n':
@@ -370,10 +373,11 @@ static bool parse_mtl(std::istream& stream, obj::MaterialLib& mtl_lib) {
     return (err_count == 0);
 }
 
-bool load_obj(const FilePath& path, obj::File& obj_file) {
+bool load_obj(const FilePath& path, obj::File& obj_file, int rank, int size) {
     // Parse the OBJ file
     std::ifstream stream(path);
-    return stream && parse_obj(stream, obj_file);
+    bool res = stream && parse_obj(stream, obj_file, rank, size);
+    return res;
 }
 
 bool load_mtl(const FilePath& path, obj::MaterialLib& mtl_lib) {
@@ -409,9 +413,8 @@ static void compute_vertex_normals(const std::vector<uint32_t>& indices,
     }
 }
 
-TriMesh compute_tri_mesh(const File& obj_file, size_t mtl_offset) {
+TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, size_t mtl_offset, BBox& bbox) {
     TriMesh tri_mesh;
-
     for (auto& obj: obj_file.objects) {
         // Convert the faces to triangles & build the new list of indices
         std::vector<TriIdx> triangles;
@@ -426,17 +429,20 @@ TriMesh compute_tri_mesh(const File& obj_file, size_t mtl_offset) {
                     if (map == mapping.end()) {
                         has_normals |= (face.indices[i].n != 0);
                         has_texcoords |= (face.indices[i].t != 0);
-
                         mapping.insert(std::make_pair(face.indices[i], mapping.size()));
                     }
                 }
-
+                
+                bool in_chunk = bbox.is_inside(obj_file.vertices[face.indices[0].v])
+                              | bbox.is_inside(obj_file.vertices[face.indices[1].v]);
                 auto v0 = mapping[face.indices[0]];
                 auto prev = mapping[face.indices[1]];
 
                 for (size_t i = 1; i < face.indices.size() - 1; i++) {
                     auto next = mapping[face.indices[i + 1]];
-                    triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
+                    if(in_chunk || bbox.is_inside(obj_file.vertices[face.indices[i + 1].v]))
+                       triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
+                    
                     prev = next;
                 }
             }
@@ -507,5 +513,4 @@ TriMesh compute_tri_mesh(const File& obj_file, size_t mtl_offset) {
 
     return tri_mesh;
 }
-
 } // namespace obj

@@ -181,11 +181,11 @@ static void jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes) {
         }
     }
 }
+
 bool load_jpg(const FilePath& path, ImageRgba32& image) {
     std::ifstream file(path, std::ifstream::binary);
     if (!file)
         return false;
-
     enhanced_jpeg_decompress_struct cinfo;
     cinfo.is = &file;
     jpeg_error_mgr jerr;
@@ -194,13 +194,11 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
     jerr.error_exit     = jpeg_error_exit;
     jerr.output_message = jpeg_output_message;
     jpeg_create_decompress(&cinfo);
-
     if (setjmp(cinfo.jmp)) {
         jpeg_abort_decompress(&cinfo);
         jpeg_destroy_decompress(&cinfo);
         return false;
     }
-
     jpeg_source_mgr src;
     src.init_source       = jpeg_no_op;
     src.fill_input_buffer = jpeg_fill_input_buffer;
@@ -209,7 +207,6 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
     src.term_source       = jpeg_no_op;
     src.bytes_in_buffer   = 0;
     cinfo.src = &src;
-
     jpeg_read_header(&cinfo, TRUE);
     jpeg_start_decompress(&cinfo);
     image.width  = cinfo.output_width;
@@ -229,10 +226,8 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
                 dst_ptr[c] = src_ptr[c];
         }
     }
-
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     gamma_correct(image);
     return true;
 }
-   
