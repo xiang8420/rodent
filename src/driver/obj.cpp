@@ -6,7 +6,7 @@
 
 #include "common.h"
 #include "obj.h"
-#include "schduler.h"
+#include "distribution.h"
 namespace obj {
 
 struct TriIdx {
@@ -433,16 +433,20 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
                     }
                 }
                 
-                bool in_chunk = bbox.is_inside(obj_file.vertices[face.indices[0].v])
-                              | bbox.is_inside(obj_file.vertices[face.indices[1].v]);
+                const float3& p0 = obj_file.vertices[face.indices[0].v];
+                const float3& p1 = obj_file.vertices[face.indices[1].v];
+                bool in_chunk = bbox.line_intersect(p0, p1);
+
                 auto v0 = mapping[face.indices[0]];
                 auto prev = mapping[face.indices[1]];
-
                 for (size_t i = 1; i < face.indices.size() - 1; i++) {
                     auto next = mapping[face.indices[i + 1]];
-                    if(in_chunk || bbox.is_inside(obj_file.vertices[face.indices[i + 1].v]))
-                       triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
-                    
+                    const float3& pi = obj_file.vertices[face.indices[i + 1].v];
+                    if(in_chunk
+                        || bbox.line_intersect(p0, pi) 
+                        || bbox.line_intersect(p1, pi)){
+                        triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
+                    }
                     prev = next;
                 }
             }

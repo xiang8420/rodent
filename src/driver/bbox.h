@@ -57,6 +57,29 @@ struct BBox {
                v.x <= max.x && v.y <= max.y && v.z <= max.z;
     }
 
+    bool line_intersect(const float3& v0, const float3& v1){
+        float3 dir = v1 - v0;
+        float3 t0  = (min - v0) / dir;
+        float3 t1  = (max - v0) / dir;
+        float tmin = 0, tmax = 1;
+        
+        tmin = std::max(std::max(std::min(t0.x, t1.x), std::min(t0.y, t1.y)), std::min(t0.z, t1.z));
+        tmax = std::min(std::min(std::max(t0.x, t1.x), std::max(t0.y, t1.y)), std::max(t0.z, t1.z)); 
+        if(tmin > tmax)
+            return false;
+        return (tmin >= 0 && tmin <= 1) || (tmax >= 0 && tmax <= 1);
+    }
+
+    bool inside_tri(const float3& v0, const float3& v1, const float3& v2) {
+        float3 tri_max = max3(v0, v1, v2);
+        float3 tri_min = min3(v0, v1, v2); 
+        for(int i = 0; i < 3; i++){
+            if(tri_max[i] > max[i] && tri_min[i] < min[i])
+                return true;
+        }
+        return false;
+    }
+
     bool is_overlapping(const BBox& bb) const {
         return min.x <= bb.max.x && max.x >= bb.min.x &&
                min.y <= bb.max.y && max.y >= bb.min.y &&
