@@ -23,7 +23,7 @@ fn @make_ray_state(rnd: RndState, contrib: Color, mis: f32, depth: i32) -> RaySt
     }
 }
 
-fn @make_camera_emitter(scene: Scene, device: Device, iter: i32) -> RayEmitter {
+fn @make_camera_emitter(camera: Camera, iter: i32) -> RayEmitter {
     @ |sample, x, y, width, height| {
         let mut hash = fnv_init();
         hash = fnv_hash(hash, sample as u32);
@@ -31,9 +31,11 @@ fn @make_camera_emitter(scene: Scene, device: Device, iter: i32) -> RayEmitter {
         hash = fnv_hash(hash, x as u32);
         hash = fnv_hash(hash, y as u32);
         let mut rnd = hash as RndState;
-        let kx = 2.0f * (x as f32 + randf(&mut rnd)) / (width  as f32) - 1.0f;
-        let ky = 1.0f - 2.0f * (y as f32 + randf(&mut rnd)) / (height as f32);
-        let ray = scene.camera.generate_ray(kx, ky);
+        let kx = (x as f32 + randf(&mut rnd)) / (width  as f32);
+        let ky = (y as f32 + randf(&mut rnd)) / (height as f32);
+
+        let k = make_vec2(2.0f * kx - 1.0f, 1.0f - 2.0f * ky);
+        let ray = camera.generate_ray(k.x, k.y);
         let state = make_ray_state(rnd, white, 0.0f, 0);
         (ray, state)
     }
@@ -41,7 +43,7 @@ fn @make_camera_emitter(scene: Scene, device: Device, iter: i32) -> RayEmitter {
 
 fn @make_debug_renderer() -> Renderer {
     @ |scene, device, iter| {
-        let on_emit = make_camera_emitter(scene, device, iter);
+        let on_emit = make_camera_emitter(scene.camera, iter);
         let on_shadow = @ |_, _, _, _, _, _| ();
         let on_bounce = @ |_, _, _, _, _, _| ();
         let on_hit = @ |ray, hit, state, surf, mat, accumulate| {
@@ -58,13 +60,12 @@ fn @make_debug_renderer() -> Renderer {
         device.trace(scene, path_tracer, 1);
     }
 }
-
 fn @make_path_tracing_renderer(max_path_len: i32, spp: i32)-> Renderer {
     @ |scene, device, iter| {
         let offset = 0.001f;
         let pdf_lightpick = 1.0f / (scene.num_lights as f32);
 
-        let on_emit = make_camera_emitter(scene, device, iter);
+        let on_emit = make_camera_emitter(scene.camera, iter);
 
         fn @on_shadow( ray: Ray
                      , hit: Hit
@@ -79,7 +80,8 @@ fn @make_path_tracing_renderer(max_path_len: i32, spp: i32)-> Renderer {
             }
 
             let rnd = &mut state.rnd;
-            // Note: randi() returns random integers, but we only want positive integers here
+            // Note: randi() returns random integers, but we only want positive integers here 
+            // For a scene chunk may access to invaild light
             let light_id = (randi(rnd) & 0x7FFFFFFF) % scene.num_lights;
             let light = @@(scene.lights)(light_id);
             let light_sample = @@(light.sample_direct)(rnd, surf.point);

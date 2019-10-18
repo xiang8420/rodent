@@ -14,7 +14,7 @@
 #include "interface.h"
 #include "obj.h"
 #include "buffer.h"
-#include "schduler.h"
+#include "distribution.h"
 #ifdef WIN32
 #include <direct.h>
 #define create_directory(d) _mkdir(d)
@@ -405,9 +405,11 @@ static std::vector<uint8_t> pad_buffer(const std::vector<T>& elems, bool enable,
 template <typename Array>
 static void write_buffer_hetero(std::string path, std::string file_name, const Array& array, unsigned short padding_flag) {
     if(padding_flag & 1){
+        create_directory((path + "cpu/").c_str());
         write_buffer(path + "cpu/" + file_name, pad_buffer(array, false, sizeof(float) * 4));
     }
     if(padding_flag & 2){
+        create_directory((path + "gpu/").c_str());
         write_buffer(path + "gpu/" + file_name, pad_buffer(array, true, sizeof(float) * 4));
     }
 }
@@ -696,6 +698,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     MeshChunk chunk = MeshChunk(obj_file);
     // Setup triangle mesh
     info("Generating triangle mesh for '", file_name, "'");
+    const BBox &bbox = chunk.bbox; 
     os << "\n        // Triangle mesh\n"
        << "        let vertices     = device.load_buffer(file.vertices);\n"
        << "        let normals      = device.load_buffer(file.normals);\n"
@@ -708,10 +711,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "            face_normals: @ |i| face_normals.load_vec3(i),\n"
        << "            triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
        << "            attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
+       << "            bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
+                                                             << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
+       << "            scale:          make_vec3("<< chunk.step.x <<"f, "<<chunk.step.y << "f, "<< chunk.step.z <<"f)\n"     
        << "            num_attrs:    1,\n"
-       << "            global_bbox:  make_bbox(make_vec3(" << chunk.bbox.min[0] << " as f32, "<< chunk.bbox.min[1] << " as f32, "<< chunk.bbox.min[2] << " as f32), make_vec3("
-       <<                                                     chunk.bbox.max[0] << " as f32, "<< chunk.bbox.max[1] << " as f32, "<< chunk.bbox.max[2] << " as f32)),\n"
-       << "            scale:        make_vec3i("<< chunk.scale[0]<<", "<<chunk.scale[1] << ", "<<chunk.scale[2] <<"),\n"     
        << "            num_tris:     27\n"  //fake num tris
  //      << "            num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
        << "        };\n"
@@ -733,7 +736,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     for(int c = 0, n = chunk.size(); c < n; c++){
         auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c));
         // if chunk is empty ??
-
+        printf("tri mesh num %d \n", tri_mesh.indices.size() / 4);
         std::string chunk_path = c > 9 ? "data/0" : "data/00";
         chunk_path = chunk_path + std::to_string(c) + "/";
         
@@ -777,7 +780,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
                 printf("nvvm\n");
                 if(!(bvh_export&1)){
-                    create_directory((chunk_path + "gpu/").c_str());
                     create_directory((data_path + "gpu/").c_str());
                     std::remove((chunk_path + "bvh_nvvm.bin").c_str());
                     std::vector<typename BvhNTriM<2, 1>::Node> nodes;
@@ -790,7 +792,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
                 printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
                 if(!(bvh_export&2)){
-                    create_directory((chunk_path + "cpu/").c_str());
                     create_directory((data_path + "cpu/").c_str());
                     std::remove((chunk_path + "bvh_sse_.bin").c_str());
                     std::vector<typename BvhNTriM<4, 4>::Node> nodes;
@@ -806,7 +807,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             } else {
                 printf("avx \n");
                 if(!(bvh_export&4)){
-                    create_directory((chunk_path + "cpu/").c_str());
                     create_directory((data_path + "cpu/").c_str());
                     std::remove((chunk_path + "bvh_avx_.bin").c_str());
                     std::vector<typename BvhNTriM<8, 4>::Node> nodes;
@@ -1036,7 +1036,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
            << "            make_material(make_mix_bsdf(diffuse, specular, lum_ks / (lum_ks + lum_kd)))\n"
            << "        })\n";
     os << "        };\n";
-
+    
     // Scene
     os << "\n       // Scene\n"
        << "        Scene {\n"

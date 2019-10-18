@@ -14,7 +14,7 @@
 #include "obj.h"
 #include "image.h"
 #include "buffer.h"
-
+#include "scheduler.h"
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -171,7 +171,7 @@ struct EmbreeDevice {
     }
 
     template <int N>
-    void store_hit(const RTCRayHitNt<N>& ray_hit, PrimaryStream& primary, size_t i, int32_t invalid_id) {
+    void save_hit(const RTCRayHitNt<N>& ray_hit, PrimaryStream& primary, size_t i, int32_t invalid_id) {
         size_t n = std::min(primary.size, int32_t(i + N));
         for (size_t j = i, k = 0; j < n; ++j, ++k) {
             auto prim_id = ray_hit.hit.primID[k];
@@ -184,7 +184,7 @@ struct EmbreeDevice {
     }
 
     template <int N>
-    void store_hit(const RTCRayNt<N>& ray, SecondaryStream& secondary, size_t i) {
+    void save_hit(const RTCRayNt<N>& ray, SecondaryStream& secondary, size_t i) {
         size_t n = std::min(secondary.size, int32_t(i + N));
         for (size_t j = i, k = 0; j < n; ++j, ++k) {
             secondary.prim_id[j] = ray.tfar[k] < 0 ? 0 : -1;
@@ -199,7 +199,7 @@ struct EmbreeDevice {
         for (size_t i = 0; i < primary.size; i += N) {
             load_ray(ray_hit, primary.rays, i, primary.size);
             EmbreeIntersect<N>::intersect(valid, scene, ray_hit, coherent);
-            store_hit(ray_hit, primary, i, invalid_id);
+            save_hit(ray_hit, primary, i, invalid_id);
         }
     }
 
@@ -211,7 +211,7 @@ struct EmbreeDevice {
         for (size_t i = 0; i < secondary.size; i += N) {
             load_ray(ray, secondary.rays, i, secondary.size);
             EmbreeIntersect<N>::occluded(valid, scene, ray);
-            store_hit(ray, secondary, i);
+            save_hit(ray, secondary, i);
         }
     }
 };
@@ -243,6 +243,9 @@ struct Interface {
 
     anydsl::Array<float> host_pixels;
     anydsl::Array<float> tmp_pixels;
+    anydsl::Array<float> host_first_primary;
+    anydsl::Array<int32_t> host_primary_num;
+
     size_t film_width;
     size_t film_height;
 
@@ -251,8 +254,10 @@ struct Interface {
         , film_height(height)
         , host_pixels(width * height * 3)
         , tmp_pixels(width * height * 3)
-
-    {}
+    {
+        host_first_primary = anydsl::Array<float>(1024 * 1024 * 20);
+        host_primary_num   = anydsl::Array<int32_t>(128);
+    }
 
     template <typename T>
     anydsl::Array<T>& resize_array(int32_t dev, anydsl::Array<T>& array, size_t size, size_t multiplier) {
@@ -365,7 +370,18 @@ struct Interface {
         info("Loaded buffer '", filename, "'");
         return buffers[filename] = std::move(copy_to_device(dev, vector));
     }
-
+    anydsl::Array<float>& load_gpu_primary_stream(int dev, int32_t size, const std::string& filename) {
+        auto& primary = devices[dev].first_primary; 
+        //    gpu_first_primary_stream(dev, size); 
+        std::ifstream is(filename, std::ios::binary);
+        if (!is)
+           error("Cannot open primary buffer");
+        read_buffer(is, host_first_primary);
+        info("loaded buffer primary buffer '", filename, "'"); 
+        anydsl::copy(host_first_primary, primary);
+        return primary;
+    }
+    
     const DeviceImage& load_png(int32_t dev, const std::string& filename) {
         auto& images = devices[dev].images;
         auto it = images.find(filename);
@@ -391,11 +407,28 @@ struct Interface {
     }
 
     void present(int32_t dev) {
-        anydsl::copy(devices[dev].film_pixels, tmp_pixels);
+        anydsl::copy(devices[dev].film_pixels, host_pixels);
         int size = film_width * film_height * 3;
         for (int i = 0; i < size; i++){
             host_pixels[i] += tmp_pixels[i];
         }
+    }
+    int save_first_primary(int32_t dev) {
+        anydsl::copy(devices[dev].first_primary, host_first_primary);
+        return devices[dev].first_primary.size();
+    }
+    int save_second_primary(int32_t dev) {
+        anydsl::copy(devices[dev].second_primary, host_first_primary);
+        return devices[dev].second_primary.size();
+    }
+    void load_first_primary(int32_t dev) {
+        anydsl::copy(host_first_primary, devices[dev].first_primary);
+    }
+    void load_second_primary(int32_t dev) {
+        anydsl::copy(host_first_primary, devices[dev].second_primary);
+    }
+    void save_first_primary_num(int32_t dev) {
+        anydsl::copy(devices[dev].tmp_buffer, host_primary_num);
     }
     void clear() {
         std::fill(host_pixels.begin(), host_pixels.end(), 0.0f);
@@ -423,13 +456,16 @@ void cleanup_interface() {
 float* get_pixels() {
     return interface->host_pixels.data();
 }
+float* get_first_primary() {
+    return interface->host_first_primary.data();    
+}
 
 void clear_pixels() {
     return interface->clear();
 }
 
 inline void get_ray_stream(RayStream& rays, float* ptr, size_t capacity) {
-    rays.id = (int*)ptr + 0 * capacity;
+    rays.id    = (int*)ptr;
     rays.org_x = ptr + 1 * capacity;
     rays.org_y = ptr + 2 * capacity;
     rays.org_z = ptr + 3 * capacity;
@@ -464,6 +500,31 @@ inline void get_secondary_stream(SecondaryStream& secondary, float* ptr, size_t 
     secondary.color_b = ptr + 12 * capacity;
     secondary.size = 0;
 }
+inline void copy_primary_ray(PrimaryStream a, PrimaryStream b, int src_id, int dst_id, bool keep_hit) {
+   b.rays.id[dst_id]    = a.rays.id[src_id];
+   b.rays.org_x[dst_id] = a.rays.org_x[src_id];
+   b.rays.org_y[dst_id] = a.rays.org_y[src_id];
+   b.rays.org_z[dst_id] = a.rays.org_z[src_id];
+   b.rays.dir_x[dst_id] = a.rays.dir_x[src_id];
+   b.rays.dir_y[dst_id] = a.rays.dir_y[src_id];
+   b.rays.dir_z[dst_id] = a.rays.dir_z[src_id];
+   b.rays.tmin[dst_id]  = a.rays.tmin[src_id];
+   b.rays.tmax[dst_id]  = a.rays.tmax[src_id];
+   if (keep_hit) {
+       b.geom_id[dst_id] = a.geom_id[src_id];
+       b.prim_id[dst_id] = a.prim_id[src_id];
+       b.t[dst_id]       = a.t[src_id];
+       b.u[dst_id]       = a.u[src_id];
+       b.v[dst_id]       = a.v[src_id];
+   }
+   b.rnd[dst_id]        = a.rnd[src_id];
+   b.mis[dst_id]        = a.mis[src_id];
+   b.contrib_r[dst_id]  = a.contrib_r[src_id];
+   b.contrib_g[dst_id]  = a.contrib_g[src_id];
+   b.contrib_b[dst_id]  = a.contrib_b[src_id];
+   b.depth[dst_id]      = a.depth[src_id];
+
+}
 
 extern "C" {
 
@@ -483,7 +544,6 @@ void rodent_get_film_data(int32_t dev, float** pixels, int32_t* width, int32_t* 
     *width  = interface->film_width;
     *height = interface->film_height;
 }
-
 void rodent_load_png(int32_t dev, const char* file, uint8_t** pixels, int32_t* width, int32_t* height) {
     auto& img = interface->load_png(dev, file);
     *pixels = const_cast<uint8_t*>(std::get<0>(img).data());
@@ -559,6 +619,36 @@ void rodent_cpu_intersect_secondary_embree(SecondaryStream* secondary) {
     interface->embree_device.intersect<8>(*secondary);
 }
 #endif
+ 
+void rodent_first_primary_check(int32_t dev, int primary_size, int32_t file_num, bool is_first_primary) {
+    int capacity = is_first_primary? interface->save_first_primary(dev) / 20 : interface->save_second_primary(dev) / 20;
+    
+    auto&  array = interface->host_first_primary;
+    PrimaryStream primary;
+    get_primary_stream(primary, array.data(), capacity);
+    for(int i = 0; i < 3; i++){
+        printf("id %d chunk %d ray org %f %f %f dir %f %f %f\n", 
+                    primary.rays.id[i+0], primary.prim_id[i+0], 
+                    primary.rays.org_x[i], primary.rays.org_y[i], primary.rays.org_z[i],
+                    primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i]);
+    }
+    
+}
+int rodent_first_primary_save(int32_t dev, int primary_size, int32_t file_num, bool is_first_primary) {
+    int capacity = is_first_primary? interface->save_first_primary(dev) / 20 : interface->save_second_primary(dev) / 20;
+    auto&  array = interface->host_first_primary;
+    PrimaryStream primary;
+    get_primary_stream(primary, array.data(), capacity);
+    int size_new = rays_transfer(array.data(), primary_size, capacity);
+    is_first_primary ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
+    return size_new;
+}
+
+void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t size) {
+    auto& array = interface->load_gpu_primary_stream(dev, size, "data/primary.bin");
+    size = array.size()/20;
+    get_primary_stream(*primary, array.data(), size);
+}
 
 void rodent_present(int32_t dev) {
     interface->present(dev);

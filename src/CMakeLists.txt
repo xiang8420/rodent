@@ -63,8 +63,9 @@ set(DRIVER_SRCS
     driver/common.h
     driver/color.h
     driver/mpi.cpp
-    driver/schduler.h
     driver/buffer.h
+    driver/distribution.h
+    driver/scheduler.h
     )
 
 set(CONVERTER_SRCS
@@ -74,7 +75,7 @@ set(CONVERTER_SRCS
     driver/file_path.h
     driver/interface.h
     driver/bvh.h
-    driver/schduler.h
+    driver/distribution.h
     )
 
 

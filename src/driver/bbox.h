@@ -70,16 +70,6 @@ struct BBox {
         return (tmin >= 0 && tmin <= 1) || (tmax >= 0 && tmax <= 1);
     }
 
-    bool inside_tri(const float3& v0, const float3& v1, const float3& v2) {
-        float3 tri_max = max3(v0, v1, v2);
-        float3 tri_min = min3(v0, v1, v2); 
-        for(int i = 0; i < 3; i++){
-            if(tri_max[i] > max[i] && tri_min[i] < min[i])
-                return true;
-        }
-        return false;
-    }
-
     bool is_overlapping(const BBox& bb) const {
         return min.x <= bb.max.x && max.x >= bb.min.x &&
                min.y <= bb.max.y && max.y >= bb.min.y &&

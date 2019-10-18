@@ -1,3 +1,12 @@
+// camera grid tree
+struct CameraGridTree{
+    // (min: 0~1  max: 2~3 weight : 4 right child:5) * 255
+    content: [f32 * 1530],
+    N: i32,
+    size: i32,
+    treeadjust: fn(i32, i32, &mut[f32]) -> (),
+    getgrid: fn(i32) -> Vec4
+}
 // Opaque camera objecg
 struct Camera {
     // Generates a ray for a point on the image plane (in [-1, 1]^2)
@@ -25,6 +34,127 @@ fn @make_camera_geometry(cos_dir: f32, dist: f32, area: f32) -> CameraGeometry {
         cos_dir: cos_dir,
         dist: dist,
         area: area
+    }
+}
+fn @make_camera_gridtree(width: f32, height: f32, proc_time: &mut[f32]) -> CameraGridTree{
+    let mut content: [f32 * 1530];
+    let N = 6;   //element num
+    // initall parent = 0, cur = 1
+    let mut num = 1;
+    fn @build(cur: i32, w:f32, iter: i32, axis: i32) -> f32 {
+        // leaf node 
+        if iter == 0 { 
+            content(cur * N + 5) = -1.0f; 
+            cur as f32 
+        } else {
+            let cur_w = w * 0.5f;
+            let midvalue = (content(cur * N + axis) + content(cur * N + 2 + axis)) * 0.5f;
+            let child1 = num++;
+            for i in range(0, 4){
+                content(child1 * N + i) = content(cur * N + i)
+            }
+            content(child1 * N + 2 + axis) = midvalue;
+            content(child1 * N + 4) = cur_w;    
+            build(child1, cur_w, iter - 1, 1 - axis);
+           
+            let child2 = num++; 
+            for i in range(0, 4){
+                content(child2 * N + i) = content(cur * N + i);
+            }
+            content(child2 * N + axis) = midvalue;
+            content(child2 * N + 4) = cur_w;
+            content(cur * N + 5) = build(child2, cur_w, iter - 1, 1 - axis);
+            cur as f32       
+        }
+    }
+    content(0) = 0.0f; content(1) = 0.0f;
+    content(2) = width; content(3) = height;
+    content(4) = 1.0f;  
+    build(0, 1.0f, 3, 0);
+    for i in range(0, num){
+        for j in range(0, N){
+            print_f32(content(i*N + j));
+            print_string(" ");
+        }
+        print_string("\n");
+    } 
+    CameraGridTree {
+        content: content,
+        N: N,
+        size: num,
+        getgrid:  @ |proc_id|{
+            let mut leaf = 0;
+            for i in range(0, num){
+                let base = i * N;
+                if content(base + 5) == -1.0f{
+                    if leaf == proc_id{
+                       return (make_vec4(content(base), content(base + 1), 
+                                    content(base + 2), content(base + 3)))
+                    } 
+                    leaf++;
+                }
+     
+            }
+            make_vec4(0.0f, 0.0f, 0.0f, 0.0f)
+        },
+        treeadjust: @ |proc_id, proc_num, proc_time|{
+            let mut total = 0.0f;
+            for i in range(0, proc_num){
+                total += proc_time(i);
+            }
+            let mut leaf = 0;
+            //update weight
+            fn adjust(cur: i32, axis: i32, iter: i32) -> (f32) {
+               let base = N * cur;
+//               if content(base + 5) == -1.0 {}   //????compile more time
+               if iter == 0 {
+                   content(base + 4) = proc_time(leaf++) / total;
+               } else {
+                print_f32(content(base));
+                print_string(" ");
+                print_f32(content(base + 1));
+                print_string(" ");
+                print_f32(content(base + 2));
+                print_string(" ");
+                print_f32(content(base + 3));
+                print_string("\n");
+                    // child base
+                    let c1_b = N * (cur + 1);
+                    let c2_b = N * (content(base + 5) as i32);             
+                    
+                    //privious range weight     
+                    let w1 = adjust(c1_b, 1 - axis, iter - 1);
+                    let w2 = adjust(c2_b, 1 - axis, iter - 1);
+  
+                    // time weight
+                    let t1 = proc_time(leaf++) / total;
+                    let t2 = proc_time(leaf++) / total;
+                    
+                    ///new range weight
+                    let w1_n = w1 + (t2 - t1) / t2 * w2;
+                    let w2_n = w1 + w2 - w1_n;
+
+                    content(c1_b + 4) = w1_n;
+                    content(c2_b + 4) = w2_n;
+                    
+                    //adjust child 1 length  
+                    let l1 = content(c1_b + 2 + axis) - content(c1_b + axis);
+                    //new length
+                    let l1_n = w1_n / w1 * l1;
+                    print_i32(cur);
+                    print_string(" child ");
+                    print_f32(content(base + 5));
+                    print_string("w ");
+                    print_f32(l1) ;
+                    print_string(" \n");
+                    content(c1_b + 2 + axis) = content(c1_b + axis) + l1_n;
+                    content(c2_b + axis) = content(c1_b + 2 + axis);
+
+                }
+                return (content(base + 4))
+            } 
+            adjust(0, 0, 3);
+        }
     }
 }
 // Creates a perspective camera

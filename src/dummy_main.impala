@@ -13,4 +13,6 @@ struct Settings {
 
 extern fn get_spp() -> i32 { 1 }
 extern fn get_dev_num() -> i32 { 1 }
+extern fn get_chunk_num() -> i32 { 1 }
 extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32) -> () {}
+extern fn preprocess(settings: &Settings, iter: i32) -> () {}

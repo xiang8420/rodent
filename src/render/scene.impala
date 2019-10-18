@@ -6,7 +6,10 @@ struct Scene {
     geometries: fn (i32) -> Geometry,
     lights:     fn (i32) -> Light,
     camera:     Camera,
-    bvh:        Bvh    
+    bvh:        Bvh,    
+    bbox:       BBox,
+    scale:      Vec3,
+    mpi_id:     i32
 }
 
 // Rendering device

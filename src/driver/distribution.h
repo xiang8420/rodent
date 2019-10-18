@@ -1,6 +1,10 @@
 #include <vector>
+#include <memory>
+
 #include "bbox.h"
 #include "obj.h"
+
+
 //Splitting bounding box for distributed computing
 struct int6 {
     union{
@@ -23,8 +27,8 @@ struct MeshChunk{
     std::vector<BBox>      list;
     std::vector<int6>      neighbors;  // 6 * chunk number
     BBox                   bbox;
-    int                    scale[3];
-    
+    float3                 scale;
+    float3                 step; 
     size_t size(){
         return list.size();
     }
@@ -38,7 +42,7 @@ struct MeshChunk{
         printf("min %f %f %f max %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
         
         // shortest axis and cut it
-        float lenth[] = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
+        float3 lenth = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
         int axis = 0;
         float minlenth = lenth[0];
         for(int i = 1; i< 3; i++){
@@ -48,31 +52,28 @@ struct MeshChunk{
            }
         }
         ///scale num per axis set shortest axis 2, so 8 bvh at least
-        scale[0] = 1;
+        scale[0] = 2;
         scale[1] = 1;
         scale[2] = 1;
-
-        axis = 0;
-        scale[axis] = 2;
-        float step = lenth[axis] / 2;
-        //    for(int i = 0; i < 3; i++){
-        //        scale[i] = lenth[i] / step;
-        //        printf("scale i %d", scale[i]);
-        //    }
-        printf("\n");
+//        float step = lenth[axis] / 2;
+//            for(int i = 0; i < 3; i++){
+//                scale[i] = lenth[i] / step;
+//            }
+        step = lenth / scale;
+        printf("scale i %d %d %d\n", step[0], step[1], step[2]);
         for(int i = 0; i < scale[0]; i++){
-            float x = bbox.min.x + i * step;
+            float x = bbox.min.x + i * step.x;
             for(int j = 0; j < scale[1]; j++){
-                float y = bbox.min.y + j * step;
+                float y = bbox.min.y + j * step.y;
                 for(int k = 0; k < scale[2]; k++){
-                    float z = bbox.min.z + k * step;
+                    float z = bbox.min.z + k * step.z;
                     struct BBox bb;
-                    bb.min.x = x;
-                    bb.min.y = y;
-                    bb.min.z = z;
-                    bb.max.x = (i == scale[0] - 1)? bbox.max.x:x + step;
-                    bb.max.y = (j == scale[1] - 1)? bbox.max.y:y + step;
-                    bb.max.z = (k == scale[2] - 1)? bbox.max.z:z + step;
+                    bb.min.x = x - 0.00001f;
+                    bb.min.y = y - 0.00001f;
+                    bb.min.z = z - 0.00001f;
+                    bb.max.x = ((i == scale[0] - 1)? bbox.max.x:x + step.x) + 0.0001f;
+                    bb.max.y = ((j == scale[1] - 1)? bbox.max.y:y + step.y) + 0.0001f;
+                    bb.max.z = ((k == scale[2] - 1)? bbox.max.z:z + step.z) + 0.0001f;
                     printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
                     list.push_back(bb);  //emplace_back
                 }
@@ -144,7 +145,7 @@ struct ImageTile {
         }
         return node.t;
     }
-    void getgrid(int proc_id, int proc_num, float* proc_time, float range[4]){
+    void get_tile(int proc_id, int proc_num, float* proc_time, float range[4]){
         float search[] = {0, float(proc_num)}; 
         range[0] = 0; range[1] = 0;
         range[2] = width; range[3] = height;
@@ -172,12 +173,5 @@ struct ImageTile {
     }
 };
 
-struct Schduler {
-    ImageTile   imagetile; 
-    MeshChunk   meshchunk;
-    
-    Schduler(float width, float height, int proc_num) {
-        imagetile = ImageTile(width, height, proc_num);
-    
-    }
-};
+
+

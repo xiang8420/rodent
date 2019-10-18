@@ -162,3 +162,4 @@ fn @swap_u32(a: &mut u32, b: &mut u32) -> () {
     *a = *b;
     *b = tmp;
 }
+

@@ -435,7 +435,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
                 
                 const float3& p0 = obj_file.vertices[face.indices[0].v];
                 const float3& p1 = obj_file.vertices[face.indices[1].v];
-                bool in_chunk = bbox.line_intersect(p0, p1);
+                bool in_chunk = bbox.line_intersect(p0, p1) || bbox.is_inside(p0) || bbox.is_inside(p1);
 
                 auto v0 = mapping[face.indices[0]];
                 auto prev = mapping[face.indices[1]];
@@ -443,6 +443,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
                     auto next = mapping[face.indices[i + 1]];
                     const float3& pi = obj_file.vertices[face.indices[i + 1].v];
                     if(in_chunk
+                        || bbox.is_inside(pi)
                         || bbox.line_intersect(p0, pi) 
                         || bbox.line_intersect(p1, pi)){
                         triangles.emplace_back(v0, prev, next, face.material + mtl_offset);

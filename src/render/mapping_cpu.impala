@@ -342,13 +342,12 @@ fn @cpu_get_film_data() -> (&mut [f32], i32, i32) {
     rodent_get_film_data(0, &mut film_pixels, &mut film_width, &mut film_height);
     (film_pixels, film_width, film_height)
 }
-
 fn @cpu_trace( scene: Scene
              , path_tracer: PathTracer
              , min_max: MinMax
              , single: bool
              , tile_size: i32
-             , spp: i32
+             , Spp: i32
              , num_cores: i32
              , vector_width: i32
              , use_embree: bool
@@ -356,10 +355,8 @@ fn @cpu_trace( scene: Scene
              ) -> () {
     let (film_pixels, film_width, film_height) = cpu_get_film_data();
    
-    print_i32(film_width);
-    print_i32(film_height); 
     fn @accumulate(pixel: i32, color: Color) -> () {
-        let inv = 1.0f / (spp as f32);
+        let inv = 1.0f / (Spp as f32);
         film_pixels(pixel * 3 + 0) += color.r * inv;
         film_pixels(pixel * 3 + 1) += color.g * inv;
         film_pixels(pixel * 3 + 2) += color.b * inv;

@@ -12,10 +12,10 @@ struct Node {
 }
 
 struct Prim {
-    intersect: fn (i32, Intrinsics, Ray, fn () -> !) -> Hit,  // Intersects a primitive in the packet
-    is_valid:  fn (i32) -> bool,                              // Returns true if the primitive in the packet is valid
-    is_last:   bool,                                          // True if this is the last primitive packet in the leaf
-    size:      i32                                            // Number of primitives in the packet (must be a constant)
+    intersect: fn (i32, Intrinsics, bool, Ray) -> (bool, Hit),  // Intersects a primitive in the packet
+    is_valid:  fn (i32) -> bool,                                // Returns true if the primitive in the packet is valid
+    is_last:   bool,                                            // True if this is the last primitive packet in the leaf
+    size:      i32                                              // Number of primitives in the packet (must be a constant)
 }
 
 struct Ray {
@@ -161,14 +161,16 @@ fn @bbox_half_area(a: BBox) -> f32 {
     ext.x * (ext.y + ext.z) + ext.y * ext.z
 }
 
-fn @intersect_ray_tri(math: Intrinsics, backface_culling: bool, ray: Ray, tri: Tri, no_hit: fn () -> !) -> (f32, f32, f32) {
+fn @intersect_ray_tri(math: Intrinsics, backface_culling: bool, mut mask: bool, ray: Ray, tri: Tri) -> (bool, f32, f32, f32) {
+    let no_hit = @ || -> ! return(false, undef[f32](), undef[f32](), undef[f32]());
+
     let c = vec3_sub(tri.v0, ray.org);
     let r = vec3_cross(ray.dir, c);
     let det = vec3_dot(tri.n, ray.dir);
     let abs_det = math.fabsf(det);
 
     let u = prodsign(vec3_dot(r, tri.e2), det);
-    let mut mask = u >= 0.0f;
+    mask &= u >= 0.0f;
 
     let v = prodsign(vec3_dot(r, tri.e1), det);
     mask &= v >= 0.0f;
@@ -183,12 +185,8 @@ fn @intersect_ray_tri(math: Intrinsics, backface_culling: bool, ray: Ray, tri: T
 
     if likely(rv_all(!mask)) { no_hit() }
 
-    if mask {
-        let inv_det = 1.0f / abs_det;
-        (t * inv_det, u * inv_det, v * inv_det)
-    } else {
-        no_hit()
-    }
+    let inv_det = 1.0f / abs_det;
+    (mask, t * inv_det, u * inv_det, v * inv_det)
 }
 
 fn @intersect_ray_box(min_max: MinMax, ordered: bool, ray: Ray, bbox: BBox) -> (f32, f32) {
@@ -203,6 +201,86 @@ fn @intersect_ray_box(min_max: MinMax, ordered: bool, ray: Ray, bbox: BBox) -> (
             (min_max.fmaxmaxf(min_max.fminf(t0.x, t1.x), min_max.fminf(t0.y, t1.y), min_max.fminmaxf(t0.z, t1.z, ray.tmin)),
              min_max.fminminf(min_max.fmaxf(t0.x, t1.x), min_max.fmaxf(t0.y, t1.y), min_max.fmaxminf(t0.z, t1.z, ray.tmax)))
         };
-
     (tentry, texit)
 }
+
+fn @inside_point_bbox(bbox: BBox, p: Vec3) -> bool {
+   ( p.x >= bbox.min.x && p.x <= bbox.max.x  
+  && p.y >= bbox.min.y && p.y <= bbox.max.y 
+  && p.z >= bbox.min.z && p.z <= bbox.max.z) 
+}
+
+fn @coordinate_compress(v: Vec3, scale: Vec3i) -> i32 {
+    if  v.x < 0.0f || v.x >= scale.x as f32 
+     || v.y < 0.0f || v.y >= scale.y as f32
+     || v.z < 0.0f || v.z >= scale.z as f32 {
+//        let v0 = make_vec3i(v.x as i32, v.y as i32, v.z as i32);
+//        let id = ((v0.x * scale.y + v0.y) * scale.z) + v0.z;
+       return( -1000 )
+    } else {
+        let v0 = make_vec3i(v.x as i32, v.y as i32, v.z as i32);
+        let id = ((v0.x * scale.y + v0.y) * scale.z) + v0.z;
+        return(id * 1000 + v0.x * 100 + v0.y * 10 + v0.z)
+    }
+}
+
+fn @coordinate_decompress(n: i32) -> (i32, Vec3i) {
+    let id   = n / 1000;
+    let n100 = n % 1000;
+    let z    = n100 % 10;
+    let coordinate = make_vec3i(n100 / 100, n100 % 100 / 10 , z);
+    (id, coordinate)
+}
+
+fn @get_closest_chunk(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3) -> i32 {
+    let mut bound: Vec3;
+    let mut step_dir = make_vec3(1.0f, 1.0f, 1.0f);
+    let id_f = make_vec3(id.x as f32, id.y as f32, id.z as f32);
+    if ray.dir.x > 0.0f {
+        bound.x = (id_f.x + 1.0f) * step.x + bbox.min.x;
+    } else {
+        bound.x = id_f.x * step.x + bbox.min.x;
+        step_dir.x = -1.0f;
+    }
+    if ray.dir.y > 0.0f {
+        bound.y = (id_f.y + 1.0f) * step.y + bbox.min.y;
+    } else {
+        bound.y = id_f.y * step.y + bbox.min.y;
+        step_dir.y = -1.0f;
+    }
+    if ray.dir.z > 0.0f {
+        bound.z = (id_f.z + 1.0f) * step.z + bbox.min.z;
+    } else {
+        bound.z = id_f.z * step.z + bbox.min.z;
+        step_dir.z = -1.0f;
+    }
+
+    let its = vec3_add(vec3_mul(ray.inv_dir, bound), ray.inv_org); 
+    
+    let mut next_id = make_vec3(id_f.x, id_f.y, id_f.z);    
+    if its.x < its.z {
+        if its.x < its.y {
+            next_id.x = next_id.x + step_dir.x;
+        } else {
+            next_id.y = next_id.y + step_dir.y;
+        }
+    } else {
+        if its.z < its.y {
+            next_id.z = next_id.z + step_dir.z;
+        } else {
+            next_id.y = next_id.y + step_dir.y;
+        }
+    }
+    coordinate_compress(next_id, scale) 
+}
+
+
+
+
+
+
+
+
+
+
+
