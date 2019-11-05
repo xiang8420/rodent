@@ -33,34 +33,31 @@ struct MeshChunk{
         return list.size();
     }
     MeshChunk(){}
-    MeshChunk(obj::File& file) {
-        chunk_division(file.bbox);
+    MeshChunk(obj::File& file, float x, float y, float z) {
+        chunk_division(file.bbox, x, y, z);
     }
     
-    bool chunk_division(BBox bb){
+    bool chunk_division(BBox bb, float scale_x, float scale_y, float scale_z){
         bbox = bb;
         printf("min %f %f %f max %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
         
         // shortest axis and cut it
-        float3 lenth = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
+        float3 length = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
         int axis = 0;
-        float minlenth = lenth[0];
+        float minlength = length[0];
         for(int i = 1; i< 3; i++){
-           if(minlenth > lenth[i]){
-               minlenth = lenth[i];
+           if(minlength > length[i]){
+               minlength = length[i];
                axis = i;
            }
         }
-        ///scale num per axis set shortest axis 2, so 8 bvh at least
-        scale[0] = 2;
-        scale[1] = 1;
-        scale[2] = 1;
-//        float step = lenth[axis] / 2;
-//            for(int i = 0; i < 3; i++){
-//                scale[i] = lenth[i] / step;
-//            }
-        step = lenth / scale;
-        printf("scale i %d %d %d\n", step[0], step[1], step[2]);
+        scale[0] = scale_x;
+        scale[1] = scale_y;
+        scale[2] = scale_z;
+        for(int i = 0; i < 3; i++){
+            step[i] = length[i] / scale[i];
+        }
+
         for(int i = 0; i < scale[0]; i++){
             float x = bbox.min.x + i * step.x;
             for(int j = 0; j < scale[1]; j++){

@@ -17,7 +17,7 @@ extern "C" {
 
 // Misc. ---------------------------------------------------------------------------
 
-static cpu_profiling_enabled = false;
+static cpu_profiling_enabled = true;
 
 // Profiles the function given as argument
 fn @cpu_profile(counter: &mut i64, body: fn () -> ()) -> () {

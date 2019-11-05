@@ -49,6 +49,7 @@ struct Scheduler {
     //only mpi 0 can create
     int mpi_id, mpi_size, num_chunks, chunk_id;
     bool mpi = false;
+    int max_rays = 1024 * 1024;
     std::string lock_path;
     std::vector<float> rays[MAX_CHUNK_NUM];
     struct Ray_Queue first, second;
@@ -159,10 +160,12 @@ struct Scheduler {
                         break;
                     }
                 }
+                printf("recv over\n");
                 if(queue.num == 0) { queue.num = capacity; }
                 std::remove(path.c_str());
                 fclose(lock);
                 flock(lock->_fileno, LOCK_UN); 
+                printf("real recv over %d\n", queue.num);
                 return true;
             } 
         }    
@@ -170,7 +173,7 @@ struct Scheduler {
     }
     
     bool any_waiting() {
-        // add all_done file fast judge
+        // add all_waiting file fast judge
         // //return if other node is done
         for(int i = 0; i < mpi_size; i ++) {
             if(i != chunk_id) {
@@ -186,7 +189,7 @@ struct Scheduler {
     }    
     
     bool any_working() {
-        // add all_done file fast judge
+        // add all_working file fast judge
         //return if other node is done
         for(int i = 0; i < mpi_size; i ++) {
             if(i != chunk_id) {
@@ -210,9 +213,9 @@ struct Scheduler {
         int *rays_id = (int*)primary;
 
         printf("start ray cluster\n");
-
+        int tmp_size = 0;
         for(int i = 0; i < size; i++) {
-            int cid = rays_chunk_id[i] / 1000;
+            int cid = rays_chunk_id[i] >> 12;
             if(cid == chunk_id){ 
                 copy_rays(primary, primary, i, primary_size, 1, capacity);
                 primary_size++;
@@ -222,25 +225,22 @@ struct Scheduler {
                     if(num_rays[cid] == capacity){
                         send_rays(cid);
                     }
+                    tmp_size++;
                 }
             }
         }
 		if(first.empty()) {
-            printf("empty read\n");
 			recv_rays(first, capacity);
 		}
-		printf("0 %d primary size %d capacity %d  %d\n", chunk_id, primary_size, capacity, first.num);
 		while( primary_size < capacity && !first.empty()) {			
-			int sent_num = primary_size + first.num < capacity ? first.num : capacity - primary_size;
-            printf("primary size %d send num %d first num %d\n", primary_size, sent_num, first.num);
-            first.num -= sent_num;
-            copy_rays(&(*first.ray)[0], primary, first.num, primary_size, sent_num, capacity);
-            primary_size += sent_num;
+			int send_num = primary_size + first.num < capacity ? first.num : capacity - primary_size;
+            first.num -= send_num;
+            copy_rays(&(*first.ray)[0], primary, first.num, primary_size, send_num, capacity);
+            primary_size += send_num;
             if(first.empty()) { recv_rays(first, capacity); }
 		}
+        printf("2 fitst %d primary %d \n", first.num, primary_size);
         
-        printf("2 scheduler primary size %d first: %d\n", primary_size, first.num);
-        printf("%d end ray transfer\n", chunk_id);
         std::string syn_path = "data/rays/syn" + std::to_string(chunk_id);
         
 		printf("%d num_rays:", mpi_id);
@@ -250,24 +250,103 @@ struct Scheduler {
             else
                 printf("%d ", num_rays[i]);
         }
-        
         printf("\n");
-        if(any_waiting() || primary_size == 0) {
+
+
+        if(primary_size == 0) {
             for(int i = 0; i < num_chunks; i++){
                 if(num_rays[i] !=0 && i != chunk_id) {
                     int *id = (int*)&rays[i][0];
                     id[num_rays[i]] = -1;
-                    printf("\n\nprimary %d  %d %d\n\n", primary_size, i, num_rays[i]);
+//                    printf("\n\nprimary %d  %d %d\n\n", primary_size, i, num_rays[i]);
                     send_rays(i);
                 }
             }
-        }
-
-        if(primary_size == 0) {
             remove(syn_path.c_str());
             printf("%d is waiting\n", chunk_id);
             while(1){
                 usleep(300);
+                if(any_working()){   
+                    if(recv_rays(first, capacity))
+                        break;
+                } else {
+                    if(recv_rays(first, capacity))
+                        break;
+                    return 0;
+                }
+            }
+//            printf("%d first num %d\n", chunk_id, first.num);
+            copy_rays(&(*first.ray)[0], primary, 0, 0, first.num, capacity);
+            primary_size = first.num;
+            first.num = 0;
+            create(syn_path);
+        }
+		return primary_size;
+		
+    }
+
+    void file_buffer_send(float *primary, size_t size, size_t capacity, bool send_all) {
+        int *rays_id = (int*) primary;
+        float *rays_org_x = primary + 1 * capacity;
+        float *rays_org_y = primary + 2 * capacity;
+        float *rays_org_z = primary + 3 * capacity;
+
+        float *rays_dir_x = primary + 4 * capacity;
+        float *rays_dir_y = primary + 5 * capacity;
+        float *rays_dir_z = primary + 6 * capacity;
+
+        int *rays_chunk_id = (int*)primary + 10 * capacity;
+        int cpu_size = 0;
+        for(int i = 0; i < 4; i++) {
+            printf("%d %d %f %f %f %f %f %f\n", rays_id[i], rays_chunk_id[i] >> 12, rays_org_x[i], rays_org_y[i], rays_org_z[i],
+                                                          rays_dir_x[i], rays_dir_y[i], rays_dir_z[i]);
+        }
+
+        for(int i = 0; i < size; i++) {
+            if(rays_chunk_id > 0){ 
+                int cid = rays_chunk_id[i] >> 12;
+                copy_rays(primary, &rays[cid][0], i, num_rays[cid]++, 1, capacity);
+                if(num_rays[cid] == capacity) {
+                    send_rays(cid);
+                }
+            }
+            cpu_size++;
+        }
+//		printf("\n %d num_rays:", mpi_id);
+//        for(int i = 0; i < 4; i++) {
+//            printf("%d ", num_rays[i]);
+//        }
+//        printf("\n num %d cpu buffer size %d \n", num_rays[1], cpu_size);
+        if (send_all) {
+            for(int i = 0; i < num_chunks; i++){
+                if(num_rays[i] != 0 && i != chunk_id) {
+                    int *id = (int*)&rays[i][0];
+                    id[num_rays[i]] = -1;
+//                    printf("\n %d %d\n\n", i, num_rays[i]);
+                    send_rays(i);
+                }
+            }
+        }
+    }
+
+    int file_primary_recv(float *primary, size_t capacity) {
+	    int primary_size = 0;	
+        if(first.empty()) {
+			recv_rays(first, capacity);
+		}
+		while( primary_size < capacity && !first.empty()) {			
+			int send_num = primary_size + first.num < capacity ? first.num : capacity - primary_size;
+            first.num -= send_num;
+            copy_rays(&(*first.ray)[0], primary, first.num, primary_size, send_num, capacity);
+            primary_size += send_num;
+            if(first.empty()) { recv_rays(first, capacity); }
+		}
+        if(primary_size == 0) {
+            std::string syn_path = "data/rays/syn" + std::to_string(chunk_id);
+            remove(syn_path.c_str());
+            printf("%d is waiting\n", chunk_id);
+            while(1){
+//                usleep(300);
                 if(any_working()){   
                     if(recv_rays(first, capacity))
                         break;
@@ -284,11 +363,6 @@ struct Scheduler {
             create(syn_path);
         }
 		return primary_size;
-		
-    }
-    
-    int mpi_rays_transfer(float *primary, size_t size, size_t capacity) {
-        
     }
 };
 
@@ -308,10 +382,24 @@ void cleanup_scheduler() {
 
 int rays_transfer(float *primary, size_t size, size_t capacity){
     if(scheduler->mpi){
-        return scheduler->mpi_rays_transfer(primary, size, capacity);
+//        return scheduler->mpi_rays_transfer(primary, size, capacity);
     } else {
         return scheduler->file_rays_transfer(primary, size, capacity);
     }
 }
 
+void buffer_send(float *buffer, size_t size, size_t capacity, bool send_all) {
+    if(scheduler->mpi){
+//        scheduler->mpi_buffer_send(buffer, size, capacity, send_all);
+    } else {
+        scheduler->file_buffer_send(buffer, size, capacity, send_all);
+    }
+}
 
+int primary_recv(float *primary, size_t capacity) {
+    if(scheduler->mpi){
+//       return scheduler->mpi_rays_transfer(primary, size, capacity);
+    } else {
+        return scheduler->file_primary_recv(primary, capacity);
+    }
+}

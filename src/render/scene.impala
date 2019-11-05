@@ -9,7 +9,7 @@ struct Scene {
     bvh:        Bvh,    
     bbox:       BBox,
     scale:      Vec3,
-    mpi_id:     i32
+    chunk:      i32
 }
 
 // Rendering device

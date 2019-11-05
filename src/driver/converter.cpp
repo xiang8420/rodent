@@ -695,7 +695,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "            mpi_size\n"
        << "        );\n";
 
-    MeshChunk chunk = MeshChunk(obj_file);
+    MeshChunk chunk = MeshChunk(obj_file, 2, 1, 1);
     // Setup triangle mesh
     info("Generating triangle mesh for '", file_name, "'");
     const BBox &bbox = chunk.bbox; 

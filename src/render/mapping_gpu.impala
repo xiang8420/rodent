@@ -221,19 +221,6 @@ fn @gpu_sort_primary( primary: PrimaryStream
     acc.sync();
 }
 
-//fn @gpu_cluster( primary: PrimaryStream
-//                    , other_primary: PrimaryStream
-//                    , dev_id: i32
-//                    , acc: Accelerator
-//                    , intrinsics: Intrinsics
-//                    , atomics: Atomics
-//                    , num_geometries: i32
-//                    , gpu_tmp:  &mut [i32]
-//                    , ray_ends: &mut [i32]
-//                    ) -> () {
-//    
-//}
-
 fn @gpu_generate_rays( primary: PrimaryStream
                      , capacity: i32
                      , acc: Accelerator
@@ -314,10 +301,94 @@ fn @gpu_compact_primary( primary: PrimaryStream
     size
 }
 
+fn @gpu_primary_transfer( primary: PrimaryStream
+                        , other_primary: PrimaryStream
+                        , buffer: PrimaryStream
+                        , chunk: i32
+                        , capacity: i32
+                        , acc: Accelerator
+                        , intrinsics: Intrinsics
+                        , atomics: Atomics
+                        , dev_id: i32
+                        , gpu_tmp:  &mut [i32]
+                        , is_first: bool
+                        ) -> (i32, i32) {
+    let block_w  = 64;
+    let prim_ids = primary.prim_id;
+    let mut size : [i32 * 2]; 
+    // primary size, buffer size, new buffer size
+    
+    size(0) = 0;
+    size(1) = buffer.size;
+    runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+    with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
+        let src_id = work_item.gidx();
+        if src_id >= primary.size {
+            break()
+        }
+        let id = get_chunk_id(prim_ids(src_id));
+        if  id != chunk && id != -1 {
+            atomics.add_global_i32(&mut gpu_tmp(0), 1);
+        }
+    }
+    acc.sync();
+    runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+     
+    // if buffer full 
+    print_string("new buffer :");
+    print_i32(size(0)); 
+    if size(0) + buffer.size >= capacity {
+        print_string("send buffer size: ");
+        print_i32(buffer.size);
+        rodent_buffer_primary_send(dev_id, buffer.size, false);
+        size(1) = 0;
+    }
+    size(0) = 0;
+    if primary.size > 0 {
+        runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+        with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
+            let src_id = work_item.gidx();
+            if src_id >= primary.size {
+                break()
+            }
+            let id = get_chunk_id(prim_ids(src_id));
+            if id == chunk {
+                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(0), 1);
+                copy_primary_ray(primary, other_primary, src_id, dst_id, true);
+            } else if id != chunk && id != -1 {
+                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(1), 1);
+                copy_primary_ray(primary, buffer, src_id, dst_id, true);
+            }
+        }
+        acc.sync();
+        runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+    }
+    if size(0) == 0 {
+        rodent_buffer_primary_send(dev_id, buffer.size, true);
+        size(0) = rodent_primary_recv(dev_id, !is_first); 
+        size(1) = 0; 
+    }    
+
+    print_string("final buffer size: ");
+    print_i32(size(1)); 
+    print_string(" primary size: ");
+    print_i32(size(0)); 
+    print_string("\n ");
+    
+    (size(0), size(1))
+}
+
 fn @gpu_swap_streams(a: &mut PrimaryStream, b: &mut PrimaryStream) -> () {
     let tmp = *a;
     *a = *b;
     *b = tmp;
+}
+
+fn @gpu_swap_primary(a: &mut PrimaryStream, b: &mut PrimaryStream, c: &mut bool) -> () {
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+    *c = !(*c);
 }
 
 fn @gpu_get_chunk_id( primary: PrimaryStream
@@ -340,12 +411,6 @@ fn @gpu_get_chunk_id( primary: PrimaryStream
     // Compact primary rays into another queue
     
     let ray_ids     = primary.rays.id;
-    let mpi_id = scene.mpi_id;
-//    print_string("mpiid :");
-//    print_i32(mpi_id);
-//    print_string("primary size ");
-//    print_i32(primary.size);
-//    print_string("\n");
     if primary.size == 0 {return()}
     with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
         let src_id = work_item.gidx();
@@ -369,7 +434,7 @@ fn @gpu_get_chunk_id( primary: PrimaryStream
                 }
             }
         } else {
-            let (id, coord) = coordinate_decompress(prim_ids(src_id));
+            let coord = get_coordinate(prim_ids(src_id));
             let compressed_chunk_id = get_closest_chunk(min_max, ray, bbox, coord, scale, step, inv_step);
             write_chunk(src_id, 0, compressed_chunk_id);
         }
@@ -393,15 +458,17 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let mut primary;
     let mut other_primary;
     let mut secondary;
+    let mut buffer;
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, capacity);
     rodent_gpu_get_secondary_stream(dev_id, &mut secondary, capacity);
+    rodent_gpu_get_primary_buffer_stream(dev_id, &mut buffer, capacity); 
 
     let mut gpu_tmp : &mut [i32];
     rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
 
     let mut id = 0;
-    let mut use_first_primary = true;
+    let mut first_primary = true;
     let mut has_unloaded_rays = false;
     let num_rays = spp_task * film_width * film_height;
     let num_chunks = (scene.scale.x * scene.scale.y * scene.scale.z) as i32;
@@ -411,49 +478,31 @@ fn @gpu_dis_streaming_trace( dev_id: i32
         // Regenerate rays
         if primary.size < capacity && id < num_rays {
             primary.size = gpu_generate_rays(primary, capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp_task);
-            print_i32(primary.size);
         }
-//        print_string("before get chunk id\n"); 
-//        rodent_first_primary_check(dev_id, primary.size, num_chunks, use_first_primary);
         gpu_get_chunk_id(primary, acc, intrinsics, atomics, min_max, scene);
-//        print_string("after get chunk id\n"); 
-//        rodent_first_primary_check(dev_id, primary.size, num_chunks, use_first_primary);
-        
-//        gpu_sort_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, num_chunks as i32, gpu_tmp, &mut ray_ends);
-        primary.size = rodent_first_primary_save(dev_id, primary.size, num_chunks, use_first_primary);
-        print_string("\n primary  :  ");
-        print_i32(primary.size);
+
+        let (primary_size, buffer_size) = gpu_primary_transfer(primary, other_primary, buffer, scene.chunk, capacity, acc, intrinsics, atomics, dev_id, gpu_tmp, first_primary);
+        gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
+        primary.size = primary_size; 
+        buffer.size = buffer_size; 
+
+//        primary.size = rodent_first_primary_save(dev_id, primary.size, num_chunks, first_primary);
         has_unloaded_rays = primary.size > 0;
         if primary.size == 0 {
             print_string("\n\n primary == 0\n\n");
             continue()
         }
-
         other_primary.size = gpu_compact_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, gpu_tmp);
-//        print_string("before swp\n"); 
-        gpu_swap_streams(&mut primary, &mut other_primary);
-            use_first_primary = !use_first_primary; 
-//        rodent_first_primary_check(dev_id, primary.size, num_chunks, use_first_primary);
-//        print_string("after swp\n"); 
-//        print_string("\n primary  :  ");
-//        print_i32(primary.size);
+        gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         if primary.size == 0 { 
             print_string("\n\n primary == 0\n\n"); 
-//            use_first_primary = !use_first_primary; 
             continue() 
         }    
         // Traverse primary rays
         gpu_traverse_primary(primary, acc, intrinsics, min_max, scene);
-//        print_string("after traverse\n");
-        // Sort rays by geometry
         let mut ray_ends : [i32 * 1024];
         gpu_sort_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, scene.num_geometries, gpu_tmp, &mut ray_ends);
-        gpu_swap_streams(&mut primary, &mut other_primary);
-           use_first_primary = !use_first_primary; 
-//        print_string("after sort\n");
-//        rodent_first_primary_check(dev_id, primary.size, num_chunks, use_first_primary);
-        // Shade rays
-//        print_string("2");
+        gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         let mut first = 0;
         for geom_id in unroll(0, scene.num_geometries) {
             let last = ray_ends(geom_id);
@@ -461,29 +510,18 @@ fn @gpu_dis_streaming_trace( dev_id: i32
                 continue()
             }
             gpu_shade(acc, atomics, scene, path_tracer, film_pixels, spp, primary, secondary, first, last, geom_id);
-//            print_string("after shade\n");
-            
-            // handle secondary save and load
-            // if too less only save until get enough secondary 
             first = last;
         }
-        print_string("ray end :  ");        print_i32(ray_ends(scene.num_geometries));
-        print_string("\n primary  :  ");        print_i32(primary.size);
-        print_string("\n first :  ");        print_i32(first);        print_string("\n");
         primary.size   = ray_ends(scene.num_geometries);
         secondary.size = first; 
         acc.sync();
-//        rodent_first_primary_check(dev_id, primary.size, num_chunks, use_first_primary);
         if first > 0 {
             // Trace secondary rays
             gpu_traverse_secondary(secondary, acc, intrinsics, atomics, min_max, scene, film_pixels, spp_task);
             // Compact primary rays
             other_primary.size = gpu_compact_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, gpu_tmp);
-            gpu_swap_streams(&mut primary, &mut other_primary);
-            use_first_primary = !use_first_primary;
+            gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         }
-//        print_string("after second\n");
-//        rodent_first_primary_check(dev_id, primary.size, num_chunks, use_first_primary);
     }
     print_string("end rendering\n");
 }
@@ -506,7 +544,7 @@ fn @gpu_streaming_trace( dev_id: i32
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, capacity);
     rodent_gpu_get_secondary_stream(dev_id, &mut secondary, capacity);
-
+    
     let mut gpu_tmp : &mut [i32];
     rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
 

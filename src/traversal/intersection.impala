@@ -210,26 +210,30 @@ fn @inside_point_bbox(bbox: BBox, p: Vec3) -> bool {
   && p.z >= bbox.min.z && p.z <= bbox.max.z) 
 }
 
+fn @get_chunk_id(n: i32) -> i32 {
+    if n == -1000 {
+        return( -1 )
+    }
+    n >> 12 as i32
+}
+
 fn @coordinate_compress(v: Vec3, scale: Vec3i) -> i32 {
     if  v.x < 0.0f || v.x >= scale.x as f32 
      || v.y < 0.0f || v.y >= scale.y as f32
      || v.z < 0.0f || v.z >= scale.z as f32 {
-//        let v0 = make_vec3i(v.x as i32, v.y as i32, v.z as i32);
-//        let id = ((v0.x * scale.y + v0.y) * scale.z) + v0.z;
-       return( -1000 )
+        return( -1000 )
     } else {
         let v0 = make_vec3i(v.x as i32, v.y as i32, v.z as i32);
         let id = ((v0.x * scale.y + v0.y) * scale.z) + v0.z;
-        return(id * 1000 + v0.x * 100 + v0.y * 10 + v0.z)
+        return((id << 12) + (v0.x << 8) + (v0.y << 4) + v0.z)
     }
 }
 
-fn @coordinate_decompress(n: i32) -> (i32, Vec3i) {
-    let id   = n / 1000;
-    let n100 = n % 1000;
-    let z    = n100 % 10;
-    let coordinate = make_vec3i(n100 / 100, n100 % 100 / 10 , z);
-    (id, coordinate)
+fn @get_coordinate(n: i32) -> (Vec3i) {
+    let x    = (n >> 8) & 0xF;
+    let y    = (n >> 4) & 0xF;
+    let z    = n & 0xF;   
+    make_vec3i(x, y, z)
 }
 
 fn @get_closest_chunk(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3) -> i32 {

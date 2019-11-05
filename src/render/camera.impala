@@ -158,7 +158,7 @@ fn @make_camera_gridtree(width: f32, height: f32, proc_time: &mut[f32]) -> Camer
     }
 }
 // Creates a perspective camera
-fn @make_perspective_camera(math: Intrinsics, eye: Vec3, view: Mat3x3, w: f32, h: f32, Range: Vec4, spp_cur: i32, proc_id: i32, proc_num: i32) -> Camera {
+fn @make_perspective_camera(math: Intrinsics, eye: Vec3, view: Mat3x3, w: f32, h: f32, Range: Vec4, spp_cur: i32) -> Camera {
     let dir   = view.col(2);
     let right = view.col(0);
     let up    = view.col(1);
