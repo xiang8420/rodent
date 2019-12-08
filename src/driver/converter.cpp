@@ -601,6 +601,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath scene_path(file_name);
+    int grid[] = {2, 1, 1};
+    int grid_num = 2;
 
     if (!obj::load_obj(scene_path, obj_file, mpi_id, mpi_size)) {
         error("Invalid OBJ file '", file_name, "'");
@@ -647,17 +649,25 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "};\n";
 
     os << "\nextern fn get_spp() -> i32 { " << spp << " } \n"
-       << "extern fn get_dev_num() -> i32{ " << dev_num << " }\n";
-    
-    os << "\nextern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32) -> () {\n";
+       << "extern fn get_dev_num() -> i32{ " << dev_num << " }\n"
+       << "extern fn get_chunk_num() -> i32{ "<< grid_num << " }\n";
 
-    os << "    let mut mpi_id = -1; \n"
-       << "    let mut mpi_size = -1; \n"
-       << "    let mpi = comm();\n"
-       << "    mpi.comm_rank(mpi.comms.world, &mut mpi_id);\n"
-       << "    mpi.comm_size(mpi.comms.world, &mut mpi_size);\n\n"
-       << "    let spp      = settings.spp;\n"
-       << "    let renderer = make_path_tracing_renderer(" << max_path_len << " /*max_path_len*/, " << spp << " /*spp*/);\n";
+
+    os << "\nfn @make_scene(device: Device, settings: &Settings, file: File_path, chunk: i32)-> Scene {\n";
+
+    os << "    let math     = device.intrinsics;\n"
+       << "    let spp      = settings.spp;\n";
+
+    os << "    // Camera\n"
+       << "    let camera = make_perspective_camera(\n"
+       << "        math,\n"
+       << "        settings.eye,\n"
+       << "        make_mat3x3(settings.right, settings.up, settings.dir),\n"
+       << "        settings.width,\n"
+       << "        settings.height,\n"
+       << "        settings.range,\n"
+       << "        spp\n"
+       << "    );\n";
     
     int gpu_num = 0; 
     for(int dev_id = 0; dev_id < dev_num; dev_id++){
@@ -678,49 +688,31 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         padding_flag |= 1;
     }
 
-    os << "    fn @make_scene(device: Device, file: File_path)-> Scene {\n"
-       << "        let math     = device.intrinsics;\n";
-
     // Setup camera
-    os << "    // Camera\n"
-       << "        let camera = make_perspective_camera(\n"
-       << "            math,\n"
-       << "            settings.eye,\n"
-       << "            make_mat3x3(settings.right, settings.up, settings.dir),\n"
-       << "            settings.width,\n"
-       << "            settings.height,\n"
-       << "            settings.range,\n"
-       << "            spp,\n"
-       << "            mpi_id,\n"
-       << "            mpi_size\n"
-       << "        );\n";
 
-    MeshChunk chunk = MeshChunk(obj_file, 2, 1, 1);
+    MeshChunk chunk = MeshChunk(obj_file, grid[0], grid[1], grid[2]);
     // Setup triangle mesh
     info("Generating triangle mesh for '", file_name, "'");
     const BBox &bbox = chunk.bbox; 
-    os << "\n        // Triangle mesh\n"
-       << "        let vertices     = device.load_buffer(file.vertices);\n"
-       << "        let normals      = device.load_buffer(file.normals);\n"
-       << "        let face_normals = device.load_buffer(file.face_normals);\n"
-       << "        let texcoords    = device.load_buffer(file.texcoords);\n"
-       << "        let indices      = device.load_buffer(file.indices);\n"
-       << "        let tri_mesh     = TriMesh {\n"
-       << "            vertices:     @ |i| vertices.load_vec3(i),\n"
-       << "            normals:      @ |i| normals.load_vec3(i),\n"
-       << "            face_normals: @ |i| face_normals.load_vec3(i),\n"
-       << "            triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
-       << "            attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
-       << "            bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
-                                                             << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
-       << "            scale:          make_vec3("<< chunk.step.x <<"f, "<<chunk.step.y << "f, "<< chunk.step.z <<"f)\n"     
-       << "            num_attrs:    1,\n"
-       << "            num_tris:     27\n"  //fake num tris
- //      << "            num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
-       << "        };\n"
-       << "        let bvh = device.load_bvh(file.bvh);\n"
-       << "        let node = bvh.node(0); \n"
-       << "        let bbox = node.bbox(0);   \n";
+    os << "\n    // Triangle mesh\n"
+       << "    let vertices     = device.load_buffer(file.vertices);\n"
+       << "    let normals      = device.load_buffer(file.normals);\n"
+       << "    let face_normals = device.load_buffer(file.face_normals);\n"
+       << "    let texcoords    = device.load_buffer(file.texcoords);\n"
+       << "    let indices      = device.load_buffer(file.indices);\n"
+       << "    let tri_mesh     = TriMesh {\n"
+       << "        vertices:     @ |i| vertices.load_vec3(i),\n"
+       << "        normals:      @ |i| normals.load_vec3(i),\n"
+       << "        face_normals: @ |i| face_normals.load_vec3(i),\n"
+       << "        triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
+       << "        attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
+       << "        num_attrs:    1,\n"
+       << "        num_tris:     27\n"  //fake num tris
+ //      << "        num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
+       << "    };\n"
+       << "    let bvh = device.load_bvh(file.bvh);\n"
+       << "    let node = bvh.node(0); \n"
+       << "    let bbox = node.bbox(0);   \n";
     
     create_directory("data/");
     std::string data_path  = "data/"; 
@@ -852,15 +844,15 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             num_lights++;
 
             if (has_map_ke){
-                os << "        let light" << i << " = make_triangle_light(\n"
-                   << "            math,\n"
-                   << "            make_vec3(" << light_verts[i * 3].x << "f, " << light_verts[i * 3].y << "f, " << light_verts[i * 3].z << "f),\n"
-                   << "            make_vec3(" << light_verts[i * 3 + 1].x << "f, " << light_verts[i * 3 + 1].y << "f, " << light_verts[i * 3 + 1].z << "f),\n"
-                   << "            make_vec3(" << light_verts[i * 3 + 2].x << "f, " << light_verts[i * 3 + 2].y << "f, " << light_verts[i * 3 + 2].z << "f),\n";
+                os << "    let light" << i << " = make_triangle_light(\n"
+                   << "        math,\n"
+                   << "        make_vec3(" << light_verts[i * 3].x << "f, " << light_verts[i * 3].y << "f, " << light_verts[i * 3].z << "f),\n"
+                   << "        make_vec3(" << light_verts[i * 3 + 1].x << "f, " << light_verts[i * 3 + 1].y << "f, " << light_verts[i * 3 + 1].z << "f),\n"
+                   << "        make_vec3(" << light_verts[i * 3 + 2].x << "f, " << light_verts[i * 3 + 2].y << "f, " << light_verts[i * 3 + 2].z << "f),\n";
                 if (light_mats[i].map_ke != "") {
-                    os << "             make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[light_mats[i].map_ke]]) <<")\n";
+                    os << "         make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[light_mats[i].map_ke]]) <<")\n";
                 } else { 
-                    os << "              make_color(" << light_colors[i].x << "f, " << light_colors[i].y << "f, " << light_colors[i].z << "f)\n";
+                    os << "         make_color(" << light_colors[i].x << "f, " << light_colors[i].y << "f, " << light_colors[i].z << "f)\n";
                 } 
                 os << "        );\n";
             } else {
@@ -879,10 +871,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
 
     }
 
-    os << "\n        // Lights\n";
+    os << "\n    // Lights\n";
     if (has_map_ke || num_lights == 0){
         if (num_lights != 0) {
-            os << "            let lights = @ |i| match i {\n";
+            os << "       let lights = @ |i| match i {\n";
             for (size_t i = 0; i < num_lights; ++i) {
                 if (i == num_lights - 1)
                     os << "                _ => light" << i << "\n";
@@ -891,7 +883,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             }
             os << "          };\n";
         } else {
-            os << "            let lights = @ |_| make_point_light(math, make_vec3(0.0f, 0.0f, 0.0f), black);\n";
+            os << "        let lights = @ |_| make_point_light(math, make_vec3(0.0f, 0.0f, 0.0f), black);\n";
         }
     } else {
 //        write_buffer("data/light_areas.bin",  light_areas);
@@ -899,32 +891,32 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         write_buffer_hetero(data_path, "ligt_ver.bin",  light_verts,  padding_flag);
         write_buffer_hetero(data_path, "ligt_nor.bin",  light_norms,  padding_flag);
         write_buffer_hetero(data_path, "ligt_col.bin",  light_colors, padding_flag);
-        os << "        let light_verts = device.load_buffer(file.light_verts);\n"
-           << "        let light_areas = device.load_buffer(file.light_areas);\n"
-           << "        let light_norms = device.load_buffer(file.light_norms);\n"
-           << "        let light_colors = device.load_buffer(file.light_colors);\n"
-           << "        let lights = @ |i| {\n"
-           << "            make_precomputed_triangle_light(\n"
-           << "                math,\n"
-           << "                light_verts.load_vec3(i * 3 + 0),\n"
-           << "                light_verts.load_vec3(i * 3 + 1),\n"
-           << "                light_verts.load_vec3(i * 3 + 2),\n"
-           << "                light_norms.load_vec3(i),\n"
-           << "                light_areas.load_f32(i),\n"
-           << "                vec3_to_color(light_colors.load_vec3(i))\n"
-           << "            )\n"
-           << "        };\n";
+        os << "    let light_verts = device.load_buffer(file.light_verts);\n"
+           << "    let light_areas = device.load_buffer(file.light_areas);\n"
+           << "    let light_norms = device.load_buffer(file.light_norms);\n"
+           << "    let light_colors = device.load_buffer(file.light_colors);\n"
+           << "    let lights = @ |i| {\n"
+           << "        make_precomputed_triangle_light(\n"
+           << "            math,\n"
+           << "            light_verts.load_vec3(i * 3 + 0),\n"
+           << "            light_verts.load_vec3(i * 3 + 1),\n"
+           << "            light_verts.load_vec3(i * 3 + 2),\n"
+           << "            light_norms.load_vec3(i),\n"
+           << "            light_areas.load_f32(i),\n"
+           << "            vec3_to_color(light_colors.load_vec3(i))\n"
+           << "        )\n"
+           << "    };\n";
 
     }
 
 
-    os << "\n        // Mapping from primitive to light source\n"
-       << "        let light_ids = device.load_buffer(file.light_ids);\n";
+    os << "\n    // Mapping from primitive to light source\n"
+       << "    let light_ids = device.load_buffer(file.light_ids);\n";
 
     // Generate images
     info("Generating images for '", file_name, "'");
-    os << "\n        // Images\n"
-       << "        let dummy_image = make_image(@ |x, y| make_color(0.0f, 0.0f, 0.0f), 1, 1);\n";
+    os << "\n    // Images\n"
+       << "    let dummy_image = make_image(@ |x, y| make_color(0.0f, 0.0f, 0.0f), 1, 1);\n";
     for (size_t i = 0; i < images.size(); i++) {
         auto name = fix_file(image_names[i]);
         copy_file(scene_path.base_name() + "/" + name, "data/" + name);
@@ -944,7 +936,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
 
     // Generate shaders
     info("Generating materials for '", file_name, "'");
-    os << "\n        // Shaders\n";
+    os << "\n    // Shaders\n";
     for (auto& mtl_name : obj_file.materials) {
         auto it = mtl_lib.find(mtl_name);
         assert(it != mtl_lib.end());
@@ -955,42 +947,42 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             break;
 
         bool has_emission = mat.ke != rgb(0.0f) || mat.map_ke != "";
-        os << "        let shader_" << make_id(mtl_name) << " : Shader = @ |ray, hit, surf| {\n";
+        os << "    let shader_" << make_id(mtl_name) << " : Shader = @ |ray, hit, surf| {\n";
         if (mat.illum == 5) {
-            os << "            let bsdf = make_mirror_bsdf(math, surf, make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f));\n";
+            os << "        let bsdf = make_mirror_bsdf(math, surf, make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f));\n";
         } else if (mat.illum == 7) {
-            os << "            let bsdf = make_glass_bsdf(math, surf, 1.0f, " << mat.ni << "f, " << "make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f), make_color(" << mat.tf.x << "f, " << mat.tf.y << "f, " << mat.tf.z << "f));\n";
+            os << "        let bsdf = make_glass_bsdf(math, surf, 1.0f, " << mat.ni << "f, " << "make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f), make_color(" << mat.tf.x << "f, " << mat.tf.y << "f, " << mat.tf.z << "f));\n";
         } else {
             bool has_diffuse  = mat.kd != rgb(0.0f) || mat.map_kd != "";
             bool has_specular = mat.ks != rgb(0.0f) || mat.map_ks != "";
 
             if (has_diffuse) {
                 if (mat.map_kd != "") {
-                    os << "            let diffuse_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_kd]]) << ");\n";
-                    os << "            let kd = diffuse_texture(vec4_to_2(surf.attr(0)));\n";
+                    os << "        let diffuse_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_kd]]) << ");\n";
+                    os << "        let kd = diffuse_texture(vec4_to_2(surf.attr(0)));\n";
                 } else {
-                    os << "            let kd = make_color(" << mat.kd.x << "f, " << mat.kd.y << "f, " << mat.kd.z << "f);\n";
+                    os << "        let kd = make_color(" << mat.kd.x << "f, " << mat.kd.y << "f, " << mat.kd.z << "f);\n";
                 }
-                os << "            let diffuse = make_diffuse_bsdf(math, surf, kd);\n";
+                os << "        let diffuse = make_diffuse_bsdf(math, surf, kd);\n";
             }
             if (has_specular) {
                 if (mat.map_ks != "") {
-                    os << "            let specular_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ks]]) << ");\n";
-                    os << "            let ks = specular_texture(vec4_to_2(surf.attr(0)));\n";
+                    os << "       let specular_texture = make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[mat.map_ks]]) << ");\n";
+                    os << "       let ks = specular_texture(vec4_to_2(surf.attr(0)));\n";
                 } else {
-                    os << "            let ks = make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f);\n";
+                    os << "       let ks = make_color(" << mat.ks.x << "f, " << mat.ks.y << "f, " << mat.ks.z << "f);\n";
                 }
-                os << "            let ns = " << mat.ns << "f;\n";
-                os << "            let specular = make_phong_bsdf(math, surf, ks, ns);\n";
+                os << "        let ns = " << mat.ns << "f;\n";
+                os << "        let specular = make_phong_bsdf(math, surf, ks, ns);\n";
             }
-            os << "            let bsdf = ";
+            os << "        let bsdf = ";
             if (has_diffuse && has_specular) {
                 os << "{\n"
-                   << "                let lum_ks = color_luminance(ks);\n"
-                   << "                let lum_kd = color_luminance(kd);\n"
-                   << "                let k = select(lum_ks + lum_kd == 0.0f, 0.0f, lum_ks / (lum_ks + lum_kd));\n"
-                   << "                make_mix_bsdf(diffuse, specular, k)\n"
-                   << "            };\n";
+                   << "            let lum_ks = color_luminance(ks);\n"
+                   << "            let lum_kd = color_luminance(kd);\n"
+                   << "            let k = select(lum_ks + lum_kd == 0.0f, 0.0f, lum_ks / (lum_ks + lum_kd));\n"
+                   << "            make_mix_bsdf(diffuse, specular, k)\n"
+                   << "        };\n";
             } else if (has_diffuse || has_specular) {
                 if (has_specular) os << "specular;\n";
                 else              os << "diffuse;\n";
@@ -999,25 +991,25 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             }
         }
         if (has_emission) {
-            os << "            make_emissive_material(surf, bsdf, lights(light_ids.load_i32(hit.prim_id)))\n";
+            os << "        make_emissive_material(surf, bsdf, lights(light_ids.load_i32(hit.prim_id)))\n";
         } else {
-            os << "            make_material(bsdf)\n";
+            os << "        make_material(bsdf)\n";
         }
-        os << "        };\n";
+        os << "    };\n";
     }
 
     if (has_simple) {
         os << "\n    // Simple materials data\n"
-           << "        let simple_kd = device.load_buffer(\"data/simple_kd.bin\");\n"
-           << "        let simple_ks = device.load_buffer(\"data/simple_ks.bin\");\n"
-           << "        let simple_ns = device.load_buffer(\"data/simple_ns.bin\");\n";
+           << "    let simple_kd = device.load_buffer(\"data/simple_kd.bin\");\n"
+           << "    let simple_ks = device.load_buffer(\"data/simple_ks.bin\");\n"
+           << "    let simple_ns = device.load_buffer(\"data/simple_ns.bin\");\n";
     }
 
     // Generate geometries
     os << "\n    // Geometries\n"
-       << "        let geometries = @ |i| match i {\n";
+       << "    let geometries = @ |i| match i {\n";
     for (uint32_t mat = 0; mat < num_complex; ++mat) {
-        os << "        ";
+        os << "    ";
         if (mat != num_complex - 1 || has_simple)
             os << mat;
         else
@@ -1025,31 +1017,38 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         os << "        => make_tri_mesh_geometry(math, tri_mesh, shader_" << make_id(obj_file.materials[mat]) << "),\n";
     }
     if (has_simple)
-        os << "        _ => make_tri_mesh_geometry(math, tri_mesh, @ |ray, hit, surf| {\n"
-           << "            let kd = vec3_to_color(simple_kd.load_vec3(hit.prim_id));\n"
-           << "            let ks = vec3_to_color(simple_ks.load_vec3(hit.prim_id));\n"
-           << "            let ns = simple_ns.load_f32(hit.prim_id);\n"
-           << "            let diffuse = make_diffuse_bsdf(math, surf, kd);\n"
-           << "            let specular = make_phong_bsdf(math, surf, ks, ns);\n"
-           << "            let lum_ks = color_luminance(ks);\n"
-           << "            let lum_kd = color_luminance(kd);\n"
-           << "            make_material(make_mix_bsdf(diffuse, specular, lum_ks / (lum_ks + lum_kd)))\n"
-           << "        })\n";
-    os << "        };\n";
+        os << "    _ => make_tri_mesh_geometry(math, tri_mesh, @ |ray, hit, surf| {\n"
+           << "        let kd = vec3_to_color(simple_kd.load_vec3(hit.prim_id));\n"
+           << "        let ks = vec3_to_color(simple_ks.load_vec3(hit.prim_id));\n"
+           << "        let ns = simple_ns.load_f32(hit.prim_id);\n"
+           << "        let diffuse = make_diffuse_bsdf(math, surf, kd);\n"
+           << "        let specular = make_phong_bsdf(math, surf, ks, ns);\n"
+           << "        let lum_ks = color_luminance(ks);\n"
+           << "        let lum_kd = color_luminance(kd);\n"
+           << "        make_material(make_mix_bsdf(diffuse, specular, lum_ks / (lum_ks + lum_kd)))\n"
+           << "    })\n";
+    os << "    };\n";
     
     // Scene
     os << "\n       // Scene\n"
-       << "        Scene {\n"
-       << "            num_geometries: " << std::min(num_complex + 1, num_mats) << ",\n"
-       << "            num_lights:     " << num_lights << ",\n"
-       << "            geometries:     @ |i| geometries(i),\n"
-       << "            lights:         @ |i| lights(i),\n"
-       << "            camera:         camera,\n"
-       << "            bvh:            bvh\n"
-       << "        }\n"
-       << "    }\n";
+       << "    Scene {\n"
+       << "        num_geometries: " << std::min(num_complex + 1, num_mats) << ",\n"
+       << "        num_lights:     " << num_lights << ",\n"
+       << "        geometries:     @ |i| geometries(i),\n"
+       << "        lights:         @ |i| lights(i),\n"
+       << "        camera:         camera,\n"
+       << "        bvh:            bvh, \n"
+       << "        bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
+                                                         << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
+       << "        scale:          make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
+       << "        chunk:          chunk \n"
+       << "    }\n"
+       << "}\n";
     
+    os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32) -> () { \n"   
+       << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, 2 /*spp*/); \n";
     for(int dev_id = 0; dev_id < dev_num; dev_id++){
+        
         Target target = target_list[dev_id];
         auto dev = dev_list[dev_id];
         if(dev_id == 0){
@@ -1076,17 +1075,16 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         }
         if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
             target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-            os << "        let scene  = make_scene(device, make_file_path(0, chunk));\n";    
+            os << "        let scene  = make_scene(device, settings, make_file_path(0, chunk), chunk);\n";    
         } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-            os << "        let scene  = make_scene(device, make_file_path(2, chunk));\n";    
+            os << "        let scene  = make_scene(device, settings, make_file_path(2, chunk), chunk);\n";    
         } else {
-            os << "        let scene  = make_scene(device, make_file_path(1, chunk));\n";   
+            os << "        let scene  = make_scene(device, settings, make_file_path(1, chunk), chunk);\n";    
         }
         os << "        renderer(scene, device, iter);\n"
            << "        device.present();\n"
            << "    }\n";
     }
-
         
     os << "}\n";
        
@@ -1137,7 +1135,7 @@ int main(int argc, char** argv) {
     Target target[5];
     bool fusion;
 
-    size_t spp = 256;
+    size_t spp = 2;
     size_t max_path_len = 64;
     bool embree_bvh = false;
     for (int i = 1; i < argc; ++i) {
