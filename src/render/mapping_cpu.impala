@@ -543,10 +543,15 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             dead_rays++;
         } 
     } 
-    print_string("dead rays");
-    print_i32(dead_rays);
+//    print_string("dead rays");
+//    print_i32(dead_rays);
+//   print_string("\n");
+
+    print_string("primary "); 
+    print_i32(primary.size);
     print_string("\n"); 
     if primary_size == 0 {
+        print_string("slave send left rays");
         rodent_buffer_primary_send(-1, buffer_size, true);
         buffer_size = 0;
         primary_size = rodent_primary_recv(-1, true); 
@@ -619,6 +624,7 @@ fn @cpu_dis_trace( scene: Scene
                 primary.size = primary_size; 
                 buffer.size = buffer_size; 
             }
+            rodent_first_primary_check(-1, primary.size, 2, true);
             has_unloaded_rays = primary.size > 0;
             if primary.size == 0 {
                 break()

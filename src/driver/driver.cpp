@@ -11,14 +11,12 @@
 #include <SDL2/SDL.h>
 #endif
 
-#include <thread>
-
 #include "interface.h"
 #include "float3.h"
 #include "common.h"
 #include "image.h"
 #include "distribution.h"
-#include "buffer.h"
+#include "communicator.h"
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
 #include <x86intrin.h>
 #endif
@@ -58,12 +56,18 @@ struct Camera {
 
 void setup_interface(size_t, size_t);
 void setup_scheduler(size_t, size_t, size_t);
+void thread_recv();
 float* get_pixels();
 float* get_first_primary();
 void clear_pixels();
 void cleanup_interface();
 void cleanup_scheduler();
 void reset_scheduler();
+void setup_server(struct Communicator *);
+void server_run();
+void setup_client(struct Communicator *, bool);
+void client_run(Settings, int);
+
 #ifndef DISABLE_GUI
 static bool handle_events(uint32_t& iter, Camera& cam) {
     static bool camera_on = false;
@@ -186,10 +190,6 @@ static inline void usage() {
               << "   -o       image.png  Writes the output image to a file" << std::endl;
 }
 
-void render_spawn(struct Settings const* settings, int iter, int dev, int chunk, int *tag){
-    render(settings, iter + dev, dev, chunk);
-    *tag = 0;
-}
 
 int main(int argc, char** argv) {
     std::string out_file;
@@ -249,153 +249,110 @@ int main(int argc, char** argv) {
         }
         error("Unexpected argument '", argv[i], "'");
     }
-    int  mpi_id = -1, mpi_num = -1;
-    MPI_Init(NULL, NULL); 
-    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_id);
-    MPI_Comm_size(MPI_COMM_WORLD, &mpi_num);
+
+   
     Camera cam(eye, dir, up, fov, (float)width / (float)height);
 
-    ImageTile tiles  = ImageTile(width, height, mpi_num);
-#ifdef DISABLE_GUI
-//    info("Running in console-only mode (compiled with -DDISABLE_GUI).");
-//    if (bench_iter == 0) {
-//        warn("Benchmark iterations no set. Defaulting to 1.");
-//        bench_iter = 1;
-//    }
-#else
-    if (SDL_Init(SDL_INIT_VIDEO) != 0)
-        error("Cannot initialize SDL.");
-
-    auto window = SDL_CreateWindow(
-        "Rodent",
-        SDL_WINDOWPOS_UNDEFINED,
-        SDL_WINDOWPOS_UNDEFINED,
-        width,
-        height,
-        0);
-    if (!window)
-        error("Cannot create window.");
-
-    auto renderer = SDL_CreateRenderer(window, -1, 0);
-    if (!renderer)
-        error("Cannot create renderer.");
-
-    auto texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
-    if (!texture)
-        error("Cannot create texture");
-
-    std::unique_ptr<uint32_t> buf(new uint32_t[width * height]);
-#endif
-
-    
-    auto chunk_num = get_chunk_num();
-    setup_interface(width, height);
-    auto film = get_pixels();
     // Force flush to zero mode for denormals
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
     _mm_setcsr(_mm_getcsr() | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
 #endif
-
+    // render 
+    setup_interface(width, height);
+    auto chunk_num = get_chunk_num();
+    auto film = get_pixels();
     auto spp_g = get_spp();
     auto dev_num = get_dev_num();
-    bool done = false;
     uint64_t timing = 0;
     uint32_t frames = 0;
     uint32_t iter = 0;
-    std::vector<double> samples_sec;
     
-    float *proc_time = new float[mpi_num];
-    for(int i = 0; i < mpi_num; i++){
+    // mpi
+    struct Communicator comm(20); 
+    int  client_size = comm.size - 1;
+    setup_scheduler(comm.rank, client_size, chunk_num);
+    int server_id = client_size; 
+     
+    if(comm.rank == server_id) {
+        setup_server(&comm);
+    } else {
+        setup_client(&comm, server_id == client_size); 
+    }
+    
+    // time 
+    std::vector<double> samples_sec;
+    float *proc_time = new float[client_size];
+    for(int i = 0; i < client_size; i++){
         proc_time[i] = 1;
     }
     float elapsed_ms = 1;  //avoid div 0
+    
+    //film 
+    ImageTile tiles  = ImageTile(width, height, client_size);
+    int frame = 0;
     float *reduce_buffer = NULL;
     int pixel_num = width * height * 3;
-    if (mpi_id==0)
-        reduce_buffer = new float[pixel_num];
-    std::thread *thread[5];
-    int task_num = granularity * dev_num; //
     int spp_cur = spp_g;
-    setup_scheduler(mpi_id, mpi_num, chunk_num);
-    while (frames < 1) {
-        printf("start rendering frame\n"); 
+    if (comm.rank==0)  // !!!
+        reduce_buffer = new float[pixel_num];
+    while(frame < 1) {
         clear_pixels();
         reset_scheduler();
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
-        float range[] = {0.0, 0.0,float(width), float(height)}; 
-        if(splitimage){
-            spp_cur = spp_g;
-            tiles.get_tile(mpi_id, mpi_num, proc_time, range); 
-        }
-        else{
-            float total = 0;
-            for(int i = 0; i < mpi_num; i++){
-                total += proc_time[i];
-            }
-            float average = total / mpi_num; 
-            spp_cur = spp_cur * average / proc_time[mpi_id];
-        }
-        Settings settings {
-            Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },
-            Vec3 { cam.dir.x, cam.dir.y, cam.dir.z },
-            Vec3 { cam.up.x, cam.up.y, cam.up.z },
-            Vec3 { cam.right.x, cam.right.y, cam.right.z },
-            cam.w,
-            cam.h,
-            Vec4 { range[0], range[1], range[2], range[3]},
-            spp_cur
-        };
-              
         auto ticks = std::chrono::high_resolution_clock::now();
-        int tag[] = {-1, -1, -1, -1, -1}; 
-        int finished = 0;
-
-
-        int chunk = mpi_id; 
-        // get task (different devices use same chunk)
-        // while (has task)
-        //
-        while(finished != task_num){
-            for(int i = 0; i < dev_num; i++){
-                if(tag[i] <= 0){
-                    if(tag[i] == 0){
-                        thread[i]->join();
-                    }
-                    tag[i] = 1;
-                    printf("work dev %d\n", i);
-                    thread[i] = new std::thread(render_spawn, &settings, mpi_id, i, chunk, &tag[i]);
-                    finished ++;
-                } 
+        if(comm.rank == server_id) {
+            printf("start server\n");
+            server_run();
+        } else {
+            float range[] = {0.0, 0.0,float(width), float(height)}; 
+            if(splitimage){
+                spp_cur = spp_g;
+                tiles.get_tile(comm.rank, client_size, proc_time, range); 
             }
+            else{
+                float total = 0;
+                for(int i = 0; i < client_size; i++){
+                    total += proc_time[i];
+                }
+                float average = total / client_size; 
+                spp_cur = spp_cur * average / proc_time[comm.rank];
+            }
+            Settings settings {
+                Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },
+                Vec3 { cam.dir.x, cam.dir.y, cam.dir.z },
+                Vec3 { cam.up.x, cam.up.y, cam.up.z },
+                Vec3 { cam.right.x, cam.right.y, cam.right.z },
+                cam.w,
+                cam.h,
+                Vec4 { range[0], range[1], range[2], range[3]},
+                spp_cur
+            };
+            client_run(settings, dev_num);
+            
+            cam.rotate(-0.1f, 0.0f);
         }
-        for(int i = 0; i < dev_num; i++){
-            thread[i]->join();
+        film = get_pixels();
+        if(comm.rank != comm.master) {
+            MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, comm.Client_Comm); 
         }
 
-        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
-        
-        film = get_pixels(); 
-        MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
-        
-        printf("proc %d time %f", mpi_id, float(elapsed_ms));
+        printf("proc %d time %f", comm.rank, float(elapsed_ms));
         
         samples_sec.emplace_back(1000.0 * double(spp_g * width * height) / double(elapsed_ms));
         frames++;
         std::string out = out_file + std::to_string(frames);
         out += ".png";
-        printf("1\n");
-        if (mpi_id == 0 && out_file != "") {
+        if (comm.rank == 0 && out_file != "") {
             float total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
             printf("2\n");
             save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
             printf("0 node proc time %f \n", total_ms);
         }
-        cam.rotate(-0.1f, 0.0f);
+        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+        frame ++;
     }
     delete [] proc_time; 
-    MPI_Finalize(); 
     cleanup_interface();
-
     auto inv = 1.0e-6;
     std::sort(samples_sec.begin(), samples_sec.end());
     info("# ", samples_sec.front() * inv,

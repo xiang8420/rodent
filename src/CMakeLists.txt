@@ -48,6 +48,7 @@ set(RODENT_SRCS
     )
 
 set(DRIVER_SRCS
+    driver/communicator.cpp
     driver/driver.cpp
     driver/interface.cpp
     driver/interface.h
@@ -63,9 +64,8 @@ set(DRIVER_SRCS
     driver/common.h
     driver/color.h
     driver/mpi.cpp
+    driver/server.cpp
     driver/buffer.h
-    driver/distribution.h
-    driver/scheduler.h
     )
 
 set(CONVERTER_SRCS
