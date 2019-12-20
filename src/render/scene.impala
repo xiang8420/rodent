@@ -8,7 +8,7 @@ struct Scene {
     camera:     Camera,
     bvh:        Bvh,    
     bbox:       BBox,
-    scale:      Vec3,
+    grid:      Vec3,
     chunk:      i32
 }
 

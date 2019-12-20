@@ -249,7 +249,6 @@ int main(int argc, char** argv) {
         }
         error("Unexpected argument '", argv[i], "'");
     }
-
    
     Camera cam(eye, dir, up, fov, (float)width / (float)height);
 
@@ -268,15 +267,16 @@ int main(int argc, char** argv) {
     uint32_t iter = 0;
     
     // mpi
-    struct Communicator comm(20); 
-    int  client_size = comm.size - 1;
+    struct Communicator comm(20);
+    bool c_s = true; 
+    int  client_size = c_s ? comm.size - 1: comm.size;
     setup_scheduler(comm.rank, client_size, chunk_num);
     int server_id = client_size; 
      
     if(comm.rank == server_id) {
         setup_server(&comm);
     } else {
-        setup_client(&comm, server_id == client_size); 
+        setup_client(&comm, c_s); 
     }
     
     // time 
@@ -332,8 +332,9 @@ int main(int argc, char** argv) {
             cam.rotate(-0.1f, 0.0f);
         }
         film = get_pixels();
-        if(comm.rank != comm.master) {
-            MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, comm.Client_Comm); 
+        if(comm.rank != server_id) {
+            printf("before reduce\n");
+            comm.Reduce_image(film, reduce_buffer, pixel_num, c_s);
         }
 
         printf("proc %d time %f", comm.rank, float(elapsed_ms));

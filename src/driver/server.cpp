@@ -38,6 +38,6 @@ void client_send_rays(float *rays, size_t size, size_t capacity, bool send_all){
     client->send_rays(rays, size, capacity, send_all);
 }
 
-int  client_recv_rays(float *rays, size_t size){
-    return client->recv_rays(rays, size);
+int  client_recv_rays(float *rays, size_t size, bool idle){
+    return client->recv_rays(rays, size, idle);
 }

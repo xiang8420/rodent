@@ -14,7 +14,7 @@ struct Communicator {
     Communicator(int width);
     
     ~Communicator(); 
-    
+    void Reduce_image(float* film, float *reduce_buffer, int pixel_num, bool server);
     void Send_rays(struct RayQueue* buffer, int size, int dst); 
     void Isend_rays(struct RayQueue* buffer, int size, int dst, int tag); 
     void Wait(int tag);

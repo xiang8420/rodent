@@ -593,7 +593,7 @@ static size_t cleanup_obj(obj::File& obj_file, obj::MaterialLib& mtl_lib) {
     return num_complex;
 }
 
-static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, int part_num) {
+static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os) {
     info("Converting OBJ file '", file_name, "'");
     int mpi_size, mpi_id;
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
@@ -1227,7 +1227,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::ofstream of("main.impala");
-    if (!convert_obj(obj_file, dev_num, target, dev, fusion, max_path_len, spp, embree_bvh, of, 8))
+    if (!convert_obj(obj_file, dev_num, target, dev, fusion, max_path_len, spp, embree_bvh, of))
         return 1;
     return 0;
     MPI_Finalize();

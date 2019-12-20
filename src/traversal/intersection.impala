@@ -205,7 +205,7 @@ fn @intersect_ray_box(min_max: MinMax, ordered: bool, ray: Ray, bbox: BBox) -> (
 }
 
 fn @inside_point_bbox(bbox: BBox, p: Vec3) -> bool {
-   ( p.x >= bbox.min.x && p.x <= bbox.max.x  
+   return ( p.x >= bbox.min.x && p.x <= bbox.max.x  
   && p.y >= bbox.min.y && p.y <= bbox.max.y 
   && p.z >= bbox.min.z && p.z <= bbox.max.z) 
 }
@@ -217,16 +217,19 @@ fn @get_chunk_id(n: i32) -> i32 {
     n >> 12 as i32
 }
 
-fn @coordinate_compress(v: Vec3, scale: Vec3i) -> i32 {
-    if  v.x < 0.0f || v.x >= scale.x as f32 
-     || v.y < 0.0f || v.y >= scale.y as f32
-     || v.z < 0.0f || v.z >= scale.z as f32 {
+fn @coordinate_compress(grid: Vec3, scale: Vec3i, max: Vec3, math: Intrinsics) -> i32 {
+    let mut id = make_vec3i(math.floorf(grid.x) as i32, math.floorf(grid.y) as i32, math.floorf(grid.z) as i32); 
+    if grid.x == max.x {id.x = scale.x - 1; } 
+    if grid.y == max.y {id.y = scale.y - 1; } 
+    if grid.z == max.z {id.z = scale.z - 1; } 
+    
+    if  id.x < 0 || id.x >= scale.x 
+     || id.y < 0 || id.y >= scale.y
+     || id.z < 0 || id.z >= scale.z {
         return( -1000 )
-    } else {
-        let v0 = make_vec3i(v.x as i32, v.y as i32, v.z as i32);
-        let id = ((v0.x * scale.y + v0.y) * scale.z) + v0.z;
-        return((id << 12) + (v0.x << 8) + (v0.y << 4) + v0.z)
-    }
+    } 
+    let chunk = ((id.x * scale.y + id.y) * scale.z) + id.z;
+    return((chunk << 12) + (id.x << 8) + (id.y << 4) + id.z)
 }
 
 fn @get_coordinate(n: i32) -> (Vec3i) {
@@ -236,7 +239,7 @@ fn @get_coordinate(n: i32) -> (Vec3i) {
     make_vec3i(x, y, z)
 }
 
-fn @get_closest_chunk(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3) -> i32 {
+fn @get_closest_chunk(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
     let mut bound: Vec3;
     let mut step_dir = make_vec3(1.0f, 1.0f, 1.0f);
     let id_f = make_vec3(id.x as f32, id.y as f32, id.z as f32);
@@ -275,16 +278,7 @@ fn @get_closest_chunk(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: V
             next_id.y = next_id.y + step_dir.y;
         }
     }
-    coordinate_compress(next_id, scale) 
+    coordinate_compress(next_id, scale, bbox.max,  math) 
 }
-
-
-
-
-
-
-
-
-
 
 

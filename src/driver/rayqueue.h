@@ -25,7 +25,10 @@ struct Ray {
    
     bool isfull() { return size == capacity; }
    
-    bool isempty() {return size == 0;}
+    bool isempty() {
+        if(size < 0){printf("ray size < 0 %d\n", size);}
+        return size == 0;
+    }
    
     float* rays() {return data; }
    
@@ -42,7 +45,7 @@ struct Ray {
     void put(float *queue, int src, int num) {
         for(int i = 0; i < num; i++){
             for(int j = 0; j < width; j++) {
-                data[src + i + j * capacity] = queue[(size + i) * width + j] ;
+                data[size + i + j * capacity] = queue[(src + i) * width + j] ;
             }
         }
         size += num;

@@ -16,7 +16,7 @@
 #include "buffer.h"
 
 void client_send_rays(float *, size_t, size_t, bool);
-int  client_recv_rays(float *, size_t);
+int  client_recv_rays(float *, size_t, bool);
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -260,9 +260,9 @@ struct Interface {
         , host_pixels(width * height * 3)
         , tmp_pixels(width * height * 3)
     {
-        host_first_primary = anydsl::Array<float>(1024 * 1024 * 20);
-        host_primary_num   = anydsl::Array<int32_t>(128);
-        host_buffer_primary     = anydsl::Array<float>(1024 * 1024 * 20);
+        host_first_primary  = anydsl::Array<float>(1024 * 1024 * 20);
+        host_primary_num    = anydsl::Array<int32_t>(128);
+        host_buffer_primary = anydsl::Array<float>(1024 * 1024 * 20);
     }
 
     template <typename T>
@@ -571,6 +571,7 @@ void rodent_get_film_data(int32_t dev, float** pixels, int32_t* width, int32_t* 
     *width  = interface->film_width;
     *height = interface->film_height;
 }
+
 void rodent_load_png(int32_t dev, const char* file, uint8_t** pixels, int32_t* width, int32_t* height) {
     auto& img = interface->load_png(dev, file);
     *pixels = const_cast<uint8_t*>(std::get<0>(img).data());
@@ -667,12 +668,12 @@ void rodent_first_primary_check(int32_t dev, int primary_size, int32_t chunk_num
         auto&  array = interface->host_first_primary;
         get_primary_stream(primary, array.data(), capacity);
     }
-//    for(int i = 0; i < 3; i++){
-//        printf("id %d chunk %d ray org %f %f %f dir %f %f %f\n", 
-//                    primary.rays.id[i+0], primary.prim_id[i+0], 
-//                    primary.rays.org_x[i], primary.rays.org_y[i], primary.rays.org_z[i],
-//                    primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i]);
-//    }
+    for(int i = 0; i < 3; i++){
+        printf("id %d chunk %d ray org %f %f %f dir %f %f %f\n", 
+                    primary.rays.id[i+0], primary.prim_id[i+0], 
+                    primary.rays.org_x[i], primary.rays.org_y[i], primary.rays.org_z[i],
+                    primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i]);
+    }
 }
 
 int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, bool is_first_primary) {
@@ -686,7 +687,7 @@ int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, 
 void rodent_buffer_primary_send(int32_t dev, int buffer_size, bool send_all) {
     if(dev == -1) {
         auto& array = interface->cpu_buffer;
-        printf("array.size %d buffer size %d\n ", array.size() / 20, buffer_size);
+//        printf("array.size %d buffer size %d\n ", array.size() / 20, buffer_size);
         client_send_rays(array.data(), buffer_size, array.size() / 20, send_all);
     } else {
         int capacity = interface->save_buffer_primary(dev) / 20;
@@ -695,18 +696,18 @@ void rodent_buffer_primary_send(int32_t dev, int buffer_size, bool send_all) {
     }
 }
 
-int rodent_primary_recv(int32_t dev, bool is_first_primary) {
+int rodent_primary_recv(int32_t dev, int32_t rays_size, bool idle, bool is_first_primary) {
     int size_new = 0;
     if(dev == -1){
         auto& array = interface->cpu_primary;
-        size_new = client_recv_rays(array.data(), array.size() / 20); 
+        size_new = client_recv_rays(array.data(), rays_size, idle); 
     } else {
         int capacity = is_first_primary? interface->save_first_primary(dev) / 20 : interface->save_second_primary(dev) / 20;
         auto&  array = interface->host_first_primary;
-        size_new = client_recv_rays(array.data(), capacity);
+        size_new = client_recv_rays(array.data(), rays_size, idle);
         is_first_primary ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
     }
-    printf("after recv size new %d\n", size_new);
+//    printf("after recv size new %d\n", size_new);
     return size_new;
 }
 

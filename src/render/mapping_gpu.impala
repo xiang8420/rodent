@@ -312,6 +312,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
                         , dev_id: i32
                         , gpu_tmp:  &mut [i32]
                         , is_first: bool
+                        , generate_end:bool
                         ) -> (i32, i32) {
     let block_w  = 64;
     let prim_ids = primary.prim_id;
@@ -365,7 +366,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
     }
     if size(0) == 0 {
         rodent_buffer_primary_send(dev_id, buffer.size, true);
-        size(0) = rodent_primary_recv(dev_id, !is_first); 
+        size(0) = rodent_primary_recv(dev_id, primary.size, generate_end, !is_first); 
         size(1) = 0; 
     }    
 
@@ -400,10 +401,10 @@ fn @gpu_get_chunk_id( primary: PrimaryStream
                     ) -> () {
     let block_w = 64;
     let bbox = scene.bbox;
-    let scale = make_vec3i(scene.scale.x as i32, scene.scale.y as i32, scene.scale.z as i32);
-    let step  = vec3_div(vec3_sub(bbox.max, bbox.min), scene.scale);
+    let grid = make_vec3i(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
+    let step  = vec3_div(vec3_sub(bbox.max, bbox.min), scene.grid);
     let inv_step = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step); 
-    let num_chunks = scale.x * scale.y * scale.z;
+    let num_chunks = grid.x * grid.y * grid.z;
     
     let prim_ids    = primary.prim_id;
     let write_chunk = @ |i, _, id| prim_ids(i) = id;
@@ -422,20 +423,20 @@ fn @gpu_get_chunk_id( primary: PrimaryStream
         if prim_ids(src_id) == 1022 {
             if inside_point_bbox(bbox, ray.org){
                 let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
-                write_chunk(src_id, 0, coordinate_compress(c, scale));
+                write_chunk(src_id, 0, coordinate_compress(c, grid, bbox.max, intrinsics));
             } else {
                 let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
                 if t0 <= t1 {
                     let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.00001f), ray.org);
                     let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
-                    write_chunk(src_id, 0, coordinate_compress(c, scale));
+                    write_chunk(src_id, 0, coordinate_compress(c, grid, bbox.max, intrinsics));
                 } else {
                     write_chunk(src_id, 0, -1000);
                 }
             }
         } else {
             let coord = get_coordinate(prim_ids(src_id));
-            let compressed_chunk_id = get_closest_chunk(min_max, ray, bbox, coord, scale, step, inv_step);
+            let compressed_chunk_id = get_closest_chunk(min_max, ray, bbox, coord, grid, step, inv_step, intrinsics);
             write_chunk(src_id, 0, compressed_chunk_id);
         }
     }
@@ -471,7 +472,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let mut first_primary = true;
     let mut has_unloaded_rays = false;
     let num_rays = spp_task * film_width * film_height;
-    let num_chunks = (scene.scale.x * scene.scale.y * scene.scale.z) as i32;
+    let num_chunks = (scene.grid.x * scene.grid.y * scene.grid.z) as i32;
     print_i32(num_chunks);
     print_string("start rendering\n");
     while id < num_rays || primary.size > 0 || has_unloaded_rays  {
@@ -481,7 +482,8 @@ fn @gpu_dis_streaming_trace( dev_id: i32
         }
         gpu_get_chunk_id(primary, acc, intrinsics, atomics, min_max, scene);
 
-        let (primary_size, buffer_size) = gpu_primary_transfer(primary, other_primary, buffer, scene.chunk, capacity, acc, intrinsics, atomics, dev_id, gpu_tmp, first_primary);
+        let (primary_size, buffer_size) = gpu_primary_transfer(primary, other_primary, buffer, scene.chunk, capacity, acc, intrinsics, 
+                                                                atomics, dev_id, gpu_tmp, first_primary, id == num_rays);
         gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         primary.size = primary_size; 
         buffer.size = buffer_size; 

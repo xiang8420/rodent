@@ -11,8 +11,8 @@ Communicator::Communicator(int width): width(width) {
     
     int group = rank == master ? 1 : 0;
     MPI_Comm_split(MPI_COMM_WORLD, group, rank, &Client_Comm);
-    MPI_Comm_size(MPI_COMM_WORLD, &group_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &group_rank);
+    MPI_Comm_size(Client_Comm, &group_size);
+    MPI_Comm_rank(Client_Comm, &group_rank);
 }
     
 Communicator::~Communicator() {
@@ -20,7 +20,6 @@ Communicator::~Communicator() {
 }
     
 void Communicator::Send_rays(struct RayQueue* buffer, int size, int dst) {
-    printf("Send to %d rays size %d", dst, buffer->get_size());
 //    int* a = (int*)buffer->data;
 //    for(int i = 0; i < 10; i ++) {
 //        printf("%d %d *", a[i * width], a[i * width + 10]);
@@ -29,7 +28,7 @@ void Communicator::Send_rays(struct RayQueue* buffer, int size, int dst) {
     int buffer_size = buffer->get_size();
     float *data = buffer->rays();
     int    send_size = buffer_size > size ? size : buffer_size;
-    printf("send ray send size %d buffer_size%d size %d", send_size, buffer_size, size);    
+//    printf("send ray send size %d buffer_size%d size %d", send_size, buffer_size, size);    
     MPI_Send(&data[(buffer_size - send_size) * width], send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
     buffer->size -= send_size;
 }
@@ -38,7 +37,7 @@ void Communicator::Isend_rays(struct RayQueue* buffer, int size, int dst, int ta
     int buffer_size = buffer->get_size();
     float *data = buffer->rays();
     int    send_size = buffer_size > size ? size : buffer_size;
-    printf("send ray send size %d buffer_size%d size %d", send_size, buffer_size, size);    
+ //   printf("send ray send size %d buffer_size%d size %d\n", send_size, buffer_size, size);    
     MPI_Isend(&data[(buffer_size - send_size) * width], send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD, &req[tag]);
     buffer->size -= send_size;
 }
@@ -63,8 +62,7 @@ int Communicator::Recv_rays(struct RayQueue* buffer, int src) {
         float *rays = &buffer->rays()[buffer->get_size() * width];
         MPI_Recv(rays, recv_num, MPI_FLOAT, src, 1, MPI_COMM_WORLD, sta); 
         buffer->size += recv_num / width;
-        printf("get rays from %d recv_num %d size %d", src, recv_num / width, buffer->get_size());
-        printf("\n");
+//        printf("get rays from %d recv_num %d size %d\n", src, recv_num / width, buffer->get_size());
         return 2;
     }
 }
@@ -99,7 +97,6 @@ bool Communicator::Server_recv(struct RayQueue* buffer, int *msg) {
         MPI_Recv(msg, 3, MPI_INT, src, 1, MPI_COMM_WORLD, sta);
         return true;
     } else {
-        printf("master recv rays %d\n\n", recv_num / width);
         MPI_Get_count(&sta[0], MPI_FLOAT, &recv_num);
         MPI_Recv(buffer->rays(), recv_num, MPI_FLOAT, src, 1, MPI_COMM_WORLD, sta);
 //    int* a = (int*)buffer->data;
@@ -112,4 +109,10 @@ bool Communicator::Server_recv(struct RayQueue* buffer, int *msg) {
     }
 }
 
-
+void Communicator::Reduce_image(float* film, float *reduce_buffer, int pixel_num, bool server){
+    if(server){
+        MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, Client_Comm); 
+    } else {
+        MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
+    }
+}

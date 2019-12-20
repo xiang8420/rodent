@@ -11,26 +11,19 @@ struct Server {
 
     double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
-    pthread_mutex_t mutex;
-    pthread_cond_t  isempty;
-    pthread_t pids[2];
-
     Server(struct Communicator *comm):comm(comm) {
         slave_num = comm->size - 1;
         width = comm->width;
         recv_capacity = 1048608;
-        buffer_capacity = 4 * recv_capacity;
+        buffer_capacity = 16 * recv_capacity;
         raybuffer = new struct RayQueue(recv_capacity, width); 
         rayqueue  = new struct RayQueue *[slave_num];
         slave_wait = new bool[slave_num];
         for(int i = 0; i < slave_num; i++){
-            rayqueue[i] = new struct RayQueue(buffer_capacity * 2, width);
+            rayqueue[i] = new struct RayQueue(buffer_capacity, width);
             slave_wait[i] = false;
         }
         
-        pthread_mutex_init(&mutex, NULL);
-        pthread_cond_init(&isempty, NULL);
-    
         recv_num = 0; send_num = 0;
         
         st = clock();
@@ -44,27 +37,26 @@ struct Server {
             delete rayqueue[i];
         }
         delete raybuffer;
-        pthread_mutex_destroy(&mutex);
-        pthread_cond_destroy(&isempty);
     }; 
 
     // ray queue isempty and recv all slave end msg
     bool shutdown(){
-            return false;
+        return false;
     }
 
     void run(){
         int msg[3];
         bool all_done = false;
+//        return;
         for(;;){
             // master recv, true: recv a request  
             //             false: recv ray data
             double t = clock();
             if(comm->Server_recv(raybuffer, &msg[0])){
                 recv_t += (double)(clock() - t) / CLOCKS_PER_SEC;
+                int id = msg[1];
                 if(msg[0] == 0) {
                     // slave has no work
-                    int id = msg[1];
                     slave_wait[id] = true;
                     if(rayqueue[id]->isempty()) {
                         // if slave wait and no rays in its queue
@@ -103,9 +95,9 @@ struct Server {
                 printf("recv size%d\n", recv_size);
                 for(int i = 0; i < recv_size; i++){
                     int chunk_id = bufferdata[i * width + 10]  >> 12;
-                    if(i<10){            
-                        printf("|%d : %d : %d |", bufferdata[i * width], chunk_id, bufferdata[i * width + 10]);
-                    }
+//                    if(chunk_id == 0 && i < 10){            
+//                        printf("|%d : %d : %d |", bufferdata[i * width], chunk_id, bufferdata[i * width + 10]);
+//                    }
                     rayqueue[chunk_id]->copy(raybuffer, i);
                     if(rayqueue[chunk_id]->isfull()){
                         printf("error queue is is full %d %d %d\n", chunk_id, rayqueue[chunk_id]->get_size(), rayqueue[chunk_id]->get_capacity());   
