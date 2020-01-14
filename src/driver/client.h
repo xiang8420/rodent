@@ -64,12 +64,12 @@ struct Client{
             usleep(100);
             p->mutex.lock();
             if(!queue->isempty() && wait_buffer->isempty()){
-                printf("fill wait buffer\n");
                 int queue_size = queue->get_size();
                 int st = queue_size > buffer_size ? queue_size - buffer_size : 0;
                 int n  = st == 0 ? queue_size : buffer_size;
                 wait_buffer->put(queue->data, st, n);
                 queue->size -= wait_buffer->get_size();
+                p->has_work = true;
             }
             bool work = p->has_work; 
             p->mutex.unlock();
@@ -120,29 +120,27 @@ struct Client{
             } 
         }
         if(server != -1){
-            printf("request thread\n"); 
             thread[dev_num] = new std::thread(request, (void*)this);
             thread[dev_num]->join();
-            printf("request thread end\n"); 
         }
         for(int i = 0; i < dev_num; i++){
-            printf("wait end \n");
             thread[i]->join();
-            printf(" end \n");
         }
     }
 
     void send_rays(float *rays, size_t size, size_t capacity, bool send_all){
         int *id = (int *) rays;
-        int *chunk = (int *) &rays[capacity * 10];
+        int *chunk = (int *) &rays[capacity * 9];
+        printf("send size %d\n", size);
         for(int i = 0; i < size; i++) {
             wait_send_buffer->put(rays, i, 1, capacity);
             int* d = (int*)wait_send_buffer->data;
             if(wait_send_buffer->isfull()) {
 //                send_ray_num += wait_send_buffer->get_size(); 
-//                for(int j = 0; j < 10; j++){
-//                    printf("%d|", d[j * 20 + 10]);
-//                }
+                printf("send :");
+                for(int j = 0; j < 10; j++){
+                    printf("%d|", d[j * 21 + 9]);
+                }
                 printf("send buffer_size%d \n\n", wait_send_buffer->get_size());
 //                if(!first) {comm->Wait(0);} else {first = false;}
                 swap(send_buffer, wait_send_buffer); 
@@ -150,8 +148,12 @@ struct Client{
             }
         }
         if(send_all && !wait_send_buffer->isempty()){
-            printf("send buffer_size%d \n\n", wait_send_buffer->get_size());
 //                if(!first) {comm->Wait(0);} else {first = false;}
+            printf("send :");
+            int* d = (int*)wait_send_buffer->data;
+//            for(int j = 0; j < 10; j++){
+//                printf(" %d %d * %d %d|", id[j], chunk[j], d[j * 21], d[j * 21 + 9]);
+//            }
             swap(send_buffer, wait_send_buffer); 
             comm->Send_rays(send_buffer, send_buffer->get_size(), server);
         }
@@ -159,30 +161,33 @@ struct Client{
     }
 
     int recv_rays(float *rays, size_t rays_size, bool idle){
-        printf("client need rays\n");
+//        printf("%d client need rays\n", mpi_rank);
         do{
+    //        printf("%d waiting  ", mpi_rank);
             mutex.lock();
+    //        printf("%d lock  ", mpi_rank);
             if(!wait_buffer->isempty()){
    //             swap(rays, wait_buffer->data);
                 int copy_size = wait_buffer->size < buffer_size - rays_size ? wait_buffer->size : buffer_size - rays_size; 
                 int buffer_st = wait_buffer->size - copy_size;
                 int rays_st   = rays_size;
-                for(int i = 0; i < 20; i++ ){
+                for(int i = 0; i < 21; i++ ){
                     for(int j = 0; j < copy_size; j++){
                         int src = buffer_st + j;
-                        int dst = rays_st +j;
+                        int dst = rays_st + j;
                         rays[i * 1048608 + dst] = wait_buffer->data[i * 1048608 + src];
                     }
                 }
                 
                 if(mpi_rank == 0) {    
-//                    printf("ray size %d buffer size %d copy size %d buffer st %d rays st%d\n", rays_size, wait_buffer->size, copy_size, buffer_st, rays_st);
+                    printf("ray size %d buffer size %d copy size %d buffer st %d rays st%d\n", rays_size, wait_buffer->size, copy_size, buffer_st, rays_st);
                     printf("copy size %d\n", copy_size);
                     int* ids = (int*)rays;
                     for(int i = 0; i < 10; i ++) {
-                        printf("| %d %d *", ids[i + rays_st], ids[i + rays_st + 10 * 1048608]);
+                        printf("| %d %d *", ids[i + rays_st], ids[i + rays_st + 9 * 1048608]);
                     }
                     printf("\n");
+                    printf("wait buffer %d\n", wait_buffer->size);
                 }
 
                 wait_buffer->size -= copy_size;
@@ -198,7 +203,7 @@ struct Client{
                 }
                 return rays_size;
             }
-            usleep(100);
+            usleep(4000);
         }while(idle);
     }
 }; 

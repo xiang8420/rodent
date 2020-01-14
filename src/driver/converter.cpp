@@ -726,7 +726,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     std::vector<float>  light_areas;
     std::vector<obj::Material> light_mats;
     for(int c = 0, n = chunk.size(); c < n; c++){
-        auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c));
+        auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c), false);
         // if chunk is empty ??
         printf("tri mesh num %d \n", tri_mesh.indices.size() / 4);
         std::string chunk_path = c > 9 ? "data/0" : "data/00";
@@ -751,6 +751,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                     simple_ks[j] = mat.ks;
                     simple_ns[j] = mat.ns;
                     geom_id = num_complex;
+                } else if(geom_id == num_mats) {
+                    geom_id = std::min(num_complex + 1, num_mats);
                 } else {
                     simple_kd[j] = rgb(0.1f, 0.05f, 0.01f);
                     simple_ks[j] = rgb(0.1f, 0.05f, 0.01f);
@@ -813,9 +815,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 }
             }
         }
-           
+          printf("light\n"); 
         //Local Light data light id
         std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
+        printf("tri mesh size %d\n", tri_mesh.indices.size() / 4);
         for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
             light_ids[i / 4] = 0;
@@ -823,6 +826,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             auto& mtl_name = obj_file.materials[tri_mesh.indices[i + 3]];
             if (mtl_name == "")
                 continue;
+//            printf("search mtl %d %s\n", tri_mesh.indices[i + 3], mtl_name.c_str());
             auto& mat = mtl_lib.find(mtl_name)->second;
             if (mat.ke == rgb(0.0f) && mat.map_ke == "")
                 continue;
@@ -867,8 +871,9 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light_colors.emplace_back(mat.ke);
             }
         }
+        printf("light over\n"); 
         write_buffer(chunk_path + "ligt_ids.bin", light_ids);
-
+        printf("chunk over\n"); 
     }
 
     os << "\n    // Lights\n";
@@ -1040,15 +1045,15 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        bvh:            bvh, \n"
        << "        bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
                                                          << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
-       << "        scale:          make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
+       << "        grid:          make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
        << "        chunk:          chunk \n"
        << "    }\n"
        << "}\n";
     
     os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32) -> () { \n"   
-       << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, 2 /*spp*/); \n";
-    for(int dev_id = 0; dev_id < dev_num; dev_id++){
-        
+       << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, " << spp << " /*spp*/); \n";
+    for(int dev_id = 0; dev_id < dev_num; dev_id++){                            
+                                                                                
         Target target = target_list[dev_id];
         auto dev = dev_list[dev_id];
         if(dev_id == 0){

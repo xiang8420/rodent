@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
     uint32_t iter = 0;
     
     // mpi
-    struct Communicator comm(20);
+    struct Communicator comm(21);
     bool c_s = true; 
     int  client_size = c_s ? comm.size - 1: comm.size;
     setup_scheduler(comm.rank, client_size, chunk_num);

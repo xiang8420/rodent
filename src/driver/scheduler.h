@@ -76,8 +76,8 @@ struct Scheduler {
         lock_path = "data/rays/lock" + std::to_string(chunk_id);
         for(int i = 0; i<= num_chunks; i++) {
             num_rays[i] = 0;
-            rays[i].reserve(CAPACITY * 20);
-            rays[i].resize(CAPACITY * 20);
+            rays[i].reserve(CAPACITY * 21);
+            rays[i].resize(CAPACITY * 21);
             rays[i].push_back(0);
         }
         first.setup(&rays[chunk_id], 0);

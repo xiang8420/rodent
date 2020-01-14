@@ -29,7 +29,7 @@ fn @cpu_parallel_tiles( film_width: i32
     }
 }
 
-extern fn cpu_sort_primary(primary: &PrimaryStream, ray_begins: &mut [i32], ray_ends: &mut[i32], num_geometries: i32, kill_nohit_rays: bool) -> i32 {
+extern fn cpu_sort_primary(primary: &PrimaryStream, ray_begins: &mut [i32], ray_ends: &mut[i32], num_geometries: i32, keep_nohit_rays: bool) -> i32 {
     let read_primary_hit = make_primary_stream_hit_reader(*primary, 1);
 
     // Count the number of rays per shader
@@ -47,10 +47,6 @@ extern fn cpu_sort_primary(primary: &PrimaryStream, ray_begins: &mut [i32], ray_
         ray_begins(i) = n;
         n += ray_ends(i);
         ray_ends(i) = n;
-//        print_string(" ");
-//        print_i32(ray_begins(i));
-//        print_string(" ");
-//        print_i32(ray_ends(i));
     }
     print_string("\n");
     
@@ -73,6 +69,7 @@ extern fn cpu_sort_primary(primary: &PrimaryStream, ray_begins: &mut [i32], ray_
                 swap_f32(&mut primary.rays.tmin(k),  &mut primary.rays.tmin(j));
                 swap_f32(&mut primary.rays.tmax(k),  &mut primary.rays.tmax(j));
 
+                swap_i32(&mut primary.grid_id(k),   &mut primary.grid_id(j));
                 swap_i32(&mut primary.geom_id(k),   &mut primary.geom_id(j));
                 swap_i32(&mut primary.prim_id(k),   &mut primary.prim_id(j));
                 swap_f32(&mut primary.t(k),         &mut primary.t(j));
@@ -90,7 +87,7 @@ extern fn cpu_sort_primary(primary: &PrimaryStream, ray_begins: &mut [i32], ray_
         }
     }
     // Kill rays that have not intersected anything
-    if kill_nohit_rays { 
+    if keep_nohit_rays { 
         ray_ends(num_geometries) 
     } else {
         ray_ends(num_geometries - 1) 
@@ -133,7 +130,7 @@ fn @cpu_compact_primary(primary: &PrimaryStream, vector_width: i32, vector_compa
 
                     cpu_compact_ray_stream(primary.rays, k + j, i + j, mask);
 
-                    primary.prim_id(k + j)   = bitcast[i32](rv_compact(bitcast[f32](primary.prim_id(i + j)), mask));
+                    primary.grid_id(k + j)   = bitcast[i32](rv_compact(bitcast[f32](primary.grid_id(i + j)), mask));
                     primary.rnd(k + j)       = bitcast[u32](rv_compact(bitcast[f32](primary.rnd(i + j)), mask));
                     primary.mis(k + j)       = rv_compact(primary.mis(i + j), mask);
                     primary.contrib_r(k + j) = rv_compact(primary.contrib_r(i + j), mask);
@@ -149,7 +146,7 @@ fn @cpu_compact_primary(primary: &PrimaryStream, vector_width: i32, vector_compa
                 let id = primary.rays.id(i);
                 if id >= 0 {
                     primary.rays.id(k)   = id;
-                    primary.prim_id(k)   = primary.prim_id(i);
+                    primary.grid_id(k)   = primary.grid_id(i);
                     cpu_move_ray_stream(primary.rays, k, i);
                     primary.rnd(k)       = primary.rnd(i);
                     primary.mis(k)       = primary.mis(i);
@@ -240,7 +237,7 @@ fn @cpu_generate_rays( primary: PrimaryStream
         write_ray(cur_ray, 0, ray);
         write_state(cur_ray, 0, state);
         primary.rays.id(cur_ray) = y * film_width + x;
-        primary.prim_id(cur_ray) = 1022 as i32;
+        primary.grid_id(cur_ray) = 1022 as i32;
     }
     *id = first_id + num_rays;
     primary.size + num_rays
@@ -252,7 +249,7 @@ fn @cpu_traverse_primary(scene: Scene, min_max: MinMax, primary: &PrimaryStream,
             min_max,
             scene.bvh,
             make_ray_stream_reader(primary.rays, vector_width),
-            make_primary_stream_hit_writer(*primary, vector_width, scene.num_geometries),
+            make_primary_stream_hit_writer(*primary, vector_width, scene.num_geometries + 1),
             vector_width /*packet_size*/,
             primary.size / vector_width + select(primary.size % vector_width != 0, 1, 0),
             single,
@@ -272,7 +269,7 @@ fn @cpu_traverse_secondary(scene: Scene, min_max: MinMax, secondary: &SecondaryS
             vector_width /*packet_size*/,
             secondary.size / vector_width + select(secondary.size % vector_width != 0, 1, 0),
             single,
-            true /*any_hit*/
+            false /*any_hit*/
         );
     }
     ($cpu_traverse_secondary_specialized)(secondary);
@@ -286,8 +283,8 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
         let write_primary_ray   = make_ray_stream_writer(primary.rays, 1);
         let write_primary_state = make_primary_stream_state_writer(*primary, 1);
         let write_secondary_ray = make_ray_stream_writer(secondary.rays, 1);
-        let prim_ids    = primary.prim_id;
-        let write_chunk = @ |i, _, id| prim_ids(i) = id;
+        let grid_ids    = primary.grid_id;
+        let write_grid = @ |i, _, id| grid_ids(i) = id;
 	    for i, vector_width in vectorized_range(vector_width, begin, end) {
             let ray       = read_primary_ray(i, 0);
             let hit       = read_primary_hit(i, 0);
@@ -299,6 +296,11 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
             let mat    = geom.shader(ray, hit, surf);
 
             // Execute hit point shading, and add the contribution of each lane to the frame buffer
+            if(geom_id == scene.num_geometries) {
+                write_primary_ray(i, 0, make_ray(vec3_add(surf.point, vec3_mulf(ray.dir, 0.0001f)), ray.dir, 0.001f, flt_max)); 
+                write_grid(i, 0, 1022);
+                continue()
+            }
 
             let mut hit_color;
             for once() {
@@ -341,11 +343,11 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
                 @@(path_tracer.on_bounce)(ray, hit, &mut state, surf, mat, @ |new_ray, new_state| -> ! {
                     write_primary_ray(i, 0, new_ray);
                     write_primary_state(i, 0, new_state);
-                    write_chunk(i, 0, 1022);
+                    write_grid(i, 0, 1022);
                     break()
                 }, @ || -> ! {
                     primary.rays.id(i) = -1;
-                    write_chunk(i, 0, -1000);
+                    write_grid(i, 0, -1000);
                     break()
                 })
             }
@@ -412,7 +414,6 @@ fn @cpu_trace( scene: Scene
                     primary.size = cpu_generate_rays(primary, capacity, path_tracer, &mut id, xmin, ymin, xmax, ymax, 
                                                 film_width, film_height, spp, vector_width);
                 }
-
                 // Trace primary rays
                 with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {
                     if use_embree {
@@ -483,13 +484,14 @@ fn @cpu_trace( scene: Scene
     }
 }
 
-fn @cpu_get_chunk_id( primary: PrimaryStream
+fn @cpu_get_grid_id( rays: RayStream
+                    , grid_ids: &mut [i32]
+                    , size: i32 
                     , min_max: MinMax
                     , vector_width: i32
                     , scene: Scene
                     ) -> () {
     let bbox  = scene.bbox;
-    let overlapped_bbox = make_bbox(bbox.min, make_vec3(bbox.max.x * 1.001f, bbox.max.y * 1.001f, bbox.max.z * 1.001f));
     let grid  = make_vec3i(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
     let scale = vec3_sub(bbox.max, bbox.min);
     let step  = vec3_div(scale, scene.grid);
@@ -497,18 +499,14 @@ fn @cpu_get_chunk_id( primary: PrimaryStream
  
     let num_chunks = grid.x * grid.y * grid.z;
 
-    let prim_ids    = primary.prim_id;
-    let write_chunk = @ |i, _, id| prim_ids(i) = id;
-    let write_ray   = make_ray_stream_writer(primary.rays, 1);
+    let write_chunk = @ |i, _, id| grid_ids(i) = id;
+    let ray_reader  = make_ray_stream_reader(rays, 1);
+    let ray_ids     = rays.id;
     // Compact primary rays into another queue
-
-    let ray_ids     = primary.rays.id;
     
-    for src_id, _ in vectorized_range(vector_width, 0, primary.size) {
-        let ray = make_ray_stream_reader(primary.rays, 1)(src_id, 0);
-        if ray_ids(src_id) == -1 {
-            write_chunk(src_id, 0, -1000);
-        } else if prim_ids(src_id) == 1022  {
+    for src_id, _ in vectorized_range(vector_width, 0, size) {
+        let ray = ray_reader(src_id, 0);
+        if grid_ids(src_id) == 1022  {
             if inside_point_bbox(bbox, ray.org){
                 // bad : equals itself chunk
                 let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
@@ -524,9 +522,9 @@ fn @cpu_get_chunk_id( primary: PrimaryStream
                 }
             }
         } else {
-                let coord = get_coordinate(prim_ids(src_id));
-                let compressed_chunk_id = get_closest_chunk(min_max, ray, bbox, coord, grid, step, inv_step, cpu_intrinsics);
-                write_chunk(src_id, 0, compressed_chunk_id);
+            let coord = get_coordinate(grid_ids(src_id));
+            let compressed_chunk_id = get_closest_chunk(min_max, ray, bbox, coord, grid, step, inv_step, cpu_intrinsics);
+            write_chunk(src_id, 0, compressed_chunk_id);
         }
     } 
 }
@@ -538,7 +536,8 @@ fn @cpu_primary_transfer( primary: PrimaryStream
                         , capacity: i32
                         , generate_end: bool 
                         ) -> (i32, i32) {
-    let prim_ids = primary.prim_id;
+    let grid_ids = primary.grid_id;
+    let buffer_grids = buffer.grid_id;
     let mut primary_size;
     let mut buffer_size;
     let mut dead_rays;
@@ -548,7 +547,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
     buffer_size = buffer.size;
     
     for i in range(0, primary.size) {
-        let cid = get_chunk_id(prim_ids(i));
+        let cid = get_chunk_id(grid_ids(i));
         if cid == chunk {
             copy_primary_ray(primary, primary, i, primary_size++, true);
         } else if cid != -1 {
@@ -561,16 +560,11 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             dead_rays++;
         } 
     } 
-//    print_string("dead rays");
-//    print_i32(dead_rays);
-//   print_string("\n");
-
-//    print_string("primary "); 
-//    print_i32(primary.size);
-//    print_string("\n"); 
     let idle = generate_end && primary_size == 0; 
     if idle {
         print_string("slave send left rays");
+        print_i32(buffer_size);
+        print_string("\n");
         rodent_buffer_primary_send(-1, buffer_size, true);
         buffer_size = 0;
     }    
@@ -579,7 +573,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
     (primary_size, buffer_size)    
 }
 
-fn @check_prim_id(primary: PrimaryStream, chunk: i32, pos: i32) -> () {
+fn @check_grid_id(primary: PrimaryStream, chunk: i32, pos: i32) -> () {
     if chunk == 0 {
         let mut ray_id = 0;
         let mut prim_0 = 0;
@@ -588,14 +582,17 @@ fn @check_prim_id(primary: PrimaryStream, chunk: i32, pos: i32) -> () {
         let mut prim_1022 = 0;    
      
         let ray_ids     = primary.rays.id;
-        let prim_ids    = primary.prim_id;
+        let grid_ids    = primary.grid_id;
         for i in range(0, primary.size) {
             if ray_ids(i) == -1 {ray_id ++; }
-            if prim_ids(i) == 0 {prim_0 ++; }
-            if prim_ids(i) == 4352 {prim_4352 ++; }
-            if prim_ids(i) == -1000 {prim_1000 ++; }
-            if prim_ids(i) == 1022 {prim_1022 ++;}
+            if grid_ids(i) == 0 {prim_0 ++; }
+            if grid_ids(i) == 4352 {prim_4352 ++; }
+            if grid_ids(i) == -1000 {prim_1000 ++; }
+            if grid_ids(i) == 1022 {prim_1022 ++;}
         }
+        print_string("chunk:");
+        print_i32(chunk);
+        print_string("|");
         print_i32(pos);
         print_string(" ray id -1: "); print_i32(ray_id); 
         print_string(" | prim 1022: "); print_i32(prim_1022); 
@@ -654,30 +651,53 @@ fn @cpu_dis_trace( scene: Scene
         let num_rays = spp * (image_range(2) - image_range(0)) as i32 * (image_range(3) - image_range(1)) as i32;
         
         print_i32(num_rays);
+        let print_node = 1;
         while  id < num_rays || primary.size > 0 || has_unloaded_rays {
             let first = id == 0;
             // (Re-)generate primary rays
+            if scene.chunk == print_node {
+                print_string("primary size before transfer ");
+                print_i32(primary.size);
+                print_string("\n");
+            }
             if primary.size < capacity {
                 primary.size = cpu_generate_rays(primary, capacity, path_tracer, &mut id, 0, 0, film_width, film_height, 
                                             film_width, film_height, spp, vector_width);
             }
+//            check_grid_id(primary, scene.chunk, -1);
             with cpu_profile(&mut get_chunk_counter) {
-                cpu_get_chunk_id(primary, min_max, vector_width, scene);
+                cpu_get_grid_id(primary.rays, primary.grid_id, primary.size, min_max, vector_width, scene);
+            }
+//            check_grid_id(primary, scene.chunk, 0);
+            if scene.chunk == print_node {
+                rodent_first_primary_check(-1, primary.size, 2, true);
+                print_string("buffer size");
+                print_i32(buffer.size);
             }
             with cpu_profile(&mut transfer_counter) {
                 let (primary_size, buffer_size) = cpu_primary_transfer(primary, buffer, scene.chunk, capacity, id == num_rays);
                 primary.size = primary_size; 
                 buffer.size = buffer_size; 
             }
-//            rodent_first_primary_check(-1, primary.size, 2, true);
+            if scene.chunk == print_node {
+                rodent_first_primary_check(-1, primary.size, 2, true);
+                print_string("buffer size");
+                print_i32(buffer.size);
+                print_string("primary size after transfer: "); print_i32(primary.size); 
+                print_string("num rays id "); print_i32(id); print_string("\n");
+            }
             has_unloaded_rays = primary.size > 0;
-            print_string("primary size after transfer: "); print_i32(primary.size); 
-            print_string("num rays id "); print_i32(id); print_string("\n");
+//            check_grid_id(primary, scene.chunk, 1);
             if primary.size == 0 {
+                print_string("primary size == 0:");
+                print_i32(id);
+                print_string("\n");
                 if id < num_rays {continue()}
                 else {break()}
             }
-    
+            if scene.chunk == print_node {
+                print_string("before traverse\n");
+            } 
             // Trace primary rays
             with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {
                 if use_embree {
@@ -686,24 +706,53 @@ fn @cpu_dis_trace( scene: Scene
                     cpu_traverse_primary(scene, min_max, primary, single, vector_width);
                 }
             }
+            if scene.chunk == print_node {
+                print_string("after traverse\n");
+            } 
+//            check_grid_id(primary, scene.chunk, 2);
             // Sort hits by shader id, and filter invalid hits
             let mut ray_begins : [i32 * 1024];
             let mut ray_ends   : [i32 * 1024];
-            primary.size = cpu_sort_primary(primary, &mut ray_begins, &mut ray_ends, scene.num_geometries, true);
+            primary.size = cpu_sort_primary(primary, &mut ray_begins, &mut ray_ends, scene.num_geometries + 2, true);
+            if scene.chunk == print_node {
+                print_string("after sort\n");
+                check_grid_id(primary, scene.chunk, 3);
+                print_string("geom num: "); 
+                for i in range(0, scene.num_geometries) {
+                    print_i32(ray_ends(i)); 
+                    print_string("  ");
+                }        
+                print_string("\n"); 
+            } 
             // Perform (vectorized) shading
             with cpu_profile(&mut shading_counter) {
                 let mut begin = 0;
-                for geom_id in unroll(0, scene.num_geometries) {
+                for geom_id in unroll(0, scene.num_geometries + 1) {
                     let end = ray_ends(geom_id);
+                    if scene.chunk == print_node {
+                        print_string("| ");
+                        print_i32(geom_id);
+                    }
                     cpu_shade(geom_id, primary, secondary, scene, path_tracer, accumulate, begin, end, vector_width);
                     begin = end;
+                    if scene.chunk == print_node {
+                        print_i32(geom_id);
+                        print_string(" ");
+                    }
                 }
             }
-            check_prim_id(primary, scene.chunk, 5);
+            if scene.chunk == print_node {
+                print_string("after shade\n");
+            } 
+            check_grid_id(primary, scene.chunk, 4);
             // Filter terminated rays
-            primary.size   = cpu_compact_primary(primary, vector_width, vector_compact);
+            primary.size   = cpu_compact_primary(primary, vector_width, false /*vector_compact*/);
             secondary.size = ray_ends(scene.num_geometries - 1);
-            check_prim_id(primary, scene.chunk, 6);
+            
+            //cpu_get_grid_id(secondary.rays, secondary.grid_id, secondary.size, min_max, vector_width, scene);
+            //let (secondary_size, secondary_buffer_size) = cpu_primary_transfer(primary, buffer, scene.chunk, capacity, id == num_rays);
+            //primary.size = primary_size; 
+            //buffer.size = buffer_size; 
 
             // Compact and trace secondary rays
             secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
@@ -719,7 +768,7 @@ fn @cpu_dis_trace( scene: Scene
 
             // Add the contribution for secondary rays to the frame buffer
             for i in range(0, secondary.size) {
-                if secondary.prim_id(i) < 0 {
+                if secondary.prim_id(i) < 0 || secondary.grid_id(i) == scene.num_geometries {
                     let j = secondary.rays.id(i);
                     accumulate(j,
                         make_color(

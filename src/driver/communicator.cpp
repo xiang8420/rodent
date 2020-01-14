@@ -20,15 +20,15 @@ Communicator::~Communicator() {
 }
     
 void Communicator::Send_rays(struct RayQueue* buffer, int size, int dst) {
-//    int* a = (int*)buffer->data;
-//    for(int i = 0; i < 10; i ++) {
-//        printf("%d %d *", a[i * width], a[i * width + 10]);
-//    } 
-//    printf("\n");
+    printf("src %d dst %d:", rank, dst);
+    int* a = (int*)buffer->data;
+    for(int i = 0; i < 10; i ++) {
+        printf("%d %d *", a[i * width], a[i * width + 9]);
+    } 
+    printf("\n");
     int buffer_size = buffer->get_size();
     float *data = buffer->rays();
     int    send_size = buffer_size > size ? size : buffer_size;
-//    printf("send ray send size %d buffer_size%d size %d", send_size, buffer_size, size);    
     MPI_Send(&data[(buffer_size - send_size) * width], send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
     buffer->size -= send_size;
 }

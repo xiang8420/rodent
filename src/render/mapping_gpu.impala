@@ -138,35 +138,6 @@ fn @gpu_shade(acc: Accelerator, atomics: Atomics, scene: Scene, path_tracer: Pat
     }
 }
 
-fn @copy_primary_ray( primary: PrimaryStream
-                    , other_primary: PrimaryStream
-                    , src_id: i32
-                    , dst_id: i32
-                    , keep_hit: bool
-                    ) -> () {
-    other_primary.rays.id(dst_id)    = primary.rays.id(src_id);
-    other_primary.rays.org_x(dst_id) = primary.rays.org_x(src_id);
-    other_primary.rays.org_y(dst_id) = primary.rays.org_y(src_id);
-    other_primary.rays.org_z(dst_id) = primary.rays.org_z(src_id);
-    other_primary.rays.dir_x(dst_id) = primary.rays.dir_x(src_id);
-    other_primary.rays.dir_y(dst_id) = primary.rays.dir_y(src_id);
-    other_primary.rays.dir_z(dst_id) = primary.rays.dir_z(src_id);
-    other_primary.rays.tmin(dst_id)  = primary.rays.tmin(src_id);
-    other_primary.rays.tmax(dst_id)  = primary.rays.tmax(src_id);
-    if keep_hit {
-        other_primary.geom_id(dst_id) = primary.geom_id(src_id);
-        other_primary.prim_id(dst_id) = primary.prim_id(src_id);
-        other_primary.t(dst_id)       = primary.t(src_id);
-        other_primary.u(dst_id)       = primary.u(src_id);
-        other_primary.v(dst_id)       = primary.v(src_id);
-    }
-    other_primary.rnd(dst_id)        = primary.rnd(src_id);
-    other_primary.mis(dst_id)        = primary.mis(src_id);
-    other_primary.contrib_r(dst_id)  = primary.contrib_r(src_id);
-    other_primary.contrib_g(dst_id)  = primary.contrib_g(src_id);
-    other_primary.contrib_b(dst_id)  = primary.contrib_b(src_id);
-    other_primary.depth(dst_id)      = primary.depth(src_id);
-}
 
 fn @gpu_sort_primary( primary: PrimaryStream
                     , other_primary: PrimaryStream

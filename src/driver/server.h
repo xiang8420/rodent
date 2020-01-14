@@ -51,6 +51,7 @@ struct Server {
         for(;;){
             // master recv, true: recv a request  
             //             false: recv ray data
+//            sleep(1);
             double t = clock();
             if(comm->Server_recv(raybuffer, &msg[0])){
                 recv_t += (double)(clock() - t) / CLOCKS_PER_SEC;
@@ -58,6 +59,7 @@ struct Server {
                 if(msg[0] == 0) {
                     // slave has no work
                     slave_wait[id] = true;
+//                    printf("idle %d %d\n", slave_wait[0], slave_wait[1]);
                     if(rayqueue[id]->isempty()) {
                         // if slave wait and no rays in its queue
                         all_done = true;
@@ -71,7 +73,8 @@ struct Server {
                     if(all_done) {
                         break;
                     }
-                } 
+                }
+
                 int dst = msg[1];  
                 int request_size = msg[2];
 
@@ -79,24 +82,21 @@ struct Server {
                 if(!rayqueue[dst]->isempty()) {
                     slave_wait[dst] = false;
                     struct RayQueue *r = rayqueue[dst]; 
-                    printf("send rays %d\n", dst);
                     comm->Send_rays(rayqueue[dst], rayqueue[dst]->size, dst);
                 } else {
                     comm->Send_noray(dst);
                 }
                 send_t += (double)(clock() - t) / CLOCKS_PER_SEC;
             } else {
-                printf("get rays\n");
                 recv_t += (double)(clock() - t) / CLOCKS_PER_SEC;
                 int recv_size = raybuffer->get_size();
 
                 // arrange data
                 int *bufferdata   = (int*) raybuffer->data;
-                printf("recv size%d\n", recv_size);
                 for(int i = 0; i < recv_size; i++){
-                    int chunk_id = bufferdata[i * width + 10]  >> 12;
-//                    if(chunk_id == 0 && i < 10){            
-//                        printf("|%d : %d : %d |", bufferdata[i * width], chunk_id, bufferdata[i * width + 10]);
+                    int chunk_id = bufferdata[i * width + 9]  >> 12;
+//                    if(chunk_id == 0 && i < 9){            
+//                        printf("|%d : %d : %d |", bufferdata[i * width], chunk_id, bufferdata[i * width + 9]);
 //                    }
                     rayqueue[chunk_id]->copy(raybuffer, i);
                     if(rayqueue[chunk_id]->isfull()){
@@ -104,13 +104,22 @@ struct Server {
                         rayqueue[chunk_id]->clear();
                     }
                 }
-                printf("\n");
                 for(int i = 0; i < slave_num;i++){
                     printf("%d %d \n", i, rayqueue[i]->get_size());
                 }
+                printf("\n");
                 raybuffer->clear();
             }
+ //           for(int i = 0; i < slave_num;i++){
+ //               printf("%d %d \n", i, rayqueue[i]->get_size());
+ //           }
+ //           printf("\n");
         }
+        printf("server send all over\n");
+        for(int i = 0; i < slave_num;i++){
+            printf("%d %d \n", i, rayqueue[i]->get_size());
+        }
+        printf("\n");
         for(int i = 0; i < slave_num; i++){
              comm->Send_end(i);
         }

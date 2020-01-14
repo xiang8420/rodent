@@ -71,7 +71,7 @@ struct TriMesh {
 
 bool load_obj(const FilePath&, File&, int, int);
 bool load_mtl(const FilePath&, MaterialLib&);
-TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&);
+TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&, bool);
 bool chunk_division(File& file);
 } // namespace obj
 

@@ -11,13 +11,6 @@ struct Ray {
     ~Ray(){
         delete[] data;
     }
- 
-    // queue store is different from orign ray
-    void put(int id, float info){
-        data[size] = id;
-        data[size + capacity] = info;
-        size++;
-    }
 
     float& operator[](int id) const {
        return data[id]; 
@@ -41,7 +34,8 @@ struct Ray {
     int get_size() { return size;}
    
     int get_capacity() {return capacity;}
-    
+ 
+    // queue store is different from orign ray
     void put(float *queue, int src, int num) {
         for(int i = 0; i < num; i++){
             for(int j = 0; j < width; j++) {
@@ -67,11 +61,6 @@ struct RayQueue {
     }
 
   // queue store is different from orign ray
-    void put(int id, float info){
-        data[size * width] = id;
-        data[size * width + 1] = info;
-        size++;
-    }
 
     void put(float *rays, int src, int num, int rays_capacity) {
         for(int i = 0; i < num; i++){

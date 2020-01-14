@@ -413,7 +413,79 @@ static void compute_vertex_normals(const std::vector<uint32_t>& indices,
     }
 }
 
-TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, size_t mtl_offset, BBox& bbox) {
+void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis) {
+    std::vector<TriIdx> triangles;
+    auto vtx_offset = tri_mesh.vertices.size();                                                       
+    auto idx_offset = tri_mesh.indices.size();                                                        
+    tri_mesh.indices.resize(idx_offset + 4 * 2);                                                      
+    tri_mesh.vertices.resize(vtx_offset + 4);                                                         
+    tri_mesh.texcoords.resize(vtx_offset + 4);                                                        
+    tri_mesh.normals.resize(vtx_offset + 4);                                                          
+   
+    printf("face %f %f %f %f %f\n", bbox.max.x, bbox.min.y, bbox.min.z, bbox.max.y, bbox.max.z);
+
+    size_t m = obj_file.materials.size();   
+    size_t idx[] = {0 + vtx_offset, 1 + vtx_offset, 2 + vtx_offset, m, 0 + vtx_offset, 2 + vtx_offset, 3 + vtx_offset, m};
+    for(int i = 0; i < 8; i++) {
+        tri_mesh.indices[idx_offset + i] = idx[i];                                                
+    }
+
+    if (axis == 0) {
+        tri_mesh.vertices[vtx_offset + 0] = float3(bbox.max.x, bbox.max.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 1] = float3(bbox.max.x, bbox.min.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 2] = float3(bbox.max.x, bbox.min.y, bbox.min.z);                   
+        tri_mesh.vertices[vtx_offset + 3] = float3(bbox.max.x, bbox.max.y, bbox.min.z);                   
+    } else if(axis == 1) {
+        tri_mesh.vertices[vtx_offset + 0] = float3(bbox.max.x, bbox.max.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 1] = float3(bbox.min.x, bbox.max.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 2] = float3(bbox.min.x, bbox.max.y, bbox.min.z);                   
+        tri_mesh.vertices[vtx_offset + 3] = float3(bbox.max.x, bbox.max.y, bbox.min.z);                   
+    } else {
+        tri_mesh.vertices[vtx_offset + 0] = float3(bbox.max.x, bbox.max.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 1] = float3(bbox.min.x, bbox.max.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 2] = float3(bbox.min.x, bbox.min.y, bbox.max.z);                   
+        tri_mesh.vertices[vtx_offset + 3] = float3(bbox.max.x, bbox.min.y, bbox.max.z);                   
+    }                                                                                
+    std::fill(tri_mesh.texcoords.begin() + vtx_offset, tri_mesh.texcoords.end(), float2(0.0f));       
+    
+    auto face_offset = tri_mesh.face_normals.size();
+    tri_mesh.face_normals.resize(face_offset + 2);                      
+    float3 face_normal(0.0f);
+    face_normal[axis] = bbox.max[axis] == bbox.min[axis]? 1: -1;    
+
+    std::fill(tri_mesh.face_normals.begin() + vtx_offset, tri_mesh.face_normals.end(), face_normal);           
+//    compute_face_normals(tri_mesh.indices, tri_mesh.vertices, tri_mesh.face_normals, idx_offset);     
+    printf("face normal  %f %f %f \n %f %f %f\n ",
+            tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].z, 
+            tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].z 
+            );   
+    std::fill(tri_mesh.normals.begin() + vtx_offset, tri_mesh.normals.end(), float3(0.0f));           
+    compute_vertex_normals(tri_mesh.indices, tri_mesh.face_normals, tri_mesh.normals, idx_offset); 
+    printf("normal  %f %f %f \n %f %f %f\n %f %f %f\n %f %f %f \n",
+            tri_mesh.normals[vtx_offset + 0].x, tri_mesh.normals[vtx_offset + 0].y, tri_mesh.normals[vtx_offset + 0].z, 
+            tri_mesh.normals[vtx_offset + 1].x, tri_mesh.normals[vtx_offset + 1].y, tri_mesh.normals[vtx_offset + 1].z, 
+            tri_mesh.normals[vtx_offset + 2].x, tri_mesh.normals[vtx_offset + 2].y, tri_mesh.normals[vtx_offset + 2].z, 
+            tri_mesh.normals[vtx_offset + 3].x, tri_mesh.normals[vtx_offset + 3].y, tri_mesh.normals[vtx_offset + 3].z 
+            );   
+}
+
+void compute_virtual_portal(TriMesh &tri_mesh, const File& obj_file, BBox& bbox_local, BBox& bbox_global) {
+     for(int i = 0; i < 3; i++) {
+        if(bbox_local.min[i] > bbox_global.min[i]) {
+            printf("min %d \n", i);
+            BBox tmp = bbox_local;
+            tmp.max[i] = tmp.min[i];
+            virtual_face(tri_mesh, obj_file, tmp, i); 
+        }
+        if(bbox_local.max[i] < bbox_global.max[i]) {
+            printf("max %d \n", i);
+            BBox tmp = bbox_local;
+            virtual_face(tri_mesh, obj_file, tmp, i); 
+        }
+     } 
+}
+
+TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, size_t mtl_offset, BBox& bbox, bool virtual_portal) {
     TriMesh tri_mesh;
     for (auto& obj: obj_file.objects) {
         // Convert the faces to triangles & build the new list of indices
@@ -501,7 +573,11 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
             compute_vertex_normals(tri_mesh.indices, tri_mesh.face_normals, tri_mesh.normals, idx_offset);
         }
     }
-
+//    BBox big_bbox(float3(-5, 0.3, -4), float3(3, 0.5, 1));
+    BBox global = obj_file.bbox;
+//    if(bbox.max.x > 0){
+        compute_virtual_portal(tri_mesh, obj_file, bbox, global);
+//    }
     // Re-normalize all the values in the OBJ file to handle invalid meshes
     bool fixed_normals = false;
     for (auto& n : tri_mesh.normals) {
