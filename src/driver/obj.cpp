@@ -453,8 +453,7 @@ void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis)
     float3 face_normal(0.0f);
     face_normal[axis] = bbox.max[axis] == bbox.min[axis]? 1: -1;    
 
-    std::fill(tri_mesh.face_normals.begin() + vtx_offset, tri_mesh.face_normals.end(), face_normal);           
-//    compute_face_normals(tri_mesh.indices, tri_mesh.vertices, tri_mesh.face_normals, idx_offset);     
+    std::fill(tri_mesh.face_normals.begin() + face_offset, tri_mesh.face_normals.end(), face_normal);           
     printf("face normal  %f %f %f \n %f %f %f\n ",
             tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].z, 
             tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].z 
