@@ -297,8 +297,9 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
 
             // Execute hit point shading, and add the contribution of each lane to the frame buffer
             if(geom_id == scene.num_geometries) {
-                write_primary_ray(i, 0, make_ray(vec3_add(surf.point, vec3_mulf(ray.dir, 0.0001f)), ray.dir, 0.001f, flt_max)); 
-                write_grid(i, 0, 1022);
+                write_primary_ray(i, 0, make_ray(ray.org, ray.dir, hit.distance + 0.001f, flt_max));
+//                write_primary_ray(i, 0, make_ray(vec3_add(surf.point, vec3_mulf(ray.dir, 0.0001f)), ray.dir, 0.001f, flt_max)); 
+//                write_grid(i, 0, 1022);
                 continue()
             }
 
