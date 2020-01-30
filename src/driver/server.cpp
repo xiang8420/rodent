@@ -7,6 +7,9 @@
 #include "client.h"
 #include "server.h"
 
+#define PRIMARY_WIDTH 21
+#define SECONDARY_WIDTH 14
+
 static std::unique_ptr<Server> server;
 
 void setup_server(struct Communicator *comm) {
@@ -34,10 +37,10 @@ void client_run(struct Settings settings, int dev_num){
     client->run(settings, dev_num);
 }
 
-void client_send_rays(float *rays, size_t size, size_t capacity, bool send_all){
-    client->send_rays(rays, size, capacity, send_all);
+void client_send_rays(float *rays, size_t size, size_t capacity, bool primary, bool send_all){
+    client->send_rays(rays, size, capacity, primary, send_all);
 }
 
-int  client_recv_rays(float *rays, size_t size, bool idle){
-    return client->recv_rays(rays, size, idle);
+int  client_recv_rays(float *rays, size_t size, bool idle, bool primary){
+    return client->recv_rays(rays, size, idle, primary);
 }

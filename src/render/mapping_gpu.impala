@@ -312,7 +312,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
     if size(0) + buffer.size >= capacity {
         print_string("send buffer size: ");
         print_i32(buffer.size);
-        rodent_buffer_primary_send(dev_id, buffer.size, false);
+//        rodent_buffer_primary_send(dev_id, buffer.size, false);
         size(1) = 0;
     }
     size(0) = 0;
@@ -336,8 +336,8 @@ fn @gpu_primary_transfer( primary: PrimaryStream
         runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
     }
     if size(0) == 0 {
-        rodent_buffer_primary_send(dev_id, buffer.size, true);
-        size(0) = rodent_primary_recv(dev_id, primary.size, generate_end, !is_first); 
+//        rodent_buffer_primary_send(dev_id, buffer.size, true);
+//        size(0) = rodent_primary_recv(dev_id, primary.size, generate_end, !is_first); 
         size(1) = 0; 
     }    
 
@@ -407,7 +407,7 @@ fn @gpu_get_chunk_id( primary: PrimaryStream
             }
         } else {
             let coord = get_coordinate(prim_ids(src_id));
-            let compressed_chunk_id = get_closest_chunk(min_max, ray, bbox, coord, grid, step, inv_step, intrinsics);
+            let compressed_chunk_id = get_closest_grid(min_max, ray, bbox, coord, grid, step, inv_step, intrinsics);
             write_chunk(src_id, 0, compressed_chunk_id);
         }
     }

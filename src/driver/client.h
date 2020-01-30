@@ -5,13 +5,13 @@ void render_spawn(struct Settings const* settings, int iter, int dev, int chunk,
 }
 
 struct Client{
-    struct RayQueue *send_buffer;
-    struct RayQueue *wait_send_buffer;
-    struct Ray *wait_buffer;
-    struct RayQueue *queue;
+    struct RayQueue * outcome_primary;
+    struct RayQueue * income_primary;
+
+    struct RayQueue * outcome_secondary;     
+    struct RayQueue * income_secondary;           
 
     int buffer_capacity, buffer_size, slave_num; 
-    int width;
     int mpi_rank, mpi_size, server;
     bool has_work, stop_recv, first;
 
@@ -23,7 +23,6 @@ struct Client{
     Client(struct Communicator *comm, bool has_server): comm(comm){
         mpi_rank = comm->rank;
         mpi_size = comm->size; 
-        width = comm->width; 
         buffer_capacity = 1048608;
         buffer_size = 1048576;
         if(has_server) {
@@ -35,67 +34,154 @@ struct Client{
         first = true;
         has_work = true;
         stop_recv = false;
-        wait_buffer      = new struct Ray(buffer_capacity, width);  
-        wait_send_buffer = new struct RayQueue(buffer_capacity, width);
-        send_buffer      = new struct RayQueue(buffer_capacity, width);
-        queue            = new struct RayQueue(buffer_capacity * 4, width); 
+        outcome_primary      = new struct RayQueue(buffer_capacity * 4, 21);
+        income_primary     = new struct RayQueue(buffer_capacity * 4, 21); 
+        
+        outcome_secondary      = new struct RayQueue(buffer_capacity * 4, 14);
+        income_secondary     = new struct RayQueue(buffer_capacity * 4, 14); 
     }
 
     ~Client(){
-        delete wait_buffer;
-        delete wait_send_buffer;
-        delete send_buffer;
-        delete queue;
+        delete outcome_primary;
+        delete income_primary;
         printf("client end\n");
     }
 
-    static void request(void* tmp) {
-        struct Client *p = (struct Client*)tmp;
-        struct RayQueue *queue = p->queue;
-        int queue_capacity = queue->get_capacity();
+    bool all_empty(){ 
+        return income_primary->isempty() && income_secondary->isempty()
+            && outcome_primary->isempty() && outcome_secondary->isempty()
+            ;
+    }
+    
+    bool all_queue_empty(){ 
+        return income_primary->isempty() 
+            && income_secondary->isempty();
+    }
+
+    // send primary and secondary
+    void send_rays(float *rays, size_t size, size_t capacity, bool primary, bool send_all){
+        int *id = (int *) rays;
+        int *chunk = (int *) &rays[capacity * 9];
+        printf("send size %d\n", size);
+        struct RayQueue *buffer = primary ? outcome_primary : outcome_secondary;
+        int width = primary? 21 : 14; 
+
+        mutex.lock();
+        for(int i = 0; i < size; i++) {
+            buffer->put(rays, i, 1, capacity);
+            int* d = (int*)buffer->data;
+            if(buffer->isfull()) {
+                printf("error : outcome buffer is full %d\n", width);
+            }
+        }
+        int* d = (int*)buffer->data;
+//        printf("%d client send %d %d:", mpi_rank, width, buffer->size);
+//        for(int j = 0; j < 10; j++){
+//            printf("%d %d|", d[j * width], d[j * width + 9]);
+//        }
+
+        printf("send over\n");
+        mutex.unlock();
+    }
+
+    void get_rays(bool primary){
+
+        struct RayQueue *queue = primary ? income_primary : income_secondary;
+
+        mutex.lock();
+        has_work = has_work || !all_queue_empty() || !all_empty() ;
+        bool work = has_work; 
         
-        struct Ray *wait_buffer = p->wait_buffer;
-        int buffer_capacity = p->buffer_capacity;
-        int buffer_size     = p->buffer_size;
-        struct Communicator *comm = p->comm;
+        int available_size = queue->get_capacity() - queue->get_size();
+        int st = queue->get_size(); 
+        if(available_size > buffer_size) {
+            comm->Send_request(work, server, available_size, primary);
+            int msg = comm->Recv_rays(queue, server);
+            
+            if(msg > 0){ 
+                int *bufferdata   = primary? (int*)income_primary->data : (int*)income_secondary->data;
+                int width = primary ? 21 : 14;
+                printf("client buffer recv:");
+                for(int i = 0; i < 10; i++){
+                    printf("|%d :: %d", bufferdata[(st + i) * width], bufferdata[(st + i) * width + 9]);
+                }
+                printf("\n");
+                has_work = true;
+            }
+
+            if(msg == -1){
+                printf("slave recv stop queue->size%d %d\n", mpi_rank, queue->size);
+                stop_recv = true;
+            } 
+        } 
+        mutex.unlock();
+    
+    }
+    
+    void Client_port(){
+        int msg[5];
+
+        comm->Recv_msg(server, &msg[0]);
+//        printf("client recv msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
+        if(msg[0] == -1) {
+            printf("slave recv stop queue->size%d \n", mpi_rank);
+            stop_recv = true;
+            return;
+        }
+        mutex.lock();
+//        printf(" income primry %d outcome primary %d in secondary %d out secondary%d msg[3] msg[4] %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
+        has_work = has_work || !all_empty() || msg[3] > 0 || msg[4] > 0 ;
+        msg[0] = has_work ? 1 : -1;
+        msg[1] = outcome_primary->size; 
+        msg[2] = outcome_secondary->size;
+        msg[3] = std::min(msg[3], buffer_size - income_primary->size); 
+        msg[4] = std::min(msg[4], buffer_size - income_secondary->size); 
+        
+        comm->Send_msg(server, &msg[0]);
+//        printf("client send msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
+//        if(outcome_primary->size > 0) {
+//                int *bufferdata   = (int*)outcome_primary->data ;
+//                printf("client buffer recv:");
+//                for(int i = 0; i < 10; i++){
+//                    printf("|%d :: %d", bufferdata[(0 + i) * 21], bufferdata[(0 + i) * 21 + 9]);
+//                }
+//                printf("\n");
+//        }
+
+        comm->Send_rays(server, true, msg[1], outcome_primary);
+        comm->Send_rays(server, false, msg[2], outcome_secondary);
+        comm->Recv_rays(server, true, msg[3], income_primary);
+        if(msg[3] > 0){
+                    int *bufferdata   = (int*)income_primary->data ;
+                    printf("client buffer recv:");
+                    for(int i = 0; i < 10; i++){
+                        printf("|%d :: %d", bufferdata[(0 + i) * 21], bufferdata[(0 + i) * 21 + 9]);
+                    }
+        }
+
+        comm->Recv_rays(server, false, msg[4], income_secondary);
+        mutex.unlock();
+    }
+
+
+    static void Server_client(void* tmp) {
+        struct Client *p = (struct Client*)tmp;
+        struct RayQueue *queue = p->income_primary;
         //start recv thread and render
 //        return;
         for(;;){
-            usleep(100);
-            p->mutex.lock();
-            if(!queue->isempty() && wait_buffer->isempty()){
-                int queue_size = queue->get_size();
-                int st = queue_size > buffer_size ? queue_size - buffer_size : 0;
-                int n  = st == 0 ? queue_size : buffer_size;
-                wait_buffer->put(queue->data, st, n);
-                queue->size -= wait_buffer->get_size();
-                p->has_work = true;
-            }
-            bool work = p->has_work; 
-            p->mutex.unlock();
-
-//                printf("client send request %d %d %d\n", queue->get_size(), buffer_size, queue_capacity);
-            if(queue->get_size() + buffer_size < queue_capacity && !p->stop_recv) {
-                comm->Send_request(p->mpi_rank, work, p->server, queue->capacity - queue->size);
-                int msg = comm->Recv_rays(queue, p->server);
-                if(msg == 0){
-                    printf("slave recv stop queue->size%d\n", queue->size);
-                    p->stop_recv = true;
-                } else if(msg == 2) {
-//                    printf("%d get rays ", p->mpi_rank);
-//                    for(int i = 0; i < 10; i ++) {
-//                        printf("%d %f |", (int)(*queue)[i * width], (*queue)[i * width + 1]);
-//                    }
-//                    p->recv_ray_num += buffer_size;
-                    printf("\n");
-                }
-            } 
-            if (queue->isempty() && p->stop_recv){
+            usleep(2000);
+            p->Client_port();
+//            p->get_rays(true);
+//            if (p->stop_recv){
+//                return;
+//            }
+//            p->get_rays(false);
+            if (p->stop_recv){
                 return;
             }
         }   
     }
-
     
     void run(struct Settings settings, int dev_num) {
               
@@ -120,7 +206,7 @@ struct Client{
             } 
         }
         if(server != -1){
-            thread[dev_num] = new std::thread(request, (void*)this);
+            thread[dev_num] = new std::thread(Server_client, (void*)this);
             thread[dev_num]->join();
         }
         for(int i = 0; i < dev_num; i++){
@@ -128,81 +214,44 @@ struct Client{
         }
     }
 
-    void send_rays(float *rays, size_t size, size_t capacity, bool send_all){
-        int *id = (int *) rays;
-        int *chunk = (int *) &rays[capacity * 9];
-        printf("send size %d\n", size);
-        for(int i = 0; i < size; i++) {
-            wait_send_buffer->put(rays, i, 1, capacity);
-            int* d = (int*)wait_send_buffer->data;
-            if(wait_send_buffer->isfull()) {
-//                send_ray_num += wait_send_buffer->get_size(); 
-                printf("send :");
-                for(int j = 0; j < 10; j++){
-                    printf("%d|", d[j * 21 + 9]);
-                }
-                printf("send buffer_size%d \n\n", wait_send_buffer->get_size());
-//                if(!first) {comm->Wait(0);} else {first = false;}
-                swap(send_buffer, wait_send_buffer); 
-                comm->Send_rays(send_buffer, send_buffer->get_size(), server);
-            }
-        }
-        if(send_all && !wait_send_buffer->isempty()){
-//                if(!first) {comm->Wait(0);} else {first = false;}
-            printf("send :");
-            int* d = (int*)wait_send_buffer->data;
-//            for(int j = 0; j < 10; j++){
-//                printf(" %d %d * %d %d|", id[j], chunk[j], d[j * 21], d[j * 21 + 9]);
-//            }
-            swap(send_buffer, wait_send_buffer); 
-            comm->Send_rays(send_buffer, send_buffer->get_size(), server);
-        }
-        printf("send over\n");
-    }
-
-    int recv_rays(float *rays, size_t rays_size, bool idle){
-//        printf("%d client need rays\n", mpi_rank);
+    int recv_rays(float *rays, size_t rays_size, bool idle, bool primary){
+        struct RayQueue *queue = primary ? income_primary : income_secondary;
+        int width = primary ? 21 : 14;
         do{
-    //        printf("%d waiting  ", mpi_rank);
+//            if(!primary) {
+//                printf("ask for secondary ray %d  wait rays%d\n", rays_size, wait_rays->size);
+//            }
             mutex.lock();
-    //        printf("%d lock  ", mpi_rank);
-            if(!wait_buffer->isempty()){
-   //             swap(rays, wait_buffer->data);
-                int copy_size = wait_buffer->size < buffer_size - rays_size ? wait_buffer->size : buffer_size - rays_size; 
-                int buffer_st = wait_buffer->size - copy_size;
-                int rays_st   = rays_size;
-                for(int i = 0; i < 21; i++ ){
-                    for(int j = 0; j < copy_size; j++){
-                        int src = buffer_st + j;
-                        int dst = rays_st + j;
-                        rays[i * 1048608 + dst] = wait_buffer->data[i * 1048608 + src];
+            if(!queue->isempty() && rays_size < buffer_size){
+                has_work = true;
+                int copy_size = std::min(queue->size , buffer_size - (int)rays_size); 
+                queue->size = queue->size - copy_size;
+                int src = queue->size; 
+                int dst = rays_size;
+                printf("ray size %d copy size %d queue st %d rays st%d\n", rays_size, copy_size, src, dst);
+                for(int i = 0; i < copy_size; i++){
+                    for(int j = 0; j < width; j++) {
+                        rays[dst + i + j * buffer_capacity]  = queue->data[(src + i) * width + j];
                     }
                 }
-                
-                if(mpi_rank == 0) {    
-                    printf("ray size %d buffer size %d copy size %d buffer st %d rays st%d\n", rays_size, wait_buffer->size, copy_size, buffer_st, rays_st);
-                    printf("copy size %d\n", copy_size);
                     int* ids = (int*)rays;
+                    printf("%d ray to renderi size %d copy size %d \n", mpi_rank, rays_size, copy_size);
                     for(int i = 0; i < 10; i ++) {
-                        printf("| %d %d *", ids[i + rays_st], ids[i + rays_st + 9 * 1048608]);
+                        printf("| %d %d *", ids[i + rays_size], ids[i + rays_size + 1048608 * 9]);
                     }
                     printf("\n");
-                    printf("wait buffer %d\n", wait_buffer->size);
-                }
-
-                wait_buffer->size -= copy_size;
-                has_work = true;
                 mutex.unlock();
                 return copy_size + rays_size;
-            } 
-            has_work = !idle || rays_size > 0 || !queue->isempty();
-            mutex.unlock();
-            if(stop_recv || !idle){
-                if(mpi_rank == 0) {    
-                    printf("ray size %d buffer size %d \n", rays_size, wait_buffer->size);
-                }
-                return rays_size;
             }
+            has_work = !(idle && all_empty()) ;
+            mutex.unlock();
+            if(stop_recv){  
+                printf("ray size %d   queue primary  size %d queue secondary size %d\n", 
+                        rays_size, income_primary->size, income_secondary->size);
+                printf("recv stop %d %d\n", mpi_rank, rays_size);
+                return -1;
+            }
+            if(has_work){ return rays_size;}
             usleep(4000);
         }while(idle);
     }

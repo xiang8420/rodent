@@ -447,7 +447,7 @@ void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis)
         tri_mesh.vertices[vtx_offset + 3] = float3(bbox.max.x, bbox.min.y, bbox.max.z);                   
     }                                                                                
     std::fill(tri_mesh.texcoords.begin() + vtx_offset, tri_mesh.texcoords.end(), float2(0.0f));       
-    
+    printf("before face normal\n");    
     auto face_offset = tri_mesh.face_normals.size();
     tri_mesh.face_normals.resize(face_offset + 2);                      
     float3 face_normal(0.0f);

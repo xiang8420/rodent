@@ -18,13 +18,16 @@ extern "C" {
     fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
     
-    fn rodent_cpu_get_buffer_stream(&mut PrimaryStream, i32) -> ();
+    fn rodent_cpu_get_primary_buffer(&mut PrimaryStream, i32) -> ();
+    fn rodent_cpu_get_secondary_buffer(&mut SecondaryStream, i32) -> ();
     fn rodent_gpu_get_primary_buffer_stream(i32, &mut PrimaryStream, i32) -> ();
     fn rodent_first_primary_save(i32, i32, i32, bool) -> i32;
     fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
+    fn rodent_secondary_check(i32, i32, i32, bool) -> ();
     fn rodent_gpu_first_primary_load(i32, &mut PrimaryStream, i32) -> i32;
-    fn rodent_buffer_primary_send(i32, i32, bool) -> ();    
-    fn rodent_primary_recv(i32, i32, bool, bool) -> i32;
+    
+    fn rodent_buffer_send(i32, i32, bool, bool) -> ();    
+    fn rodent_rays_recv(i32, i32, bool, bool, bool) -> i32;
 }
 
 // Ray streams ---------------------------------------------------------------------
@@ -99,6 +102,28 @@ fn @copy_primary_ray( primary: PrimaryStream
     other_primary.depth(dst_id)      = primary.depth(src_id);
 }
 
+fn @copy_secondary_ray( secondary: SecondaryStream
+                      , other_secondary: SecondaryStream
+                      , src_id: i32
+                      , dst_id: i32
+                      , keep_hit: bool
+                      ) -> () {
+    other_secondary.rays.id(dst_id)    = secondary.rays.id(src_id);
+    other_secondary.rays.org_x(dst_id) = secondary.rays.org_x(src_id);
+    other_secondary.rays.org_y(dst_id) = secondary.rays.org_y(src_id);
+    other_secondary.rays.org_z(dst_id) = secondary.rays.org_z(src_id);
+    other_secondary.rays.dir_x(dst_id) = secondary.rays.dir_x(src_id);
+    other_secondary.rays.dir_y(dst_id) = secondary.rays.dir_y(src_id);
+    other_secondary.rays.dir_z(dst_id) = secondary.rays.dir_z(src_id);
+    other_secondary.rays.tmin(dst_id)  = secondary.rays.tmin(src_id);
+    other_secondary.rays.tmax(dst_id)  = secondary.rays.tmax(src_id);
+    other_secondary.grid_id(dst_id)    = secondary.grid_id(src_id);
+    other_secondary.prim_id(dst_id) = secondary.prim_id(src_id);
+    other_secondary.color_r(dst_id)  = secondary.color_r(src_id);
+    other_secondary.color_g(dst_id)  = secondary.color_g(src_id);
+    other_secondary.color_b(dst_id)  = secondary.color_b(src_id);
+}
+
 fn @make_ray_stream_reader(rays: RayStream, vector_width: i32) -> fn (i32, i32) -> Ray {
     @ |i, j| {
         let k = i * vector_width + j;
@@ -164,8 +189,9 @@ fn @make_primary_stream_hit_writer(primary: PrimaryStream, vector_width: i32, in
 fn @make_secondary_stream_hit_writer(secondary: SecondaryStream, vector_width: i32) -> fn (i32, i32, Hit) -> () {
     @ |i, j, hit| {
         let k = i * vector_width + j;
-        secondary.prim_id(k) = hit.prim_id;
-        secondary.grid_id(k) = hit.geom_id; 
+        secondary.rays.tmin(k) = hit.distance + 0.000001f;
+        secondary.prim_id(k)   = hit.prim_id;
+        secondary.grid_id(k)   = hit.geom_id; 
     }
 }
 

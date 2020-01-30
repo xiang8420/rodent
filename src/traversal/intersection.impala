@@ -228,18 +228,25 @@ fn @coordinate_compress(grid: Vec3, scale: Vec3i, max: Vec3, math: Intrinsics) -
      || id.z < 0 || id.z >= scale.z {
         return( -1000 )
     } 
-    let chunk = ((id.x * scale.y + id.y) * scale.z) + id.z;
-    return((chunk << 12) + (id.x << 8) + (id.y << 4) + id.z)
+    let grid = ((id.x * scale.y + id.y) * scale.z) + id.z;
+    return((grid << 12) + (id.x << 8) + (id.y << 4) + id.z)
 }
 
 fn @get_coordinate(n: i32) -> (Vec3i) {
-    let x    = (n >> 8) & 0xF;
-    let y    = (n >> 4) & 0xF;
-    let z    = n & 0xF;   
+    let x = (n >> 8) & 0xF;
+    let y = (n >> 4) & 0xF;
+    let z = n & 0xF;   
     make_vec3i(x, y, z)
 }
 
-fn @get_closest_chunk(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
+fn @get_grid_coordinate(grid: i32, scale: Vec3i) -> (Vec3i) {
+    let x = grid / (scale.y  * scale.z );
+    let y = (grid - x * (scale.y * scale.z)) / scale.z;
+    let z = grid % scale.z; 
+    make_vec3i(x, y, z)
+}
+
+fn @get_closest_grid(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
     let mut bound: Vec3;
     let mut step_dir = make_vec3(1.0f, 1.0f, 1.0f);
     let id_f = make_vec3(id.x as f32, id.y as f32, id.z as f32);
