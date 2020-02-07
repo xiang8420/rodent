@@ -55,14 +55,11 @@ struct Camera {
 };
 
 void setup_interface(size_t, size_t);
-void setup_scheduler(size_t, size_t, size_t);
 void thread_recv();
 float* get_pixels();
 float* get_first_primary();
 void clear_pixels();
 void cleanup_interface();
-void cleanup_scheduler();
-void reset_scheduler();
 void setup_server(struct Communicator *);
 void server_run();
 void setup_client(struct Communicator *, bool);
@@ -270,7 +267,6 @@ int main(int argc, char** argv) {
     struct Communicator comm;
     bool c_s = true; 
     int  client_size = c_s ? comm.size - 1: comm.size;
-    setup_scheduler(comm.rank, client_size, chunk_num);
     int server_id = client_size; 
      
     if(comm.rank == server_id) {
@@ -297,7 +293,6 @@ int main(int argc, char** argv) {
         reduce_buffer = new float[pixel_num];
     while(frame < 1) {
         clear_pixels();
-        reset_scheduler();
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
         auto ticks = std::chrono::high_resolution_clock::now();
         if(comm.rank == server_id) {

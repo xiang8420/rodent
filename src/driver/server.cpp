@@ -1,6 +1,7 @@
 #include "interface.h"
 #include <thread>
 #include <mutex>
+#include<string.h>
 #include "rayqueue.h"
 #include "communicator.h"
 #include "communicator_f.h"

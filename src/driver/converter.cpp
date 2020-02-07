@@ -601,8 +601,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath scene_path(file_name);
-    int grid[] = {2, 1, 1};
-    int grid_num = 2;
+    int grid[] = {2, 1, 2};
+    int grid_num = 4;
 
     if (!obj::load_obj(scene_path, obj_file, mpi_id, mpi_size)) {
         error("Invalid OBJ file '", file_name, "'");

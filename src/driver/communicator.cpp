@@ -20,7 +20,7 @@ Communicator::~Communicator() {
     
 void Communicator::Send_rays(struct RayQueue* buffer, int size,  int dst, bool has_work, bool primary) {
 //    printf("send rays %d %d\n", rank, dst);
-    int* a = (int*)buffer->data;
+    int* a = (int*)buffer->rays();
     int width = buffer->width;
     int buffer_size = buffer->get_size();
     int msg[MSG_SIZE];
@@ -146,11 +146,11 @@ void Communicator::Recv_rays(int src, bool primary, int recv_size, struct RayQue
     buffer->size += recv_size;
     MPI_Recv(rays, recv_size * width, MPI_FLOAT, src, 1, MPI_COMM_WORLD, sta); 
     
-//    int* ids = (int*)rays;
-//    for(int i = 0; i < 10; i ++) {
-//        printf("|r %d %d ", ids[i * width], ids[i * width + 9]);
-//    }
-//    printf("\n");
+    int* ids = (int*)rays;
+    for(int i = 0; i < 10; i ++) {
+        printf("|r %d %d ", ids[i * width], ids[i * width + 9]);
+    }
+    printf("\n");
 }
 
 void Communicator::Send_rays(int dst, bool primary, int send_size, struct RayQueue* buffer) {
@@ -160,10 +160,10 @@ void Communicator::Send_rays(int dst, bool primary, int send_size, struct RayQue
     buffer->size -= send_size;
     printf("send to %d %d %d buffer size%d\n", dst, send_size, width, buffer->size);
     int* ids = (int*)rays;
-//    for(int i = 0; i < 10; i ++) {
-//        printf("|s %d %d ", ids[i * width], ids[i * width + 9]);
-//    }
-//    printf("\n");
+    for(int i = 0; i < 10; i ++) {
+        printf("|s %d %d ", ids[i * width], ids[i * width + 9]);
+    }
+    printf("\n");
     MPI_Send(rays, send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
 }
 
