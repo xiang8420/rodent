@@ -64,9 +64,9 @@ struct Server {
         int recv_size     = raybuffer->size;
         for(int i = 0; i < recv_size; i++){
             int chunk_id = bufferdata[i * width + 9]  >> 12;
-            if( i < 9){            
-                printf("|%d : %d|", bufferdata[i * width], bufferdata[i * width + 9]);
-            }
+//            if( i < 9){            
+//                printf("|%d : %d|", bufferdata[i * width], bufferdata[i * width + 9]);
+//            }
 //            if(queue[chunk_id]->size > buffer_capacity){
 //                printf("%d > %d\n",queue[chunk_id]->size, buffer_capacity);
 //            }
@@ -104,7 +104,7 @@ struct Server {
 //            for(int i = 0; i < slave_num;i++){
 //                printf("%d %d \n", i, queue_secondary[i]->get_size());
 //            }
-            printf("\n");
+//            printf("\n");
             sort(queue_primary);
 //            printf("server 1\n");
             comm->Recv_rays(dst, false, msg[2], raybuffer);
@@ -115,27 +115,25 @@ struct Server {
 //            printf("server 4\n");
             comm->Send_rays(dst, false, msg[4], queue_secondary[dst]);
 //            printf("server 5\n");
-            if(msg[3] > 0 || msg[4] > 0) {
+            if(msg[0] == 1) {
                 slave_wait[dst] = false;
             }
-            for(int i = 0; i < slave_num;i++){
-                printf("%d %d %d\n", i, queue_primary[i]->get_size(), msg[0]);
-            }
-            printf("\n");
-            for(int i = 0; i < slave_num;i++){
-                printf("%d %d \n", i, queue_secondary[i]->get_size());
-            }
+ //           printf("msg %d %d %d %d %d src %d\n", msg[0], msg[1], msg[2], msg[3], msg[4], dst);
+ //           for(int i = 0; i < slave_num;i++){
+ //               printf("%d %d %d  %d|", i, slave_wait[i], queue_primary[i]->get_size(), queue_secondary[i]->get_size() );
+ //           }
+ //           printf("\n");
             if(msg[0] == -1 /*slave idle*/ && msg[3] ==0 && msg[4] == 0) {
                 slave_wait[dst] = true;
                 all_done = true;
-                printf("slave wait %d %d", dst, slave_wait[dst]);
+//                printf("slave wait %d %d", dst, slave_wait[dst]);
                 for(int i = 0; i < slave_num; i++){
-                    printf("%d %d|",slave_wait[i], all_queue_empty(i));
+//                    printf("%d %d|",slave_wait[i], all_queue_empty(i));
                     if(!slave_wait[i] || !all_queue_empty(i)) {
                         all_done = false; break;
                     }
                 }
-                printf("\n");
+//                printf("\n");
                 if(all_done) {
                     break;
                 }

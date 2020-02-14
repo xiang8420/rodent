@@ -246,7 +246,7 @@ fn @get_grid_coordinate(grid: i32, scale: Vec3i) -> (Vec3i) {
     make_vec3i(x, y, z)
 }
 
-fn @get_closest_grid(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
+fn @get_closest_grid(min_max: MinMax, ray: Ray, org: Vec3,  bbox: BBox, id: Vec3i, scale: Vec3i, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
     let mut bound: Vec3;
     let mut step_dir = make_vec3(1.0f, 1.0f, 1.0f);
     let id_f = make_vec3(id.x as f32, id.y as f32, id.z as f32);
@@ -269,7 +269,7 @@ fn @get_closest_grid(min_max: MinMax, ray: Ray, bbox: BBox, id: Vec3i, scale: Ve
         step_dir.z = -1.0f;
     }
 
-    let its = vec3_add(vec3_mul(ray.inv_dir, bound), ray.inv_org); 
+    let its = vec3_add(vec3_mul(ray.inv_dir, bound), vec3_neg(vec3_mul(org, ray.inv_dir))); 
     
     let mut next_id = make_vec3(id_f.x, id_f.y, id_f.z);    
     if its.x < its.z {

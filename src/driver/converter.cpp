@@ -593,7 +593,20 @@ static size_t cleanup_obj(obj::File& obj_file, obj::MaterialLib& mtl_lib) {
     return num_complex;
 }
 
-static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os) {
+void get_grid(size_t n, int* grid){
+    grid[0] = 1; grid[1] = 1; grid[2] = 1;
+    int axit = 0;
+    int cur_n = n;
+    while(cur_n != 1){
+        grid[axit] *= 2;
+        ++axit % 3;
+        cur_n /= 2;
+    }
+    printf("grid %d %d %d\n", grid[0], grid[1], grid[2]);
+}
+
+static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, 
+                        bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, size_t grid_num) {
     info("Converting OBJ file '", file_name, "'");
     int mpi_size, mpi_id;
     MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
@@ -601,8 +614,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath scene_path(file_name);
-    int grid[] = {2, 1, 2};
-    int grid_num = 4;
+    int *grid = new int[3];
+    get_grid(grid_num, grid);
 
     if (!obj::load_obj(scene_path, obj_file, mpi_id, mpi_size)) {
         error("Invalid OBJ file '", file_name, "'");
@@ -815,7 +828,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 }
             }
         }
-          printf("light\n"); 
+        printf("light\n"); 
         //Local Light data light id
         std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
         printf("tri mesh size %d\n", tri_mesh.indices.size() / 4);
@@ -835,14 +848,14 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
             auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
 
-            int light_id = 0;
-            for(int light_id = 0; light_id < num_lights; light_id++){
-                int vert_id = light_id * 3;
+            int find_light = 0;
+            for(find_light; find_light < num_lights; find_light++){
+                int vert_id = find_light * 3;
                 if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
                     break;
             } 
-            light_ids[i / 4] = light_id;
-            if(light_id != num_lights)
+            light_ids[i / 4] = find_light;
+            if(find_light != num_lights)
                 continue;
            
             num_lights++;
@@ -1140,7 +1153,8 @@ int main(int argc, char** argv) {
     Target target[5];
     bool fusion;
 
-    size_t spp = 2;
+    size_t grid = 4;
+    size_t spp = 4;
     size_t max_path_len = 64;
     bool embree_bvh = false;
     for (int i = 1; i < argc; ++i) {
@@ -1206,6 +1220,9 @@ int main(int argc, char** argv) {
             } else if (!strcmp(argv[i], "-spp") || !strcmp(argv[i], "--samples-per-pixel")) {
                 if (!check_option(i++, argc, argv)) return 1;
                 spp = strtol(argv[i], NULL, 10);
+            } else if(!strcmp(argv[i], "-g") || !strcmp(argv[i], "--grid")) { 
+                if (!check_option(i++, argc, argv)) return 1;
+                grid = strtol(argv[i], NULL, 10);
             } else if (!strcmp(argv[i], "--max-path-len")) {
                 if (!check_option(i++, argc, argv)) return 1;
                 max_path_len = strtol(argv[i], NULL, 10);
@@ -1232,7 +1249,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::ofstream of("main.impala");
-    if (!convert_obj(obj_file, dev_num, target, dev, fusion, max_path_len, spp, embree_bvh, of))
+    if (!convert_obj(obj_file, dev_num, target, dev, fusion, max_path_len, spp, embree_bvh, of, grid))
         return 1;
     return 0;
     MPI_Finalize();

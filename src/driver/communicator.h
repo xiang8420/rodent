@@ -31,6 +31,8 @@ struct Communicator {
     void Recv_rays(int src, bool primary, int recv_size, struct RayQueue* buffer);
     void Send_rays(int dst, bool primary, int send_size, struct RayQueue* buffer);
 
+//    std::vector<char> in;
+//    std::vector<char> out;
 };
 
 

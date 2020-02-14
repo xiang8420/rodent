@@ -44,6 +44,13 @@ static void compress(const Array& in, std::vector<char>& out) {
 }
 
 template <typename Array>
+static void compress(const Array& in, size_t size, std::vector<char>& out) {
+    size_t in_size = sizeof(in[0]) * size;
+    out.resize(LZ4_compressBound(in_size));
+    out.resize(LZ4_compress_default((const char*)in, out.data(), in_size, out.size()));
+}
+
+template <typename Array>
 static void write_buffer(std::ostream& os, const Array& array) {
     std::vector<char> out;
     compress(array, out);

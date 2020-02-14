@@ -422,7 +422,7 @@ void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis)
     tri_mesh.texcoords.resize(vtx_offset + 4);                                                        
     tri_mesh.normals.resize(vtx_offset + 4);                                                          
    
-    printf("face %f %f %f %f %f\n", bbox.max.x, bbox.min.y, bbox.min.z, bbox.max.y, bbox.max.z);
+//    printf("face %f %f %f %f %f\n", bbox.max.x, bbox.min.y, bbox.min.z, bbox.max.y, bbox.max.z);
 
     size_t m = obj_file.materials.size();   
     size_t idx[] = {0 + vtx_offset, 1 + vtx_offset, 2 + vtx_offset, m, 0 + vtx_offset, 2 + vtx_offset, 3 + vtx_offset, m};
@@ -447,25 +447,25 @@ void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis)
         tri_mesh.vertices[vtx_offset + 3] = float3(bbox.max.x, bbox.min.y, bbox.max.z);                   
     }                                                                                
     std::fill(tri_mesh.texcoords.begin() + vtx_offset, tri_mesh.texcoords.end(), float2(0.0f));       
-    printf("before face normal\n");    
+//    printf("before face normal\n");    
     auto face_offset = tri_mesh.face_normals.size();
     tri_mesh.face_normals.resize(face_offset + 2);                      
     float3 face_normal(0.0f);
     face_normal[axis] = bbox.max[axis] == bbox.min[axis]? 1: -1;    
 
     std::fill(tri_mesh.face_normals.begin() + face_offset, tri_mesh.face_normals.end(), face_normal);           
-    printf("face normal  %f %f %f \n %f %f %f\n ",
-            tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].z, 
-            tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].z 
-            );   
+//    printf("face normal  %f %f %f \n %f %f %f\n ",
+//            tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 1].z, 
+//            tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].x, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].y, tri_mesh.face_normals[tri_mesh.face_normals.size() - 2].z 
+//            );   
     std::fill(tri_mesh.normals.begin() + vtx_offset, tri_mesh.normals.end(), float3(0.0f));           
     compute_vertex_normals(tri_mesh.indices, tri_mesh.face_normals, tri_mesh.normals, idx_offset); 
-    printf("normal  %f %f %f \n %f %f %f\n %f %f %f\n %f %f %f \n",
-            tri_mesh.normals[vtx_offset + 0].x, tri_mesh.normals[vtx_offset + 0].y, tri_mesh.normals[vtx_offset + 0].z, 
-            tri_mesh.normals[vtx_offset + 1].x, tri_mesh.normals[vtx_offset + 1].y, tri_mesh.normals[vtx_offset + 1].z, 
-            tri_mesh.normals[vtx_offset + 2].x, tri_mesh.normals[vtx_offset + 2].y, tri_mesh.normals[vtx_offset + 2].z, 
-            tri_mesh.normals[vtx_offset + 3].x, tri_mesh.normals[vtx_offset + 3].y, tri_mesh.normals[vtx_offset + 3].z 
-            );   
+//    printf("normal  %f %f %f \n %f %f %f\n %f %f %f\n %f %f %f \n",
+//            tri_mesh.normals[vtx_offset + 0].x, tri_mesh.normals[vtx_offset + 0].y, tri_mesh.normals[vtx_offset + 0].z, 
+//            tri_mesh.normals[vtx_offset + 1].x, tri_mesh.normals[vtx_offset + 1].y, tri_mesh.normals[vtx_offset + 1].z, 
+//            tri_mesh.normals[vtx_offset + 2].x, tri_mesh.normals[vtx_offset + 2].y, tri_mesh.normals[vtx_offset + 2].z, 
+//            tri_mesh.normals[vtx_offset + 3].x, tri_mesh.normals[vtx_offset + 3].y, tri_mesh.normals[vtx_offset + 3].z 
+//            );   
 }
 
 void compute_virtual_portal(TriMesh &tri_mesh, const File& obj_file, BBox& bbox_local, BBox& bbox_global) {

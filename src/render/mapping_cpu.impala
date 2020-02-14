@@ -297,7 +297,7 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
             let mat    = geom.shader(ray, hit, surf);
 
             if(geom_id == scene.num_geometries) {
-                write_primary_ray(i, 0, make_ray(ray.org, ray.dir, hit.distance + 0.001f, flt_max));
+                write_primary_ray(i, 0, make_ray(ray.org, ray.dir, hit.distance + 0.00003f, flt_max));
                 continue()
             }
 
@@ -517,7 +517,7 @@ fn @cpu_get_grid_id( rays: RayStream
                 } else {
                     let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
                     if t0 <= t1 {
-                        let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.001f), ray.org);
+                        let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0001f), ray.org);
                         let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
                         write_grid(src_id, 0, coordinate_compress(c, grid_scale, bbox.max, cpu_intrinsics));
                     } else {
@@ -525,9 +525,9 @@ fn @cpu_get_grid_id( rays: RayStream
                     }
                 }
             } else {
-                let coord = get_coordinate(grid_ids(src_id));
-                let grid_id = get_closest_grid(min_max, ray, bbox, cur_coord, grid_scale, step, inv_step, cpu_intrinsics);
-                write_grid(src_id, 0, grid_id);
+//                let coord = get_coordinate(grid_ids(src_id));
+//                let grid_id = get_closest_grid(min_max, ray, bbox, cur_coord, grid_scale, step, inv_step, cpu_intrinsics);
+//                write_grid(src_id, 0, grid_id);
             }
         }
     } 
@@ -543,8 +543,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
                         ) -> (i32, i32) {
     let bbox       = scene.bbox;
     let grid_scale = make_vec3i(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
-    let scale      = vec3_sub(bbox.max, bbox.min);
-    let step       = vec3_div(scale, scene.grid);
+    let step       = vec3_div(vec3_sub(bbox.max, bbox.min), scene.grid);
     let inv_step   = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
     let num_grids  = grid_scale.x * grid_scale.y * grid_scale.z;
 
@@ -568,7 +567,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
                 } else {
                     let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
                     if t0 <= t1 {
-                        let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.001f), ray.org);
+                        let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
                         let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
                         write_grid(src_id, 0, coordinate_compress(c, grid_scale, bbox.max, cpu_intrinsics));
                     } else {
@@ -576,9 +575,12 @@ fn @cpu_primary_transfer( primary: PrimaryStream
                     }
                 }
             } else {
-                let coord = get_coordinate(grid_ids(src_id));
-                let grid_id = get_closest_grid(min_max, ray, bbox, cur_coord, grid_scale, step, inv_step, cpu_intrinsics);
-                write_grid(src_id, 0, grid_id);
+//                let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
+//                let grid_id = get_closest_grid(min_max, ray, org, bbox, cur_coord, grid_scale, step, inv_step, cpu_intrinsics);
+//                write_grid(src_id, 0, grid_id);
+                let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
+                let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
+                write_grid(src_id, 0, coordinate_compress(c, grid_scale, bbox.max, cpu_intrinsics));
             }
         }
     } 
@@ -626,9 +628,9 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
     for src_id, _ in vectorized_range(vector_width, 0, secondary.size) {
         let ray = ray_reader(src_id, 0);
         if secondary.grid_id(src_id) == scene.num_geometries {
-            let coord = get_coordinate(grid_ids(src_id));
-            let grid_id = get_closest_grid(min_max, ray, bbox, cur_coord, grid_scale, step, inv_step, cpu_intrinsics);
-            write_grid(src_id, 0, grid_id);
+            let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
+            let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
+            write_grid(src_id, 0, coordinate_compress(c, grid_scale, bbox.max, cpu_intrinsics));
         } else {
             write_grid(src_id, 0, -1000);
         }
@@ -798,21 +800,20 @@ fn @cpu_dis_trace( scene: Scene
                 primary.size = cpu_generate_rays(primary, capacity, path_tracer, &mut id, 0, 0, film_width, film_height, 
                                             film_width, film_height, spp, vector_width);
             }
-//            check_primary_grid_id(primary, scene.chunk, -2);
             with cpu_profile(&mut transfer_counter) {
                 let (primary_size, buffer1_size) = cpu_primary_transfer(primary, buffer1, min_max, vector_width, capacity, id == num_rays, scene);
                 primary.size = primary_size; 
                 buffer1.size = buffer1_size; 
-    //            check_primary_grid_id(primary, scene.chunk, -1);
-    //            rodent_first_primary_check(-1, primary.size,  1, true);
                 
                 idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
-                if primary.size == 0 && buffer1.size >0 {
-//                    print_string("slave send left primary\n");
-                    rodent_buffer_send(-1, buffer1.size, true, true);
-                    buffer1.size = 0;
+//                rodent_first_primary_check(-1, primary.size, 1, true);                
+                if primary.size == 0 {
+                    if(buffer1.size > 0) {
+                        rodent_buffer_send(-1, buffer1.size, true, true);
+                        buffer1.size = 0;
+                    }
+                    primary.size = rodent_rays_recv(-1, primary.size, idle, true, true); 
                 }    
-                primary.size = rodent_rays_recv(-1, primary.size, idle, true, true); 
                 if(primary.size < 0) {
                     print_string("end rendering"); print_i32(primary.size); 
                     print_string(" "); print_i32(buffer1.size);
@@ -843,6 +844,7 @@ fn @cpu_dis_trace( scene: Scene
                 }
             }
             // Filter terminated rays
+            primary.size   = ray_ends(scene.num_geometries);
             primary.size   = cpu_compact_primary(primary, vector_width, false /*vector_compact*/);
 //            check_secondary_grid_id(secondary, scene.chunk, 1);
             secondary.size = ray_ends(scene.num_geometries - 1);
@@ -850,15 +852,15 @@ fn @cpu_dis_trace( scene: Scene
             
             with cpu_profile(&mut transfer_counter) {
                 idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
-                if secondary.size == 0 && buffer2.size > 0 {
-                    rodent_buffer_send(-1, buffer2.size, false, true);
-                    buffer2.size = 0;
+                if secondary.size == 0 {
+                    if buffer2.size > 0 {
+                        rodent_buffer_send(-1, buffer2.size, false, true);
+                        buffer2.size = 0;
+                    }
+                    secondary.size = rodent_rays_recv(-1, secondary.size, idle, false, true); 
                 }    
-                secondary.size = rodent_rays_recv(-1, secondary.size, idle, false, true); 
             }
             if(secondary.size < 0) {
-                print_string("end rendering"); print_i32(primary.size); print_string(" "); print_i32(buffer1.size);
-                print_string(" "); print_i32(secondary.size); print_string(" "); print_i32(buffer2.size); print_string("\n");
                 break()
             }
 
@@ -874,7 +876,7 @@ fn @cpu_dis_trace( scene: Scene
             }
             // Add the contribution for secondary rays to the frame buffer
             for i in range(0, secondary.size) {
-                if secondary.prim_id(i) < 0/* || secondary.grid_id(i) == scene.num_geometries*/ {
+                if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries */{
                     let j = secondary.rays.id(i);
                     accumulate(j,
                         make_color(
@@ -911,7 +913,6 @@ fn @cpu_dis_trace( scene: Scene
         print_counter(transfer_counter, total_counter, "transfer");
         print_counter(total_counter,   total_counter, "total");
     }
-    print_string("end rendering\n");     
 }
 
 // CPU device ----------------------------------------------------------------------

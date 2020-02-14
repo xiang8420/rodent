@@ -1,5 +1,6 @@
 #include "communicator.h"
 #include "rayqueue.h"
+#include "buffer.h"
 
 Communicator::Communicator() {
     MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, NULL);
@@ -144,8 +145,17 @@ void Communicator::Recv_rays(int src, bool primary, int recv_size, struct RayQue
     buffer->width = width;
     float *rays = &buffer->rays()[buffer->get_size() * width];
     buffer->size += recv_size;
+
     MPI_Recv(rays, recv_size * width, MPI_FLOAT, src, 1, MPI_COMM_WORLD, sta); 
-    
+
+//    int out_size;
+//    MPI_Status status;
+//    MPI_Probe(src, 1, MPI_COMM_WORLD, &status);
+//    MPI_Get_count(&status, MPI_CHAR, &out_size);
+//    std::vector<char> in(out_size);
+//    MPI_Recv(in.data(), out_size, MPI_CHAR, src, 1, MPI_COMM_WORLD, sta);
+//    LZ4_decompress_safe(in.data(), (char*)rays, in.size(), recv_size * width * sizeof(float));
+
     int* ids = (int*)rays;
     for(int i = 0; i < 10; i ++) {
         printf("|r %d %d ", ids[i * width], ids[i * width + 9]);
@@ -159,11 +169,20 @@ void Communicator::Send_rays(int dst, bool primary, int send_size, struct RayQue
     float *rays = &buffer->rays()[(buffer->get_size() - send_size) * width];
     buffer->size -= send_size;
     printf("send to %d %d %d buffer size%d\n", dst, send_size, width, buffer->size);
+
+    MPI_Send(rays, send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
+
+//    std::vector<char> out;
+//    compress(rays, send_size * width, out);
+//    size_t in_size  = sizeof(rays[0]) * send_size * width;
+//    size_t out_size = out.size();
+//    printf("%d after compress %d\n", in_size, out_size);
+//    MPI_Send(out.data(), out_size, MPI_CHAR, dst, 1, MPI_COMM_WORLD);
+    
     int* ids = (int*)rays;
     for(int i = 0; i < 10; i ++) {
         printf("|s %d %d ", ids[i * width], ids[i * width + 9]);
     }
     printf("\n");
-    MPI_Send(rays, send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
 }
 

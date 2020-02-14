@@ -198,6 +198,7 @@ int main(int argc, char** argv) {
     int granularity = 1; 
     float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
 //    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
+    printf("strat\n");
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] == '-') {
             if (!strcmp(argv[i], "--width")) {
@@ -254,6 +255,7 @@ int main(int argc, char** argv) {
     _mm_setcsr(_mm_getcsr() | (_MM_FLUSH_ZERO_ON | _MM_DENORMALS_ZERO_ON));
 #endif
     // render 
+    printf("interface\n");
     setup_interface(width, height);
     auto chunk_num = get_chunk_num();
     auto film = get_pixels();
@@ -308,9 +310,11 @@ int main(int argc, char** argv) {
                 float total = 0;
                 for(int i = 0; i < client_size; i++){
                     total += proc_time[i];
+                    printf("proc [] %d ", proc_time[i]);
                 }
                 float average = total / client_size; 
-                spp_cur = spp_cur * average / proc_time[comm.rank];
+                spp_cur = spp_cur / client_size;//* average / proc_time[comm.rank];
+                printf("spp_cur %d %d average%d total%d \n", spp_cur, spp_g, average, total);
             }
             Settings settings {
                 Vec3 { cam.eye.x, cam.eye.y, cam.eye.z },

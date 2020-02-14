@@ -80,11 +80,11 @@ struct Client{
             }
         }
         int* d = (int*)buffer->rays();
-//        printf("%d client send %d %d:", mpi_rank, width, buffer->size);
-//        for(int j = 0; j < 10; j++){
-//            printf("%d %d|", d[j * width], d[j * width + 9]);
-//        }
-//        printf("send over\n");
+        printf("%d client send %d %d:", mpi_rank, width, buffer->size);
+        for(int j = 0; j < 10; j++){
+            printf("%d %d|", d[j * width], d[j * width + 9]);
+        }
+        printf("send over\n");
         mutex.unlock();
     }
     
@@ -98,7 +98,7 @@ struct Client{
             return;
         }
         mutex.lock();
-//        printf(" income primry %d outcome primary %d in secondary %d out secondary%d msg[3] msg[4] %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
+//        printf("proc %d %d %d %d %d\n", mpi_rank, idle, all_empty(),msg[3], msg[4]);
         idle = idle && all_empty() && msg[3] <= 0 &&msg[4] <= 0 ;
         msg[0] = idle ? -1 : 1;
         msg[1] = outcome_primary->size; 
@@ -127,17 +127,19 @@ struct Client{
 //                    }
 //        }
         comm->Recv_rays(server, false, msg[4], income_secondary);
-        mutex.unlock();
-        income_buffer_mutex.lock();
-        if(income_buffer_primary->empty()) {
+//        income_buffer_mutex.lock();
+//        printf("income_buffer_primary %d %d %d %d %d\n", mpi_rank, income_buffer_primary->size, income_primary->size, income_buffer_secondary->size, income_secondary->size);
+        if(income_buffer_primary->empty() && !income_primary->empty()) {
             struct RayQueue *queue = income_buffer_primary; 
             queue->size = income_primary->get(queue->rays(), buffer_size, buffer_capacity);
         }
-        if(income_buffer_secondary->empty()) {
+        if(income_buffer_secondary->empty() && !income_secondary->empty()) {
             struct RayQueue *queue = income_buffer_secondary; 
             queue->size = income_secondary->get(queue->rays(), buffer_size, buffer_capacity);
         }
-        income_buffer_mutex.unlock();
+//        printf("income_buffer_primary %d %d %d %d %d\n", mpi_rank, income_buffer_primary->size, income_primary->size, income_buffer_secondary->size, income_secondary->size);
+//        income_buffer_mutex.unlock();
+        mutex.unlock();
     }
 
 
@@ -190,14 +192,16 @@ struct Client{
         struct RayQueue *queue = primary ? income_buffer_primary : income_buffer_secondary;
         int width = primary ? 21 : 14;
         do{
-            income_buffer_mutex.lock(); 
+//            income_buffer_mutex.lock(); 
+            mutex.lock();
+//            printf("queue size %d %d\n", queue->size, primary);
             if(!queue->empty() && rays_size < buffer_size){
                 idle = false;
                 int copy_size = std::min(queue->size , buffer_size - (int)rays_size); 
                 queue->size = queue->size - copy_size;
                 int src = queue->size; 
                 int dst = rays_size;
-                printf("ray size %d copy size %d queue st %d rays st%d\n", rays_size, copy_size, src, dst);
+//                printf("ray size %d copy size %d queue st %d rays st%d\n", rays_size, copy_size, src, dst);
                 for(int i = 0; i < width; i++) {
                     memcpy( &rays[dst + i * buffer_capacity], &queue->data[src + i * buffer_capacity], copy_size * sizeof(float));
                 }
@@ -207,20 +211,23 @@ struct Client{
                         printf("| %d %d *", ids[i + rays_size], ids[i + rays_size + 1048608 * 9]);
                     }
                     printf("\n");
-                income_buffer_mutex.unlock(); 
+                    mutex.unlock();
+//                income_buffer_mutex.unlock(); 
                 return copy_size + rays_size;
             }
             idle = no_task && all_empty();
-            printf("proc %d rendering %d %d %d %d %d %d %d\n",mpi_rank, no_task, income_primary->size, income_secondary->size,
-                    outcome_primary->size, outcome_secondary->size, income_buffer_primary->size, income_buffer_primary->size);
+//            printf("proc %d rendering %d %d %d %d %d %d %d\n",mpi_rank, no_task, income_primary->size, income_secondary->size,
+//                    outcome_primary->size, outcome_secondary->size, income_buffer_primary->size, income_buffer_secondary->size);
             income_buffer_mutex.unlock(); 
+            mutex.unlock();
             if(stop_recv){  
                 printf("ray size %d   queue primary  size %d queue secondary size %d\n", 
                         rays_size, income_primary->size, income_secondary->size);
                 printf("recv stop %d %d\n", mpi_rank, rays_size);
                 return -1;
             }
-            if(!no_task){ return rays_size;}
+//            printf("%d %d\n", no_task, all_empty());
+            if(!no_task || !all_empty() ){ return rays_size;}
             usleep(400);
         }while(no_task);
     }

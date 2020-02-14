@@ -233,6 +233,7 @@ struct Interface {
         anydsl::Array<float> second_primary;
         anydsl::Array<float> buffer_primary;
         anydsl::Array<float> secondary;
+        anydsl::Array<float> buffer_secondary;
         anydsl::Array<float> film_pixels;
     };
     std::unordered_map<int32_t, DeviceData> devices;
@@ -453,6 +454,10 @@ struct Interface {
     int save_buffer_primary(int32_t dev) {
         anydsl::copy(devices[dev].buffer_primary, host_buffer_primary);
         return devices[dev].buffer_primary.size();
+    }
+    int save_buffer_secondary(int32_t dev) {
+        anydsl::copy(devices[dev].buffer_secondary, host_buffer_primary);
+        return devices[dev].buffer_secondary.size();
     }
     void load_buffer_primary(int32_t dev) {
         anydsl::copy(host_buffer_primary, devices[dev].buffer_primary);
@@ -707,21 +712,22 @@ void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mar
         get_primary_stream(primary, array.data(), capacity);
     }
     for(int i = 0; i < 5; i++){
-        printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
+        printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f geom %d prim %d t %f\n", 
                     primary.rays.id[i+0], primary.grid_id[i+0], primary.rays.tmin[i],
                     primary.rays.org_x[i], primary.rays.org_y[i], primary.rays.org_z[i],
-                    primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i]);
+                    primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i],
+                    primary.geom_id[i], primary.prim_id[i], primary.t);
     }
     
-    PrimaryStream buffer;
-    auto& array = interface->cpu_buffer;
-    get_primary_stream(buffer, array.data(), array.size() / 21);
-    for(int i = 0; i < 3; i++){
-        printf("buffer id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
-                    buffer.rays.id[i], buffer.grid_id[i], buffer.rays.tmin[i],
-                    buffer.rays.org_x[i], buffer.rays.org_y[i], buffer.rays.org_z[i],
-                    buffer.rays.dir_x[i], buffer.rays.dir_y[i], buffer.rays.dir_z[i]);
-    }
+//    PrimaryStream buffer;
+//    auto& array = interface->cpu_buffer;
+//    get_primary_stream(buffer, array.data(), array.size() / 21);
+//    for(int i = 0; i < 3; i++){
+//        printf("buffer id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
+//                    buffer.rays.id[i], buffer.grid_id[i], buffer.rays.tmin[i],
+//                    buffer.rays.org_x[i], buffer.rays.org_y[i], buffer.rays.org_z[i],
+//                    buffer.rays.dir_x[i], buffer.rays.dir_y[i], buffer.rays.dir_z[i]);
+//    }
 }
 
 int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, bool is_first_primary) {
@@ -733,39 +739,49 @@ int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, 
 }
 
 // 
-void rodent_buffer_send(int32_t dev, int buffer_size, bool primary, bool send_all) {
+void rodent_buffer_send(int32_t dev, int buffer_size, bool isPrimary, bool send_all) {
     if(dev == -1) {
-        if(primary) {
+        if(isPrimary) {
             auto& array = interface->cpu_buffer;
 //            printf("array.size %d buffer size %d\n ", array.size() / 21, buffer_size);
-            client_send_rays(array.data(), buffer_size, array.size() / 21, primary, send_all);
+            client_send_rays(array.data(), buffer_size, array.size() / 21, isPrimary, send_all);
         } else {
             auto& array = interface->cpu_secondary_buffer;
 //            printf("array.size %d buffer size %d\n ", array.size() / 14, buffer_size);
-            client_send_rays(array.data(), buffer_size, array.size() / 14, primary, send_all);
+            client_send_rays(array.data(), buffer_size, array.size() / 14, isPrimary, send_all);
         }
     } else {
-        int capacity = interface->save_buffer_primary(dev) / 21;
-        auto& array  = interface->host_buffer_primary;
-        client_send_rays(array.data(), buffer_size, capacity, primary, send_all);
+        if(isPrimary){
+            int capacity = interface->save_buffer_primary(dev) / 21;
+            auto& array  = interface->host_buffer_primary;
+            client_send_rays(array.data(), buffer_size, capacity, isPrimary, send_all);
+        } else {
+//            int capacity = interface->save_buffer_secondary(dev) / 21;
+//            auto& array  = interface->host_buffer_secondary;
+//            client_send_rays(array.data(), buffer_size, capacity, isPrimary, send_all);
+        }
     }
 }
 
-int rodent_rays_recv(int32_t dev, int32_t rays_size, bool idle, bool primary, bool is_first_primary) {
+int rodent_rays_recv(int32_t dev, int32_t rays_size, bool idle, bool isPrimary, bool is_first_primary) {
     int size_new = 0;
     if(dev == -1){
-        if(primary){
+        if(isPrimary){
             auto& array = interface->cpu_primary;
-            size_new = client_recv_rays(array.data(), rays_size, idle, primary); 
+            size_new = client_recv_rays(array.data(), rays_size, idle, isPrimary); 
         } else {
             auto& array = interface->cpu_secondary;
-            size_new = client_recv_rays(array.data(), rays_size, idle, primary); 
+            size_new = client_recv_rays(array.data(), rays_size, idle, isPrimary); 
         }
     } else {
-//        int capacity = is_first_primary? interface->save_first_primary(dev) / 21 : interface->save_second_primary(dev) / 21;
-//        auto&  array = interface->host_first_primary;
-//        size_new = client_recv_rays(array.data(), rays_size, idle);
-//        is_first_primary ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
+        if(isPrimary) {
+            int capacity = is_first_primary? interface->save_first_primary(dev) / 21 : interface->save_second_primary(dev) / 21;
+            auto&  array = interface->host_first_primary;
+            size_new = client_recv_rays(array.data(), rays_size, idle, isPrimary);
+            is_first_primary ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
+        } else {
+        
+        }
     }
 //    printf("after recv size new %d\n", size_new);
     return size_new;
