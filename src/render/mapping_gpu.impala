@@ -16,17 +16,19 @@ fn @gpu_get_film_data(dev_id: i32) -> (&mut [f32], i32, i32) {
 }
 
 fn @gpu_traverse_primary(primary: PrimaryStream, acc: Accelerator, intrinsics: Intrinsics, min_max: MinMax, scene: Scene) -> () {
-    gpu_traverse_single(
-        acc,
-        intrinsics,
-        min_max,
-        scene.bvh,
-        make_ray_stream_reader(primary.rays, 1),
-        make_primary_stream_hit_writer(primary, 1, scene.num_geometries),
-        1 /*packet_size*/,
-        primary.size /*num_packets*/,
-        false /*any_hit*/
-    );
+    if primary.size > 0 {
+        gpu_traverse_single(
+            acc,
+            intrinsics,
+            min_max,
+            scene.bvh,
+            make_ray_stream_reader(primary.rays, 1),
+            make_primary_stream_hit_writer(primary, 1, scene.num_geometries + 1),
+            1 /*packet_size*/,
+            primary.size /*num_packets*/,
+            false /*any_hit*/
+        );
+    }
 }
 
 fn @gpu_accumulate(atomics: Atomics, film_pixels: &mut [f32], pixel: i32, color: Color, spp: i32) -> () {
@@ -68,13 +70,14 @@ fn @gpu_traverse_secondary(secondary: SecondaryStream, acc: Accelerator, intrins
             false /*any_hit*/,
             1 /*root*/
         );
-        if hit.geom_id < 0  || secondary.grid_id(gid) == scene.num_geometries {
+        make_secondary_stream_hit_writer(secondary, 1)(gid, 0, hit); 
+        if hit.geom_id < 0 /* || secondary.grid_id(gid) == scene.num_geometries*/ {
             let color = make_color(
                 secondary.color_r(gid),
                 secondary.color_g(gid),
                 secondary.color_b(gid)
             );
-            gpu_accumulate(atomics, film_pixels, pixel, color, spp);
+//            gpu_accumulate(atomics, film_pixels, pixel, color, spp);
         }
     }
 }
@@ -86,6 +89,7 @@ fn @gpu_shade(acc: Accelerator, atomics: Atomics, scene: Scene, path_tracer: Pat
     let block = (block_w, 1, 1);
     let grid_ids    = primary.grid_id;
     let write_grid = @ |i, _, id| grid_ids(i) = id;
+    let write_primary_ray   = make_ray_stream_writer(primary.rays, 1);
 
     with work_item in acc.exec(grid, block) {
         let ray_id = first + work_item.gidx();
@@ -101,39 +105,43 @@ fn @gpu_shade(acc: Accelerator, atomics: Atomics, scene: Scene, path_tracer: Pat
         let geom  = scene.geometries(geom_id);
         let surf  = geom.surface_element(ray, hit);
         let mat   = geom.shader(ray, hit, surf);
+        
+        if(geom_id == scene.num_geometries) {
+            write_primary_ray(ray_id, 0, make_ray(ray.org, ray.dir, hit.distance + 0.00003f, flt_max));
+        } else {
+            for once() {
+                @@(path_tracer.on_hit)(ray, hit, &mut state, surf, mat, @ |color| -> ! {
+                    gpu_accumulate(atomics, film_pixels, pixel, color, spp);
+                    break()
+                });
+            }
 
-        for once() {
-            @@(path_tracer.on_hit)(ray, hit, &mut state, surf, mat, @ |color| -> ! {
-                gpu_accumulate(atomics, film_pixels, pixel, color, spp);
-                break()
-            });
-        }
+            for once() {
+                @@(path_tracer.on_shadow)(ray, hit, &mut state, surf, mat, @ |ray, color| -> ! {
+                    make_ray_stream_writer(secondary.rays, 1)(ray_id, 0, ray);
+                    secondary.color_r(ray_id) = color.r;
+                    secondary.color_g(ray_id) = color.g;
+                    secondary.color_b(ray_id) = color.b;
+                    secondary.rays.id(ray_id) = pixel;
+                    break()
+                }, @ || -> ! {
+                    secondary.rays.id(ray_id) = -1;
+                    break()
+                })
+            }
 
-        for once() {
-            @@(path_tracer.on_shadow)(ray, hit, &mut state, surf, mat, @ |ray, color| -> ! {
-                make_ray_stream_writer(secondary.rays, 1)(ray_id, 0, ray);
-                secondary.color_r(ray_id) = color.r;
-                secondary.color_g(ray_id) = color.g;
-                secondary.color_b(ray_id) = color.b;
-                secondary.rays.id(ray_id) = pixel;
-                break()
-            }, @ || -> ! {
-                secondary.rays.id(ray_id) = -1;
-                break()
-            })
-        }
-
-        for once() {
-            @@(path_tracer.on_bounce)(ray, hit, &mut state, surf, mat, @ |new_ray, new_state| -> ! {
-                make_ray_stream_writer(primary.rays, 1)(ray_id, 0, new_ray);
-                make_primary_stream_state_writer(primary, 1)(ray_id, 0, new_state);
-                write_grid(ray_id, 0, 1022);
-                break()
-            }, @ || -> ! {
-                primary.rays.id(ray_id) = -1;
-                write_grid(ray_id, 0, -1000);
-                break()
-            })
+            for once() {
+                @@(path_tracer.on_bounce)(ray, hit, &mut state, surf, mat, @ |new_ray, new_state| -> ! {
+                    make_ray_stream_writer(primary.rays, 1)(ray_id, 0, new_ray);
+                    make_primary_stream_state_writer(primary, 1)(ray_id, 0, new_state);
+                    write_grid(ray_id, 0, 1022);
+                    break()
+                }, @ || -> ! {
+                    primary.rays.id(ray_id) = -1;
+                    write_grid(ray_id, 0, -1000);
+                    break()
+                })
+            }
         }
     }
 }
@@ -206,7 +214,7 @@ fn @gpu_generate_rays( primary: PrimaryStream
     let first_ray_id = *id;
     let first_dst_id = primary.size;
     
-    let num_rays = cpu_intrinsics.min(spp * film_width * film_height - first_ray_id, capacity - first_dst_id);
+    let num_rays = intrinsics.min(spp * film_width * film_height - first_ray_id, capacity - first_dst_id);
     let film_div = make_fast_div(film_width as u32);
 
     let ray_ids     = primary.rays.id;
@@ -230,7 +238,7 @@ fn @gpu_generate_rays( primary: PrimaryStream
         let (ray, state) = @@(on_emit)(sample, x, y, film_width, film_height);
         write_ray(dst_id, 0, ray);
         write_state(dst_id, 0, state);
-        write_id(dst_id, 0, pixel);  //?
+        write_id(dst_id, 0, pixel);
         write_grid(dst_id, 0, 1022); 
     }
     acc.sync();
@@ -272,81 +280,40 @@ fn @gpu_compact_primary( primary: PrimaryStream
     size
 }
 
-fn @gpu_primary_transfer( primary: PrimaryStream
-                        , other_primary: PrimaryStream
-                        , buffer: PrimaryStream
-                        , chunk: i32
-                        , capacity: i32
-                        , acc: Accelerator
-                        , intrinsics: Intrinsics
-                        , atomics: Atomics
-                        , dev_id: i32
-                        , gpu_tmp:  &mut [i32]
-                        , is_first: bool
-                        , generate_end:bool
-                        ) -> (i32, i32) {
-    let block_w  = 64;
-    let grid_ids = primary.grid_id;
-    let mut size : [i32 * 2]; 
-    // primary size, buffer size, new buffer size
-    size(0) = 0;
-    size(1) = buffer.size;
-    runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
-    with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
+fn @gpu_compact_secondary( secondary: SecondaryStream
+                         , other_secondary: SecondaryStream
+                         , dev_id: i32
+                         , acc: Accelerator
+                         , intrinsics: Intrinsics
+                         , atomics: Atomics
+                         , gpu_tmp: &mut [i32]
+                         ) -> i32 {
+    let block_w = 64;
+
+    // reset temporary memory
+    let mut size = 0;
+    runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, sizeof[i32]() as i64);
+
+    // Compact secondary rays into another queue
+    with work_item in acc.exec((round_up(secondary.size, block_w), 1, 1), (block_w, 1, 1)) {
         let src_id = work_item.gidx();
-        if src_id >= primary.size {
+        if src_id >= secondary.size {
             break()
         }
-        let id = get_chunk_id(grid_ids(src_id));
-        if  id != chunk && id != -1 {
-            atomics.add_global_i32(&mut gpu_tmp(0), 1);
+
+        let ray_id = secondary.rays.id(src_id);
+        if ray_id >= 0 {
+            let dst_id = atomics.add_global_i32(&mut gpu_tmp(0), 1);
+            copy_secondary_ray(secondary, other_secondary, src_id, dst_id);
         }
+
     }
     acc.sync();
-    runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
-     
-    // if buffer full 
-    print_string("new buffer :");
-    print_i32(size(0)); 
-    if size(0) + buffer.size >= capacity {
-        print_string("send buffer size: ");
-        print_i32(buffer.size);
-        rodent_buffer_send(dev_id, buffer.size, true, true);
-        size(1) = 0;
-    }
-    size(0) = 0;
-    if primary.size > 0 {
-        runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
-        with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
-            let src_id = work_item.gidx();
-            if src_id >= primary.size {
-                break()
-            }
-            let id = get_chunk_id(grid_ids(src_id));
-            if id == chunk {
-                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(0), 1);
-                copy_primary_ray(primary, other_primary, src_id, dst_id, true);
-            } else if id != chunk && id != -1 {
-                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(1), 1);
-                copy_primary_ray(primary, buffer, src_id, dst_id, true);
-            }
-        }
-        acc.sync();
-        runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
-    }
-    print_i32(size(0)); print_string("||"); print_i32(size(1));print_string("||"); print_i32(primary.size);
-    rodent_buffer_send(dev_id, buffer.size, true, true);
-    size(1) = 0; 
-    size(0) = rodent_rays_recv(dev_id, size(0), generate_end, true, !is_first); 
 
-    print_string("final buffer size: ");
-    print_i32(size(1)); 
-    print_string(" primary size: ");
-    print_i32(size(0)); 
-    print_string("\n ");
-    
-    (size(0), size(1))
+    runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, sizeof[i32]() as i64);
+    size
 }
+
 
 fn @gpu_swap_streams(a: &mut PrimaryStream, b: &mut PrimaryStream) -> () {
     let tmp = *a;
@@ -361,7 +328,14 @@ fn @gpu_swap_primary(a: &mut PrimaryStream, b: &mut PrimaryStream, c: &mut bool)
     *c = !(*c);
 }
 
-fn @gpu_get_grid_id( primary: PrimaryStream
+fn @gpu_swap_secondary(a: &mut SecondaryStream, b: &mut SecondaryStream, c: &mut bool) -> () {
+    let tmp = *a;
+    *a = *b;
+    *b = tmp;
+    *c = !(*c);
+}
+
+fn @gpu_primary_grid( primary: PrimaryStream
                     , acc: Accelerator
                     , intrinsics: Intrinsics
                     , atomics: Atomics
@@ -382,7 +356,6 @@ fn @gpu_get_grid_id( primary: PrimaryStream
     let scene_id    = scene.chunk;
     let cur_coord   = get_grid_coordinate(scene_id, grid_scale);
  
-    let mut primary_size = 0;
     // Compact primary rays into another queue
     
     if primary.size == 0 {return()}
@@ -417,6 +390,191 @@ fn @gpu_get_grid_id( primary: PrimaryStream
     acc.sync();
 }
 
+fn @gpu_primary_transfer( primary: PrimaryStream
+                        , other_primary: PrimaryStream
+                        , buffer: PrimaryStream
+                        , chunk: i32
+                        , capacity: i32
+                        , acc: Accelerator
+                        , intrinsics: Intrinsics
+                        , atomics: Atomics
+                        , dev_id: i32
+                        , gpu_tmp:  &mut [i32]
+                        , is_first: bool
+                        , generate_end:bool
+                        ) -> (i32, i32) {
+    
+    if primary.size == 0 {return (0, buffer.size)}
+    
+    let block_w  = 64;
+    let grid_ids = primary.grid_id;
+    let mut size : [i32 * 2]; 
+    // primary size, buffer size, new buffer size
+    size(0) = 0;
+    size(1) = buffer.size;
+    runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+    with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
+        let src_id = work_item.gidx();
+        if src_id >= primary.size {
+            break()
+        }
+        let id = get_chunk_id(grid_ids(src_id));
+        if  id != chunk && id != -1 {
+            atomics.add_global_i32(&mut gpu_tmp(0), 1);
+        }
+    }
+    acc.sync();
+    runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+     
+    // if buffer full 
+    print_string("new buffer :");
+    print_i32(size(0)); 
+    if size(0) + buffer.size >= capacity {
+        print_string("send buffer size: ");
+        print_i32(buffer.size);
+        rodent_primary_send(dev_id, buffer.size, true);
+        size(1) = 0;
+    }
+    size(0) = 0;
+    if primary.size > 0 {
+        runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+        with work_item in acc.exec((round_up(primary.size, block_w), 1, 1), (block_w, 1, 1)) {
+            let src_id = work_item.gidx();
+            if src_id >= primary.size {
+                break()
+            }
+            let id = get_chunk_id(grid_ids(src_id));
+            if id == chunk {
+                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(0), 1);
+                copy_primary_ray(primary, other_primary, src_id, dst_id, false);
+            } else if id != chunk && id != -1 {
+                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(1), 1);
+                copy_primary_ray(primary, buffer, src_id, dst_id, false);
+            }
+        }
+        acc.sync();
+        runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+    }
+    print_i32(size(0)); print_string("||"); print_i32(size(1));print_string("||"); print_i32(primary.size);
+    print_string("final buffer size: ");
+    print_i32(size(1)); 
+    print_string(" primary size: ");
+    print_i32(size(0)); 
+    print_string("\n ");
+    
+    (size(0), size(1))
+}
+fn @gpu_secondary_grid( secondary: SecondaryStream
+                      , acc: Accelerator
+                      , intrinsics: Intrinsics
+                      , atomics: Atomics
+                      , min_max: MinMax
+                      , scene: Scene
+                      ) -> () {
+    let block_w = 64;
+    let bbox = scene.bbox;
+    let grid_scale = make_vec3i(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
+    let step       = vec3_div( vec3_sub(bbox.max, bbox.min), scene.grid);
+    let inv_step   = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
+    let num_grids  = grid_scale.x * grid_scale.y * grid_scale.z;
+
+    let grid_ids    = secondary.grid_id;
+    let write_grid  = @ |i, _, id| secondary.grid_id(i) = id;
+    let ray_reader  = make_ray_stream_reader(secondary.rays, 1);
+    let ray_ids     = secondary.rays.id;
+    let scene_id    = scene.chunk;
+    let cur_coord   = get_grid_coordinate(scene_id, grid_scale);
+ 
+    // Compact secondary rays into another queue
+    
+    if secondary.size == 0 {return()}
+    with work_item in acc.exec((round_up(secondary.size, block_w), 1, 1), (block_w, 1, 1)) {
+        let src_id = work_item.gidx();
+        if src_id >= secondary.size {
+            break()
+        }
+        let ray = make_ray_stream_reader(secondary.rays, 1)(src_id, 0);
+        if secondary.grid_id(src_id) == scene.num_geometries {
+            let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
+            let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
+            write_grid(src_id, 0, coordinate_compress(c, grid_scale, bbox.max, intrinsics));
+        } else {
+            write_grid(src_id, 0, -1000);
+        }
+    }
+    acc.sync();
+}
+
+fn @gpu_secondary_transfer( secondary: SecondaryStream
+                          , buffer: SecondaryStream
+                          , chunk: i32
+                          , capacity: i32
+                          , acc: Accelerator
+                          , intrinsics: Intrinsics
+                          , atomics: Atomics
+                          , dev_id: i32
+                          , gpu_tmp:  &mut [i32]
+                          , is_first: bool
+                          , generate_end:bool
+                          ) -> (i32, i32) {
+    
+    if secondary.size == 0 {return (0, buffer.size)}
+    
+    let block_w  = 64;
+    let grid_ids = secondary.grid_id;
+    let mut size : [i32 * 2]; 
+    // secondary size, buffer size, new buffer size
+    size(0) = 0;
+    size(1) = buffer.size;
+    runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+    with work_item in acc.exec((round_up(secondary.size, block_w), 1, 1), (block_w, 1, 1)) {
+        let src_id = work_item.gidx();
+        if src_id >= secondary.size {
+            break()
+        }
+        let id = get_chunk_id(grid_ids(src_id));
+        if  id != chunk && id != -1 {
+            atomics.add_global_i32(&mut gpu_tmp(0), 1);
+        }
+    }
+    acc.sync();
+    runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+     
+    // if buffer full 
+    print_string("new buffer :");
+    print_i32(size(0)); 
+    if size(0) + buffer.size >= capacity {
+        print_string("send buffer2 size: ");
+        print_i32(buffer.size);
+        rodent_secondary_send(dev_id, buffer.size, true);
+        size(1) = 0;
+    }
+    size(0) = 0;
+    if secondary.size > 0 {
+        runtime_copy(0, &size as &[i8], 0i64, dev_id, gpu_tmp as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+        with work_item in acc.exec((round_up(secondary.size, block_w), 1, 1), (block_w, 1, 1)) {
+            let src_id = work_item.gidx();
+            if src_id >= secondary.size {
+                break()
+            }
+            let id = get_chunk_id(grid_ids(src_id));
+            if id != chunk && id != -1 {
+                let dst_id  = atomics.add_global_i32(&mut gpu_tmp(1), 1);
+                copy_secondary_ray(secondary, buffer, src_id, dst_id);
+            }
+        }
+        acc.sync();
+        runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, (sizeof[i32]() * 2) as i64);
+    }
+    print_i32(size(0)); print_string("||"); print_i32(size(1));print_string("||"); print_i32(secondary.size);
+    print_string("buffer2 size: ");
+    print_i32(size(1)); 
+    print_string(" secondary size: ");
+    print_i32(size(0)); 
+    print_string("\n ");
+    
+    (size(0), size(1))
+}
 fn @gpu_dis_streaming_trace( dev_id: i32
                            , acc: Accelerator
                            , intrinsics: Intrinsics
@@ -424,94 +582,129 @@ fn @gpu_dis_streaming_trace( dev_id: i32
                            , min_max: MinMax
                            , scene: Scene
                            , path_tracer: PathTracer
-                           , spp: i32
+                           , Spp: i32
                            ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
     
-    let spp_task = scene.camera.spp;
+    let spp = scene.camera.spp;
     let capacity = 1024 * 1024;
     let mut primary;
     let mut other_primary;
+    let mut buffer1;
+    
     let mut secondary;
-    let mut buffer;
+    let mut buffer2;
+
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, capacity);
-    rodent_gpu_get_secondary_stream(dev_id, &mut secondary, capacity);
-    rodent_gpu_get_primary_buffer_stream(dev_id, &mut buffer, capacity); 
+    rodent_gpu_get_primary_buffer_stream(dev_id, &mut buffer1, capacity); 
+    
+    rodent_gpu_get_first_secondary_stream(dev_id, &mut secondary, capacity);
+    rodent_gpu_get_secondary_buffer_stream(dev_id, &mut buffer2, capacity); 
 
     let mut gpu_tmp : &mut [i32];
     rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
 
     let mut id = 0;
     let mut first_primary = true;
-    let mut has_unloaded_rays = false;
-    let num_rays = spp_task * film_width * film_height;
+    let num_rays = spp * film_width * film_height;
     let num_chunks = (scene.grid.x * scene.grid.y * scene.grid.z) as i32;
+    let mut idle = false; 
+
     print_i32(num_chunks);
     print_string("start rendering\n");
+    print_i32(num_rays);
     while true {
         // Regenerate rays
         if primary.size < capacity && id < num_rays {
              primary.size = gpu_generate_rays(primary, capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
         }
-        rodent_first_primary_check(1, primary.size, 1, true);     
+//        rodent_first_primary_check(1, primary.size, 1, true);     
         print_string("before grid id: ");
         print_i32(primary.size);
-        gpu_get_grid_id(primary, acc, intrinsics, atomics, min_max, scene); 
+        gpu_primary_grid(primary, acc, intrinsics, atomics, min_max, scene); 
         print_string("after grid id: ");
         print_i32(primary.size);
+        let (primary_size, buffer1_size) = gpu_primary_transfer(primary, other_primary, buffer1, scene.chunk, capacity, acc, intrinsics,
+                                                                atomics, dev_id, gpu_tmp, first_primary, id == num_rays);
+        print_string("after transfer : ");
+        gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
+        primary.size = primary_size; 
+        buffer1.size = buffer1_size;
+        if primary.size == 0 { 
+            idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
+            if buffer1.size > 0 {
+                rodent_primary_send(dev_id, buffer1_size, true);
+                buffer1.size = 0;
+            }
+            primary.size = rodent_primary_recv(dev_id, primary.size, idle, first_primary); 
+        }
+        print_string("primary.size == ");
+        print_i32(primary.size);
+        print_string("\n");
+        if(primary.size < 0) {break()}
         if(primary.size == 0) {
             print_string("primary == 0 id"); 
             print_i32(id);
             print_string(" ");
             print_i32(num_rays);
-            break()
         }
-        let (primary_size, buffer_size) = gpu_primary_transfer(primary, other_primary, buffer, scene.chunk, capacity, acc, intrinsics,
-                                                                atomics, dev_id, gpu_tmp, first_primary, id == num_rays);
-        print_string("after transfer : ");
-        print_i32(primary.size);
-        if(primary_size < 0) {break()}
-        if(primary_size == 0) {continue()}
-        gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
-        primary.size = primary_size; 
-        buffer.size = buffer_size;
- 
-        rodent_first_primary_check(1, primary.size, 1, true);     
+//        rodent_secondary_check(1, secondary.size, 1, true);     
         // Traverse primary rays
         gpu_traverse_primary(primary, acc, intrinsics, min_max, scene);
         print_string("sort\n"); 
         // Sort rays by geometry
         let mut ray_ends : [i32 * 1024];
-        gpu_sort_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, scene.num_geometries, gpu_tmp, &mut ray_ends);
-        gpu_swap_streams(&mut primary, &mut other_primary);
-        // Shade rays
-        let mut first = 0;
-        for geom_id in unroll(0, scene.num_geometries) {
-            let last = ray_ends(geom_id);
-            if first >= last {
-                continue()
+        if primary.size == 0 {
+            secondary.size = 0; 
+        } else {
+            gpu_sort_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, scene.num_geometries + 2, gpu_tmp, &mut ray_ends);
+            gpu_swap_streams(&mut primary, &mut other_primary);
+            // Shade rays
+            let mut first = 0;
+            for geom_id in unroll(0, scene.num_geometries + 1) {
+                let last = ray_ends(geom_id);
+                if first >= last {
+                    continue()
+                }
+                gpu_shade(acc, atomics, scene, path_tracer, film_pixels, Spp, primary, secondary, first, last, geom_id);
+                first = last;
             }
-            gpu_shade(acc, atomics, scene, path_tracer, film_pixels, spp, primary, secondary, first, last, geom_id);
-            first = last;
+            primary.size   = ray_ends(scene.num_geometries);
+            secondary.size = ray_ends(scene.num_geometries - 1);
         }
-        print_string("shade\n"); 
-        print_string("ray end :  ");
-        print_i32(ray_ends(scene.num_geometries));
-        print_string("\n primary  :  ");
-        print_i32(primary.size);
-        print_string("\n first :  ");
-        print_i32(first);
+        print_i32(secondary.size);
+//        secondary.size = gpu_compact_secondary(secondary, other_secondary, dev_id, acc, intrinsics, atomics, gpu_tmp);
+//        gpu_swap_secondary(&mut secondary, &mut other_secondary, &mut first_secondary);
+        print_string("after compact\n");
+        print_i32(secondary.size);
         print_string("\n");
-        primary.size   = first;
-        secondary.size = first;
-        acc.sync();
+       
+        if secondary.size == 0 { 
+            idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
+            if buffer2.size > 0 {
+                print_string("send rays\n");
+                rodent_secondary_send(dev_id, buffer2.size, true);
+                buffer2.size = 0;
+            }
+            print_string("recv rays\n");
+            secondary.size = rodent_secondary_recv(dev_id, secondary.size, idle, true); 
+        }
+        print_string("after send\n");
 
-        if first > 0 {
+        acc.sync();
+        if secondary.size > 0 {
             // Trace secondary rays
             gpu_traverse_secondary(secondary, acc, intrinsics, atomics, min_max, scene, film_pixels, spp);
-
-            // Compact primary rays
+            gpu_secondary_grid(secondary, acc, intrinsics, atomics, min_max, scene); 
+            let (secondary_size, buffer2_size) = gpu_secondary_transfer(secondary, buffer2, scene.chunk, capacity, acc, intrinsics,
+                                                                    atomics, dev_id, gpu_tmp, true, id == num_rays);
+            print_string("after transfer : ");
+            secondary.size = secondary_size; 
+            buffer2.size = buffer2_size;
+        }
+        if primary.size > 0 {
+        // Compact primary rays
             other_primary.size = gpu_compact_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, gpu_tmp);
             gpu_swap_streams(&mut primary, &mut other_primary);
         }
@@ -536,7 +729,7 @@ fn @gpu_streaming_trace( dev_id: i32
     let mut secondary;
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, capacity);
-    rodent_gpu_get_secondary_stream(dev_id, &mut secondary, capacity);
+    rodent_gpu_get_first_secondary_stream(dev_id, &mut secondary, capacity);
     
     let mut gpu_tmp : &mut [i32];
     rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
@@ -715,7 +908,7 @@ fn @make_gpu_device( dev_id: i32
         intrinsics: intrinsics,
         trace: @ |scene, path_tracer, spp| {
             if streaming {
-                gpu_dis_streaming_trace(
+                gpu_streaming_trace(
                     dev_id,
                     acc,
                     intrinsics,

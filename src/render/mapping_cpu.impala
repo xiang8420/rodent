@@ -404,7 +404,6 @@ fn @cpu_trace( scene: Scene
             let mut secondary : SecondaryStream;
             let capacity = spp * tile_size * tile_size;
             rodent_cpu_get_primary_stream(&mut primary,     capacity);
-            rodent_cpu_get_primary_buffer(&mut buffer,     capacity);
             rodent_cpu_get_secondary_stream(&mut secondary, capacity);
             let mut id = 0;
             let num_rays = spp * (ymax - ymin) * (xmax - xmin);
@@ -590,7 +589,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             copy_primary_ray(primary, primary, i, primary_size++, false);
         } else if cid != -1 {
             if buffer_size >= capacity {
-                rodent_buffer_send(-1, buffer_size, true, true);
+                rodent_primary_send(-1, buffer_size, true);
                 buffer_size = 0;
             }
             copy_primary_ray(primary, buffer, i, buffer_size++, false);
@@ -639,13 +638,13 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
     for i in range(0, secondary.size) {
         let cid = get_chunk_id(grid_ids(i));
         if cid == scene_id {
-            copy_secondary_ray(secondary, secondary, i, secondary_size++, false);
+            copy_secondary_ray(secondary, secondary, i, secondary_size++);
         } else if cid != -1 {
             if buffer_size >= capacity {
-                rodent_buffer_send(-1, buffer_size, false, true);
+                rodent_secondary_send(-1, buffer_size, true);
                 buffer_size = 0;
             }
-            copy_secondary_ray(secondary, buffer, i, buffer_size++, false);
+            copy_secondary_ray(secondary, buffer, i, buffer_size++);
         }
     }
     (secondary_size, buffer_size)    
@@ -669,14 +668,14 @@ fn @cpu_secondary_extract(secondary: SecondaryStream
     for i in range(0, secondary.size) {
         let cid = get_chunk_id(grid_ids(i));
         if cid == chunk {
-            copy_secondary_ray(secondary, secondary, i, secondary_size++, false);
+            copy_secondary_ray(secondary, secondary, i, secondary_size++);
         } 
         else if cid != -1 {
             if buffer_size >= capacity {
-                rodent_buffer_send(-1, buffer_size, false, true);
+                rodent_secondary_send(-1, buffer_size, true);
                 buffer_size = 0;
             }
-            copy_secondary_ray(secondary, buffer, i, buffer_size++, false);
+            copy_secondary_ray(secondary, buffer, i, buffer_size++);
         } else {
             dead_rays++;
         } 
@@ -779,14 +778,14 @@ fn @cpu_dis_trace( scene: Scene
     with cpu_profile(&mut total_counter) {
         // Get ray streams/states from the CPU driver
         let mut primary   : PrimaryStream;
-        let mut buffer1   : PrimaryStream;
+        let mut out_primary   : PrimaryStream;
         let mut secondary : SecondaryStream;
-        let mut buffer2   : SecondaryStream;
+        let mut out_secondary   : SecondaryStream;
         let capacity = 1024 * 1024;
         rodent_cpu_get_primary_stream(&mut primary,     capacity);
-        rodent_cpu_get_primary_buffer(&mut buffer1,     capacity);
+        rodent_cpu_get_primary_outcome_stream(&mut out_primary,     capacity);
         rodent_cpu_get_secondary_stream(&mut secondary, capacity);
-        rodent_cpu_get_secondary_buffer(&mut buffer2,   capacity);
+        rodent_cpu_get_secondary_outcome_stream(&mut out_secondary,   capacity);
         let mut id = 0;
         let num_rays = spp * (image_range(2) - image_range(0)) as i32 * (image_range(3) - image_range(1)) as i32;
         
@@ -801,24 +800,24 @@ fn @cpu_dis_trace( scene: Scene
                                             film_width, film_height, spp, vector_width);
             }
             with cpu_profile(&mut transfer_counter) {
-                let (primary_size, buffer1_size) = cpu_primary_transfer(primary, buffer1, min_max, vector_width, capacity, id == num_rays, scene);
+                let (primary_size, out_primary_size) = cpu_primary_transfer(primary, out_primary, min_max, vector_width, capacity, id == num_rays, scene);
                 primary.size = primary_size; 
-                buffer1.size = buffer1_size; 
+                out_primary.size = out_primary_size; 
                 
-                idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
+                idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
 //                rodent_first_primary_check(-1, primary.size, 1, true);                
                 if primary.size == 0 {
-                    if(buffer1.size > 0) {
-                        rodent_buffer_send(-1, buffer1.size, true, true);
-                        buffer1.size = 0;
+                    if(out_primary.size > 0) {
+                        rodent_primary_send(-1, out_primary.size, true);
+                        out_primary.size = 0;
                     }
-                    primary.size = rodent_rays_recv(-1, primary.size, idle, true, true); 
+                    primary.size = rodent_primary_recv(-1, primary.size, idle, true); 
                 }    
                 if(primary.size < 0) {
                     print_string("end rendering"); print_i32(primary.size); 
-                    print_string(" "); print_i32(buffer1.size);
+                    print_string(" "); print_i32(out_primary.size);
                     print_string(" "); print_i32(secondary.size); 
-                    print_string(" "); print_i32(buffer2.size);
+                    print_string(" "); print_i32(out_secondary.size);
                     break()
                 }
             }
@@ -847,17 +846,19 @@ fn @cpu_dis_trace( scene: Scene
             primary.size   = ray_ends(scene.num_geometries);
             primary.size   = cpu_compact_primary(primary, vector_width, false /*vector_compact*/);
 //            check_secondary_grid_id(secondary, scene.chunk, 1);
+
+            // only when secondary size == 0 need recv, it should be compacted? no compact 
             secondary.size = ray_ends(scene.num_geometries - 1);
             secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
             
             with cpu_profile(&mut transfer_counter) {
-                idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
+                idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
                 if secondary.size == 0 {
-                    if buffer2.size > 0 {
-                        rodent_buffer_send(-1, buffer2.size, false, true);
-                        buffer2.size = 0;
+                    if out_secondary.size > 0 {
+                        rodent_secondary_send(-1, out_secondary.size, true);
+                        out_secondary.size = 0;
                     }
-                    secondary.size = rodent_rays_recv(-1, secondary.size, idle, false, true); 
+                    secondary.size = rodent_secondary_recv(-1, secondary.size, idle, true); 
                 }    
             }
             if(secondary.size < 0) {
@@ -888,10 +889,10 @@ fn @cpu_dis_trace( scene: Scene
                 }
             }
             with cpu_profile(&mut transfer_counter) {
-                let (secondary_size, buffer2_size) = cpu_secondary_transfer(secondary, buffer2, min_max, vector_width, capacity, id == num_rays, scene);
+                let (secondary_size, out_secondary_size) = cpu_secondary_transfer(secondary, out_secondary, min_max, vector_width, capacity, id == num_rays, scene);
     //            check_secondary_grid_id(secondary, scene.chunk, 3);
                 secondary.size = secondary_size; 
-                buffer2.size = buffer2_size;
+                out_secondary.size = out_secondary_size;
             } 
         }
     }

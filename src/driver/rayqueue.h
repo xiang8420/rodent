@@ -29,7 +29,11 @@ struct Ray {
    
     float* datas() {return &data[capacity];}
    
-    void clear() {size = 0;}
+    int clear() { 
+        int s = size;
+        size = 0;
+        return s;
+    }
    
     int get_size() { return size;}
    
@@ -112,7 +116,11 @@ struct RayQueue {
 
     float* rays() {return data; }
 
-    void clear() {size = 0;}
+    int clear() {
+        int s = size;
+        size = 0;
+        return s;
+    }
 
     int get_size() { return size;}
 
@@ -133,10 +141,10 @@ inline void swap(struct Ray* &a, struct Ray* &b) {
     b = tmp;
 }
          
-inline void swap(float *&a, float *&b) {
-    float* tmp;
-    tmp = a;
-    a = b;
-    b = tmp;
+inline void swap(float **a, float **b) {
+    float** tmp;
+    *tmp = *a;
+    *a = *b;
+    *b = *tmp;
 }
 

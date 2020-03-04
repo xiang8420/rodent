@@ -55,7 +55,6 @@ struct Camera {
 };
 
 void setup_interface(size_t, size_t);
-void thread_recv();
 float* get_pixels();
 float* get_first_primary();
 void clear_pixels();

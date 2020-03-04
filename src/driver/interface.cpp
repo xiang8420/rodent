@@ -16,7 +16,7 @@
 #include "buffer.h"
 
 void client_send_rays(float *, size_t, size_t, bool, bool);
-int  client_recv_rays(float *, size_t, bool, bool);
+int  client_recv_rays(float **, size_t, bool, bool);
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -229,19 +229,24 @@ struct Interface {
         std::unordered_map<std::string, anydsl::Array<uint8_t>> buffers;
         std::unordered_map<std::string, DeviceImage> images;
         anydsl::Array<int32_t> tmp_buffer;
+        
         anydsl::Array<float> first_primary;
         anydsl::Array<float> second_primary;
         anydsl::Array<float> buffer_primary;
-        anydsl::Array<float> secondary;
+        
+        anydsl::Array<float> first_secondary;
+        anydsl::Array<float> second_secondary;
         anydsl::Array<float> buffer_secondary;
         anydsl::Array<float> film_pixels;
     };
     std::unordered_map<int32_t, DeviceData> devices;
 
     static thread_local anydsl::Array<float> cpu_primary;
-    static thread_local anydsl::Array<float> cpu_buffer;
+    static thread_local anydsl::Array<float> cpu_primary_outcome;
+    static thread_local anydsl::Array<float> cpu_primary_income;
     static thread_local anydsl::Array<float> cpu_secondary;
-    static thread_local anydsl::Array<float> cpu_secondary_buffer;
+    static thread_local anydsl::Array<float> cpu_secondary_outcome;
+    static thread_local anydsl::Array<float> cpu_secondary_income;
 
 #ifdef ENABLE_EMBREE_DEVICE
     EmbreeDevice embree_device;
@@ -250,7 +255,9 @@ struct Interface {
     anydsl::Array<float> host_pixels;
     anydsl::Array<float> tmp_pixels;
     anydsl::Array<float> host_first_primary;
+    anydsl::Array<float> host_first_secondary;
     anydsl::Array<float> host_buffer_primary;
+    anydsl::Array<float> host_buffer_secondary;
     anydsl::Array<int32_t> host_primary_num;
 
     size_t film_width;
@@ -262,9 +269,11 @@ struct Interface {
         , host_pixels(width * height * 3)
         , tmp_pixels(width * height * 3)
     {
-        host_first_primary  = anydsl::Array<float>(1024 * 1024 * 21);
+        host_first_primary  = anydsl::Array<float>(1048608 * 21);
+        host_buffer_primary = anydsl::Array<float>(1048608 * 21);
+        host_first_secondary  = anydsl::Array<float>(1048608 * 14);
+        host_buffer_secondary = anydsl::Array<float>(1048608 * 14);
         host_primary_num    = anydsl::Array<int32_t>(128);
-        host_buffer_primary = anydsl::Array<float>(1024 * 1024 * 21);
     }
 
     template <typename T>
@@ -276,23 +285,31 @@ struct Interface {
         }
         return array;
     }
-
+    //cpu 
     anydsl::Array<float>& cpu_primary_stream(size_t size) {
         return resize_array(0, cpu_primary, size, 21);
     }
 
-    anydsl::Array<float>& cpu_buffer_stream(size_t size) {
-        return resize_array(0, cpu_buffer, size, 21);
+    anydsl::Array<float>& cpu_primary_outcome_stream(size_t size) {
+        return resize_array(0, cpu_primary_outcome, size, 21);
     }
     
-    anydsl::Array<float>& cpu_secondary_buffer_stream(size_t size) {
-        return resize_array(0, cpu_secondary_buffer, size, 14);
+    anydsl::Array<float>& cpu_primary_income_stream(size_t size) {
+        return resize_array(0, cpu_primary_income, size, 21);
     }
-
+    
     anydsl::Array<float>& cpu_secondary_stream(size_t size) {
         return resize_array(0, cpu_secondary, size, 14);
     }
     
+    anydsl::Array<float>& cpu_secondary_outcome_stream(size_t size) {
+        return resize_array(0, cpu_secondary_outcome, size, 14);
+    }
+
+    anydsl::Array<float>& cpu_secondary_income_stream(size_t size) {
+        return resize_array(0, cpu_secondary_income, size, 14);
+    }
+    //gpu 
     anydsl::Array<float>& gpu_first_primary_stream(int32_t dev, size_t size) {
         return resize_array(dev, devices[dev].first_primary, size, 21);
     }
@@ -305,10 +322,18 @@ struct Interface {
         return resize_array(dev, devices[dev].buffer_primary, size, 21);
     }
 
-    anydsl::Array<float>& gpu_secondary_stream(int32_t dev, size_t size) {
-        return resize_array(dev, devices[dev].secondary, size, 14);
+    anydsl::Array<float>& gpu_first_secondary_stream(int32_t dev, size_t size) {
+        return resize_array(dev, devices[dev].first_secondary, size, 14);
     }
 
+    anydsl::Array<float>& gpu_second_secondary_stream(int32_t dev, size_t size) {
+        return resize_array(dev, devices[dev].second_secondary, size, 14);
+    }
+
+    anydsl::Array<float>& gpu_secondary_buffer_stream(int32_t dev, size_t size) {
+        return resize_array(dev, devices[dev].buffer_secondary, size, 14);
+    }
+    
     anydsl::Array<int32_t>& gpu_tmp_buffer(int32_t dev, size_t size) {
         return resize_array(dev, devices[dev].tmp_buffer, size, 1);
     }
@@ -448,6 +473,21 @@ struct Interface {
     void load_second_primary(int32_t dev) {
         anydsl::copy(host_first_primary, devices[dev].second_primary);
     }
+
+    int save_first_secondary(int32_t dev) {
+        anydsl::copy(devices[dev].first_secondary, host_first_secondary);
+        return devices[dev].first_secondary.size();
+    }
+    int save_second_secondary(int32_t dev) {
+        anydsl::copy(devices[dev].second_secondary, host_first_secondary);
+        return devices[dev].second_secondary.size();
+    }
+    void load_first_secondary(int32_t dev) {
+        anydsl::copy(host_first_secondary, devices[dev].first_secondary);
+    }
+    void load_second_secondary(int32_t dev) {
+        anydsl::copy(host_first_secondary, devices[dev].second_secondary);
+    }
     void save_first_primary_num(int32_t dev) {
         anydsl::copy(devices[dev].tmp_buffer, host_primary_num);
     }
@@ -456,7 +496,7 @@ struct Interface {
         return devices[dev].buffer_primary.size();
     }
     int save_buffer_secondary(int32_t dev) {
-        anydsl::copy(devices[dev].buffer_secondary, host_buffer_primary);
+        anydsl::copy(devices[dev].buffer_secondary, host_buffer_secondary);
         return devices[dev].buffer_secondary.size();
     }
     void load_buffer_primary(int32_t dev) {
@@ -473,9 +513,11 @@ struct Interface {
 };
 
 thread_local anydsl::Array<float> Interface::cpu_primary;
-thread_local anydsl::Array<float> Interface::cpu_buffer;
+thread_local anydsl::Array<float> Interface::cpu_primary_outcome;
+thread_local anydsl::Array<float> Interface::cpu_primary_income;
 thread_local anydsl::Array<float> Interface::cpu_secondary;
-thread_local anydsl::Array<float> Interface::cpu_secondary_buffer;
+thread_local anydsl::Array<float> Interface::cpu_secondary_outcome;
+thread_local anydsl::Array<float> Interface::cpu_secondary_income;
 
 static std::unique_ptr<Interface> interface;
 
@@ -540,6 +582,7 @@ inline void get_secondary_stream(SecondaryStream& secondary, float* ptr, size_t 
     secondary.color_b = ptr + 13 * capacity;
     secondary.size = 0;
 }
+
 inline void copy_primary_ray(PrimaryStream a, PrimaryStream b, int src_id, int dst_id, bool keep_hit) {
    b.rays.id[dst_id]    = a.rays.id[src_id];
    b.rays.org_x[dst_id] = a.rays.org_x[src_id];
@@ -627,8 +670,13 @@ void rodent_cpu_get_primary_stream(PrimaryStream* primary, int32_t size) {
     get_primary_stream(*primary, array.data(), array.size() / 21);
 }
 
-void rodent_cpu_get_primary_buffer(PrimaryStream* primary, int32_t size) {
-    auto& array = interface->cpu_buffer_stream(size);
+void rodent_cpu_get_primary_outcome_stream(PrimaryStream* primary, int32_t size) {
+    auto& array = interface->cpu_primary_outcome_stream(size);
+    get_primary_stream(*primary, array.data(), array.size() / 21);
+}
+
+void rodent_cpu_get_primary_income_stream(PrimaryStream* primary, int32_t size) {
+    auto& array = interface->cpu_primary_income_stream(size);
     get_primary_stream(*primary, array.data(), array.size() / 21);
 }
 
@@ -637,11 +685,16 @@ void rodent_cpu_get_secondary_stream(SecondaryStream* secondary, int32_t size) {
     get_secondary_stream(*secondary, array.data(), array.size() / 14);
 }
 
-void rodent_cpu_get_secondary_buffer(SecondaryStream* buffer, int32_t size) {
-    auto& array = interface->cpu_secondary_buffer_stream(size);
+void rodent_cpu_get_secondary_outcome_stream(SecondaryStream* buffer, int32_t size) {
+    auto& array = interface->cpu_secondary_outcome_stream(size);
     get_secondary_stream(*buffer, array.data(), array.size() / 14);
 }
 
+void rodent_cpu_get_secondary_income_stream(SecondaryStream* buffer, int32_t size) {
+    auto& array = interface->cpu_secondary_income_stream(size);
+    get_secondary_stream(*buffer, array.data(), array.size() / 14);
+}
+//gpu
 void rodent_gpu_get_tmp_buffer(int32_t dev, int32_t** buf, int32_t size) {
     *buf = interface->gpu_tmp_buffer(dev, size).data();
 }
@@ -661,8 +714,18 @@ void rodent_gpu_get_primary_buffer_stream(int32_t dev, PrimaryStream* primary, i
     get_primary_stream(*primary, array.data(), array.size() / 21);
 }
 
-void rodent_gpu_get_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
-    auto& array = interface->gpu_secondary_stream(dev, size);
+void rodent_gpu_get_first_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
+    auto& array = interface->gpu_first_secondary_stream(dev, size);
+    get_secondary_stream(*secondary, array.data(), array.size() / 14);
+}
+
+void rodent_gpu_get_second_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
+    auto& array = interface->gpu_second_secondary_stream(dev, size);
+    get_secondary_stream(*secondary, array.data(), array.size() / 14);
+}
+
+void rodent_gpu_get_secondary_buffer_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
+    auto& array = interface->gpu_secondary_buffer_stream(dev, size);
     get_secondary_stream(*secondary, array.data(), array.size() / 14);
 }
 
@@ -683,14 +746,14 @@ void rodent_secondary_check(int32_t dev, int primary_size, int32_t print_mark, b
         auto& array = interface->cpu_secondary;
         get_secondary_stream(secondary, array.data(), array.size() / 14);
     } 
-//    for(int i = 0; i < 5; i++){
-//        printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
-//                    secondary.rays.id[i],    secondary.grid_id[i],    secondary.rays.tmin[i],
-//                    secondary.rays.org_x[i], secondary.rays.org_y[i], secondary.rays.org_z[i],
-//                    secondary.rays.dir_x[i], secondary.rays.dir_y[i], secondary.rays.dir_z[i]);
-//    }
+    for(int i = 0; i < 5; i++){
+        printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
+                    secondary.rays.id[i],    secondary.grid_id[i],    secondary.rays.tmin[i],
+                    secondary.rays.org_x[i], secondary.rays.org_y[i], secondary.rays.org_z[i],
+                    secondary.rays.dir_x[i], secondary.rays.dir_y[i], secondary.rays.dir_z[i]);
+    }
     SecondaryStream buffer;
-    auto& array = interface->cpu_secondary_buffer;
+    auto& array = interface->cpu_secondary_outcome;
     get_secondary_stream(buffer, array.data(), array.size() / 14);
     for(int i = 0; i < 3; i++){
         printf("buffer id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
@@ -702,7 +765,7 @@ void rodent_secondary_check(int32_t dev, int primary_size, int32_t print_mark, b
 
 void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mark, bool is_first_primary) {
     PrimaryStream primary;
-    printf("\n%d", print_mark);
+    printf("%d primary size %d\n", print_mark, primary_size);
     if (dev == -1) {
         auto& array = interface->cpu_primary;
         get_primary_stream(primary, array.data(), array.size() / 21);
@@ -712,22 +775,12 @@ void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mar
         get_primary_stream(primary, array.data(), capacity);
     }
     for(int i = 0; i < 5; i++){
-        printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f geom %d prim %d t %f\n", 
+        printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f geom %d prim %d\n", 
                     primary.rays.id[i+0], primary.grid_id[i+0], primary.rays.tmin[i],
                     primary.rays.org_x[i], primary.rays.org_y[i], primary.rays.org_z[i],
                     primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i],
-                    primary.geom_id[i], primary.prim_id[i], primary.t);
+                    primary.geom_id[i], primary.prim_id[i]);
     }
-    
-//    PrimaryStream buffer;
-//    auto& array = interface->cpu_buffer;
-//    get_primary_stream(buffer, array.data(), array.size() / 21);
-//    for(int i = 0; i < 3; i++){
-//        printf("buffer id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
-//                    buffer.rays.id[i], buffer.grid_id[i], buffer.rays.tmin[i],
-//                    buffer.rays.org_x[i], buffer.rays.org_y[i], buffer.rays.org_z[i],
-//                    buffer.rays.dir_x[i], buffer.rays.dir_y[i], buffer.rays.dir_z[i]);
-//    }
 }
 
 int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, bool is_first_primary) {
@@ -739,54 +792,67 @@ int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, 
 }
 
 // 
-void rodent_buffer_send(int32_t dev, int buffer_size, bool isPrimary, bool send_all) {
+void rodent_primary_send(int32_t dev, int buffer_size, bool send_all) {
     if(dev == -1) {
-        if(isPrimary) {
-            auto& array = interface->cpu_buffer;
-//            printf("array.size %d buffer size %d\n ", array.size() / 21, buffer_size);
-            client_send_rays(array.data(), buffer_size, array.size() / 21, isPrimary, send_all);
-        } else {
-            auto& array = interface->cpu_secondary_buffer;
-//            printf("array.size %d buffer size %d\n ", array.size() / 14, buffer_size);
-            client_send_rays(array.data(), buffer_size, array.size() / 14, isPrimary, send_all);
-        }
+        auto& array = interface->cpu_primary_outcome;
+        client_send_rays(array.data(), buffer_size, array.size() / 21, true, send_all);
     } else {
-        if(isPrimary){
-            int capacity = interface->save_buffer_primary(dev) / 21;
-            auto& array  = interface->host_buffer_primary;
-            client_send_rays(array.data(), buffer_size, capacity, isPrimary, send_all);
-        } else {
-//            int capacity = interface->save_buffer_secondary(dev) / 21;
-//            auto& array  = interface->host_buffer_secondary;
-//            client_send_rays(array.data(), buffer_size, capacity, isPrimary, send_all);
-        }
+        int capacity = interface->save_buffer_primary(dev) / 21;
+        auto& array  = interface->host_buffer_primary;
+        client_send_rays(array.data(), buffer_size, capacity, true, send_all);
     }
 }
 
-int rodent_rays_recv(int32_t dev, int32_t rays_size, bool idle, bool isPrimary, bool is_first_primary) {
+//void rodent_set_exchange_buffer(int32_t dev) {
+//    if(dev == -1) {
+//        client_set_exchange_primary(interface->cpu_primary_exchange);
+//        
+//    } else {
+//    
+//    }
+//}
+
+void rodent_secondary_send(int32_t dev, int buffer_size, bool send_all) {
+    if(dev == -1) {
+        auto& array = interface->cpu_secondary_outcome;
+//            printf("array.size %d buffer size %d\n ", array.size() / 14, buffer_size);
+        client_send_rays(array.data(), buffer_size, array.size() / 14, false, send_all);
+    } else {
+        int capacity = interface->save_buffer_secondary(dev) / 14;
+        auto& array  = interface->host_buffer_secondary;
+        client_send_rays(array.data(), buffer_size, capacity, false, send_all);
+    }
+}
+
+int rodent_primary_recv(int32_t dev, int32_t rays_size, bool idle, bool isFirst) {
     int size_new = 0;
     if(dev == -1){
-        if(isPrimary){
-            auto& array = interface->cpu_primary;
-            size_new = client_recv_rays(array.data(), rays_size, idle, isPrimary); 
-        } else {
-            auto& array = interface->cpu_secondary;
-            size_new = client_recv_rays(array.data(), rays_size, idle, isPrimary); 
-        }
+        float* array = interface->cpu_primary.data();
+        size_new = client_recv_rays(&array, rays_size, idle, true); 
     } else {
-        if(isPrimary) {
-            int capacity = is_first_primary? interface->save_first_primary(dev) / 21 : interface->save_second_primary(dev) / 21;
-            auto&  array = interface->host_first_primary;
-            size_new = client_recv_rays(array.data(), rays_size, idle, isPrimary);
-            is_first_primary ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
-        } else {
-        
-        }
+        float* array = interface->host_first_primary.data();
+        size_new = client_recv_rays(&array, rays_size, idle, true);
+        isFirst ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
     }
 //    printf("after recv size new %d\n", size_new);
     return size_new;
 }
 
+int rodent_secondary_recv(int32_t dev, int32_t rays_size, bool idle, bool isFirst) {
+    int size_new = 0;
+    if(dev == -1){
+        float* array = interface->cpu_secondary.data();
+        size_new = client_recv_rays(&array, rays_size, idle, false); 
+    } else {
+        float* array = interface->host_first_secondary.data();
+        size_new = client_recv_rays(&array, rays_size, idle, false);
+        printf("after secondary recv %d \n", size_new);
+        if(size_new > 0) {
+            isFirst ? interface->load_first_secondary(dev) : interface->load_second_secondary(dev);
+        }
+    }
+    return size_new;
+}
 void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t size) {
     auto& array = interface->load_gpu_primary_stream(dev, size, "data/primary.bin");
     size = array.size() / 21;
