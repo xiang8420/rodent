@@ -59,10 +59,10 @@ float* get_pixels();
 float* get_first_primary();
 void clear_pixels();
 void cleanup_interface();
-void setup_server(struct Communicator *);
-void server_run();
-void setup_client(struct Communicator *, bool);
-void client_run(Settings, int);
+void setup_master(struct Communicator *, int);
+void master_run();
+void setup_worker(struct Communicator *, bool);
+void worker_run(Settings, int);
 
 #ifndef DISABLE_GUI
 static bool handle_events(uint32_t& iter, Camera& cam) {
@@ -266,26 +266,26 @@ int main(int argc, char** argv) {
     
     // mpi
     struct Communicator comm;
-    bool c_s = true; 
-    int  client_size = c_s ? comm.size - 1: comm.size;
-    int server_id = client_size; 
+    bool   use_master = true; 
+    int    worker_size = use_master ? comm.size - 1: comm.size;
+    int    master_id = worker_size; 
      
-    if(comm.rank == server_id) {
-        setup_server(&comm);
+    if(comm.rank == master_id) {
+        setup_master(&comm, chunk_num);
     } else {
-        setup_client(&comm, c_s); 
+        setup_worker(&comm, use_master); 
     }
     
     // time 
     std::vector<double> samples_sec;
-    float *proc_time = new float[client_size];
-    for(int i = 0; i < client_size; i++){
+    float *proc_time = new float[worker_size];
+    for(int i = 0; i < worker_size; i++){
         proc_time[i] = 1;
     }
     float elapsed_ms = 1;  //avoid div 0
     
     //film 
-    ImageTile tiles  = ImageTile(width, height, client_size);
+    ImageTile tiles  = ImageTile(width, height, worker_size);
     int frame = 0;
     float *reduce_buffer = NULL;
     int pixel_num = width * height * 3;
@@ -296,23 +296,23 @@ int main(int argc, char** argv) {
         clear_pixels();
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, proc_time, 1, MPI_FLOAT, MPI_COMM_WORLD);
         auto ticks = std::chrono::high_resolution_clock::now();
-        if(comm.rank == server_id) {
-            printf("start server\n");
-            server_run();
+        if(comm.rank == master_id) {
+            printf("start master\n");
+            master_run();
         } else {
             float range[] = {0.0, 0.0,float(width), float(height)}; 
             if(splitimage){
                 spp_cur = spp_g;
-                tiles.get_tile(comm.rank, client_size, proc_time, range); 
+                tiles.get_tile(comm.rank, worker_size, proc_time, range); 
             }
             else{
                 float total = 0;
-                for(int i = 0; i < client_size; i++){
+                for(int i = 0; i < worker_size; i++){
                     total += proc_time[i];
                     printf("proc [] %d ", proc_time[i]);
                 }
-                float average = total / client_size; 
-                spp_cur = spp_cur / client_size;//* average / proc_time[comm.rank];
+                float average = total / worker_size; 
+                spp_cur = spp_cur / worker_size;//* average / proc_time[comm.rank];
                 printf("spp_cur %d %d average%d total%d \n", spp_cur, spp_g, average, total);
             }
             Settings settings {
@@ -325,14 +325,14 @@ int main(int argc, char** argv) {
                 Vec4 { range[0], range[1], range[2], range[3]},
                 spp_cur
             };
-            client_run(settings, dev_num);
+            worker_run(settings, dev_num);
             
             cam.rotate(-0.1f, 0.0f);
         }
         film = get_pixels();
-        if(comm.rank != server_id) {
+        if(comm.rank != master_id) {
             printf("before reduce\n");
-            comm.Reduce_image(film, reduce_buffer, pixel_num, c_s);
+            comm.Reduce_image(film, reduce_buffer, pixel_num, use_master);
         }
 
         printf("proc %d time %f", comm.rank, float(elapsed_ms));

@@ -15,8 +15,8 @@
 #include "image.h"
 #include "buffer.h"
 
-void client_send_rays(float *, size_t, size_t, bool, bool);
-int  client_recv_rays(float **, size_t, bool, bool);
+void worker_send_rays(float *, size_t, size_t, bool, bool);
+int  worker_recv_rays(float **, size_t, bool, bool);
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -795,17 +795,17 @@ int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, 
 void rodent_primary_send(int32_t dev, int buffer_size, bool send_all) {
     if(dev == -1) {
         auto& array = interface->cpu_primary_outcome;
-        client_send_rays(array.data(), buffer_size, array.size() / 21, true, send_all);
+        worker_send_rays(array.data(), buffer_size, array.size() / 21, true, send_all);
     } else {
         int capacity = interface->save_buffer_primary(dev) / 21;
         auto& array  = interface->host_buffer_primary;
-        client_send_rays(array.data(), buffer_size, capacity, true, send_all);
+        worker_send_rays(array.data(), buffer_size, capacity, true, send_all);
     }
 }
 
 //void rodent_set_exchange_buffer(int32_t dev) {
 //    if(dev == -1) {
-//        client_set_exchange_primary(interface->cpu_primary_exchange);
+//        worker_set_exchange_primary(interface->cpu_primary_exchange);
 //        
 //    } else {
 //    
@@ -816,11 +816,11 @@ void rodent_secondary_send(int32_t dev, int buffer_size, bool send_all) {
     if(dev == -1) {
         auto& array = interface->cpu_secondary_outcome;
 //            printf("array.size %d buffer size %d\n ", array.size() / 14, buffer_size);
-        client_send_rays(array.data(), buffer_size, array.size() / 14, false, send_all);
+        worker_send_rays(array.data(), buffer_size, array.size() / 14, false, send_all);
     } else {
         int capacity = interface->save_buffer_secondary(dev) / 14;
         auto& array  = interface->host_buffer_secondary;
-        client_send_rays(array.data(), buffer_size, capacity, false, send_all);
+        worker_send_rays(array.data(), buffer_size, capacity, false, send_all);
     }
 }
 
@@ -828,10 +828,10 @@ int rodent_primary_recv(int32_t dev, int32_t rays_size, bool idle, bool isFirst)
     int size_new = 0;
     if(dev == -1){
         float* array = interface->cpu_primary.data();
-        size_new = client_recv_rays(&array, rays_size, idle, true); 
+        size_new = worker_recv_rays(&array, rays_size, idle, true); 
     } else {
         float* array = interface->host_first_primary.data();
-        size_new = client_recv_rays(&array, rays_size, idle, true);
+        size_new = worker_recv_rays(&array, rays_size, idle, true);
         isFirst ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
     }
 //    printf("after recv size new %d\n", size_new);
@@ -842,10 +842,10 @@ int rodent_secondary_recv(int32_t dev, int32_t rays_size, bool idle, bool isFirs
     int size_new = 0;
     if(dev == -1){
         float* array = interface->cpu_secondary.data();
-        size_new = client_recv_rays(&array, rays_size, idle, false); 
+        size_new = worker_recv_rays(&array, rays_size, idle, false); 
     } else {
         float* array = interface->host_first_secondary.data();
-        size_new = client_recv_rays(&array, rays_size, idle, false);
+        size_new = worker_recv_rays(&array, rays_size, idle, false);
         printf("after secondary recv %d \n", size_new);
         if(size_new > 0) {
             isFirst ? interface->load_first_secondary(dev) : interface->load_second_secondary(dev);

@@ -1,5 +1,4 @@
 #include "mpi.h"
-
 #define MSG_SIZE 5
 
 struct Communicator {
@@ -14,7 +13,6 @@ struct Communicator {
     ~Communicator(); 
     void Reduce_image(float* film, float *reduce_buffer, int pixel_num, bool server);
     
-    void Send_rays(struct RayQueue* buffer, int size, int dst, bool has_work, bool primary); 
     void Isend_rays(struct RayQueue* buffer, int size, int dst, int tag); 
     void Wait(int tag);
     int Recv_rays(struct RayQueue* buffer, int src);
@@ -30,9 +28,6 @@ struct Communicator {
     void Recv_msg(int dst, int *msg);
     void Recv_rays(int src, bool primary, int recv_size, struct RayQueue* buffer);
     void Send_rays(int dst, bool primary, int send_size, struct RayQueue* buffer);
-
-//    std::vector<char> in;
-//    std::vector<char> out;
 };
 
 

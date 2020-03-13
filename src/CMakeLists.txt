@@ -64,7 +64,7 @@ set(DRIVER_SRCS
     driver/common.h
     driver/color.h
     driver/mpi.cpp
-    driver/server.cpp
+    driver/multiproc.cpp
     driver/buffer.h
     )
 
