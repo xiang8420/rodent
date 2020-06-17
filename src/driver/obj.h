@@ -69,10 +69,15 @@ struct TriMesh {
     std::vector<float2>   texcoords;
 };
 
-bool load_obj(const FilePath&, File&, int, int);
+bool load_obj(const FilePath&, File&);
 bool load_mtl(const FilePath&, MaterialLib&);
+void write_obj(TriMesh *, int);
+void mesh_add(TriMesh&, TriMesh&);
 TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&, bool);
 bool chunk_division(File& file);
+
+void compute_vertex_normals(const std::vector<uint32_t>& ,const std::vector<float3>&, std::vector<float3>&, size_t);
+void compute_face_normals(const std::vector<uint32_t>&, const std::vector<float3>&, std::vector<float3>&, size_t);
 } // namespace obj
 
 #endif // LOAD_OBJ_H

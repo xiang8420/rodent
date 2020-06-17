@@ -8,14 +8,19 @@ struct Scene {
     camera:     Camera,
     bvh:        Bvh,    
     bbox:       BBox,
-    grid:      Vec3,
+    grid:       Vec3,
     chunk:      i32
+}
+
+struct Domain {
+    bbox: BBox,
+    grid: Vec3 
 }
 
 // Rendering device
 struct Device {
     intrinsics: Intrinsics,
-
+    ray_batching: fn (Camera, Domain, i32) -> (),
     trace: fn (Scene, PathTracer, i32) -> (),
     present: fn () -> (),
 

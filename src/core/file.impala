@@ -7,13 +7,14 @@ fn int_to_string(i: i32) -> [u8 * 5]{
     if i < 10 {
         str(2) = str(0);   
         str(1) = '0';
+        str(0) = '0';
     } else if i < 100 {
         str(2) = str(1);
         str(1) = str(0);
-    } else {
+        str(0) = '0';
+    } else if i > 999 {
         print_string("Error: too much chunks");
-    }
-    str(0) = '0';
+    } 
     str(3) = '/';
     str(4) = '\0';
     str

@@ -11,7 +11,7 @@ fn @gpu_get_film_data(dev_id: i32) -> (&mut [f32], i32, i32) {
     let mut film_pixels : &mut [f32];
     let mut film_width  : i32;
     let mut film_height : i32;
-    rodent_get_film_data(dev_id, &mut film_pixels, &mut film_width, &mut film_height);
+    rodent_get_film_data(dev_id, &mut film_pixels, &mut film_width, &mut film_height, false);
     (film_pixels, film_width, film_height)
 }
 
@@ -77,7 +77,7 @@ fn @gpu_traverse_secondary(secondary: SecondaryStream, acc: Accelerator, intrins
                 secondary.color_g(gid),
                 secondary.color_b(gid)
             );
-//            gpu_accumulate(atomics, film_pixels, pixel, color, spp);
+            gpu_accumulate(atomics, film_pixels, pixel, color, spp);
         }
     }
 }
@@ -213,7 +213,6 @@ fn @gpu_generate_rays( primary: PrimaryStream
     let block_w  = 64;
     let first_ray_id = *id;
     let first_dst_id = primary.size;
-    
     let num_rays = intrinsics.min(spp * film_width * film_height - first_ray_id, capacity - first_dst_id);
     let film_div = make_fast_div(film_width as u32);
 
@@ -344,7 +343,7 @@ fn @gpu_primary_grid( primary: PrimaryStream
                     ) -> () {
     let block_w = 64;
     let bbox = scene.bbox;
-    let grid_scale = make_vec3i(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
+    let grid_scale = make_vec3_i32(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
     let step       = vec3_div( vec3_sub(bbox.max, bbox.min), scene.grid);
     let inv_step   = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
     let num_grids  = grid_scale.x * grid_scale.y * grid_scale.z;
@@ -432,7 +431,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
     if size(0) + buffer.size >= capacity {
         print_string("send buffer size: ");
         print_i32(buffer.size);
-        rodent_primary_send(dev_id, buffer.size, true);
+        rodent_worker_primary_send(dev_id, buffer.size);
         size(1) = 0;
     }
     size(0) = 0;
@@ -473,7 +472,7 @@ fn @gpu_secondary_grid( secondary: SecondaryStream
                       ) -> () {
     let block_w = 64;
     let bbox = scene.bbox;
-    let grid_scale = make_vec3i(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
+    let grid_scale = make_vec3_i32(scene.grid.x as i32, scene.grid.y as i32, scene.grid.z as i32);
     let step       = vec3_div( vec3_sub(bbox.max, bbox.min), scene.grid);
     let inv_step   = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
     let num_grids  = grid_scale.x * grid_scale.y * grid_scale.z;
@@ -546,7 +545,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
     if size(0) + buffer.size >= capacity {
         print_string("send buffer2 size: ");
         print_i32(buffer.size);
-        rodent_secondary_send(dev_id, buffer.size, true);
+        rodent_worker_secondary_send(dev_id, buffer.size);
         size(1) = 0;
     }
     size(0) = 0;
@@ -586,7 +585,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
                            ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
     
-    let spp = scene.camera.spp;
+    let spp = scene.camera.tile.spp;
     let capacity = 1024 * 1024;
     let mut primary;
     let mut other_primary;
@@ -595,6 +594,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let mut secondary;
     let mut buffer2;
 
+    rodent_initial_gpu_host_data(film_width * film_height);
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, capacity);
     rodent_gpu_get_primary_buffer_stream(dev_id, &mut buffer1, capacity); 
@@ -627,17 +627,24 @@ fn @gpu_dis_streaming_trace( dev_id: i32
         print_i32(primary.size);
         let (primary_size, buffer1_size) = gpu_primary_transfer(primary, other_primary, buffer1, scene.chunk, capacity, acc, intrinsics,
                                                                 atomics, dev_id, gpu_tmp, first_primary, id == num_rays);
-        print_string("after transfer : ");
         gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         primary.size = primary_size; 
         buffer1.size = buffer1_size;
+        print_string("after transfer : ");
+        print_i32(primary.size);
+        print_string(" : buffer1 size : ");
+        print_i32(buffer1.size);
         if primary.size == 0 { 
             idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
             if buffer1.size > 0 {
-                rodent_primary_send(dev_id, buffer1_size, true);
+                print_string("before send");
+                rodent_worker_primary_send(dev_id, buffer1_size);
+                print_string("after send");
                 buffer1.size = 0;
             }
-            primary.size = rodent_primary_recv(dev_id, primary.size, idle, first_primary); 
+            print_string("before recv");
+            primary.size = rodent_worker_primary_recv(dev_id, primary.size, first_primary, 0, idle); 
+            print_string("after recv");
         }
         print_string("primary.size == ");
         print_i32(primary.size);
@@ -684,11 +691,11 @@ fn @gpu_dis_streaming_trace( dev_id: i32
             idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && buffer1.size == 0 && buffer2.size == 0); 
             if buffer2.size > 0 {
                 print_string("send rays\n");
-                rodent_secondary_send(dev_id, buffer2.size, true);
+                rodent_worker_secondary_send(dev_id, buffer2.size);
                 buffer2.size = 0;
             }
             print_string("recv rays\n");
-            secondary.size = rodent_secondary_recv(dev_id, secondary.size, idle, true); 
+            secondary.size = rodent_worker_secondary_recv(dev_id, secondary.size, true, 0, idle); 
         }
         print_string("after send\n");
 
@@ -746,7 +753,7 @@ fn @gpu_streaming_trace( dev_id: i32
         
         // Sort rays by geometry
         let mut ray_ends : [i32 * 1024];
-        gpu_sort_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, scene.num_geometries, gpu_tmp, &mut ray_ends);
+        gpu_sort_primary(primary, other_primary, dev_id, acc, intrinsics, atomics, scene.num_geometries + 1, gpu_tmp, &mut ray_ends);
         gpu_swap_streams(&mut primary, &mut other_primary);
         // Shade rays
         let mut first = 0;
@@ -758,13 +765,6 @@ fn @gpu_streaming_trace( dev_id: i32
             gpu_shade(acc, atomics, scene, path_tracer, film_pixels, spp, primary, secondary, first, last, geom_id);
             first = last;
         }
-        print_string("ray end :  ");
-        print_i32(ray_ends(scene.num_geometries));
-        print_string("\n primary  :  ");
-        print_i32(primary.size);
-        print_string("\n first :  ");
-        print_i32(first);
-        print_string("\n");
         primary.size   = first;
         secondary.size = first;
         acc.sync();
@@ -783,13 +783,12 @@ fn @gpu_streaming_trace( dev_id: i32
 fn @gpu_mega_kernel_trace(dev_id: i32, acc: Accelerator, intrinsics: Intrinsics, atomics: Atomics, min_max: MinMax, scene: Scene, path_tracer: PathTracer, spp: i32) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
 
+    let spp_task = scene.camera.tile.spp;
     // Make tiles of 2^10 = 1024 total samples
-    let spp_task = scene.camera.spp;
-    let proc_range = scene.camera.range;
-    let width = (proc_range.z - proc_range.x) as i32 - 1;
-    let height = (proc_range.w - proc_range.y) as i32 - 1;    
-
     let mut log2_tile_size = (10 - ilog2(spp_task)) / 2;
+    let camera_tile = scene.camera.tile;
+    let width  = camera_tile.xmax - camera_tile.xmin - 1;
+    let height = camera_tile.ymax - camera_tile.ymin - 1;    
     if log2_tile_size < 0 { log2_tile_size = 0 }
     let tile_size = 1 << log2_tile_size;
 
@@ -831,8 +830,8 @@ fn @gpu_mega_kernel_trace(dev_id: i32, acc: Accelerator, intrinsics: Intrinsics,
                 let sample_id = id % spp_task;
                 let in_tile_y = fast_div(tile_div, ray_id as u32) as i32;
                 let in_tile_x = ray_id - in_tile_y * tile_w;
-                let x = proc_range.x as i32 + tile_x + in_tile_x;
-                let y = proc_range.y as i32 + tile_y + in_tile_y;
+                let x = camera_tile.xmin as i32 + tile_x + in_tile_x;
+                let y = camera_tile.ymin as i32 + tile_y + in_tile_y;
                 
                 let (init_ray, init_state) = @@(path_tracer.on_emit)(sample_id, x, y, film_width, film_height);
                 final_color = make_color(0.0f, 0.0f, 0.0f);
@@ -892,6 +891,33 @@ fn @gpu_mega_kernel_trace(dev_id: i32, acc: Accelerator, intrinsics: Intrinsics,
     acc.sync()
 }
 
+fn @gpu_ray_batching( dev_id: i32
+                     , camera: Camera 
+                     , domain: Domain
+                     , acc: Accelerator
+                     , intrinsics: Intrinsics
+                     , atomics: Atomics
+                     , min_max: MinMax
+                     , scene: Scene
+                     , path_tracer: PathTracer
+                     , spp: i32
+                     ) -> () {
+    let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
+
+    let capacity = 1024 * 1024;
+    let mut primary;
+    rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
+    
+    let mut id = 0;
+    let num_rays = spp * film_width * film_height;
+    while id < num_rays || primary.size > 0 {
+        // Regenerate rays
+        if primary.size < capacity && id < num_rays {
+             primary.size = gpu_generate_rays(primary, capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
+        }
+        // Traverse primary rays
+    }
+}
 // GPU device ----------------------------------------------------------------------
 
 fn @make_gpu_device( dev_id: i32
@@ -906,6 +932,7 @@ fn @make_gpu_device( dev_id: i32
                    ) -> Device {
     Device {
         intrinsics: intrinsics,
+        ray_batching: @|camera, domain, spp| { },
         trace: @ |scene, path_tracer, spp| {
             if streaming {
                 gpu_streaming_trace(
@@ -1019,76 +1046,76 @@ fn @make_nvvm_device(dev: i32, streaming: bool) -> Device {
     )
 }
 
-fn @make_amdgpu_device(dev: i32, streaming: bool) -> Device {
-    let dev_id = runtime_device(3, dev);
-    let load_bvh = @ |filename| {
-        let mut nodes;
-        let mut tris;
-        rodent_load_bvh2_tri1(dev_id, filename, &mut nodes, &mut tris);
-        make_gpu_bvh2_tri1(nodes, tris, false)
-    };
-    let read_pixel = @ |p, i| p(i);
-    let make_buffer = @ |p| {
-        DeviceBuffer {
-            load_f32:  @ |i| (p as &[1][f32])(i),
-            load_i32:  @ |i| (p as &[1][i32])(i),
-            load_vec2: @ |i| {
-                let v = (p as &[1][simd[f32 * 4]])(i);
-                make_vec2(v(0), v(1))
-            },
-            load_vec3: @ |i| {
-                let v = (p as &[1][simd[f32 * 4]])(i);
-                make_vec3(v(0), v(1), v(2))
-            },
-            load_vec4: @ |i| {
-                let v = (p as &[1][simd[f32 * 4]])(i);
-                make_vec4(v(0), v(1), v(2), v(3))
-            },
-            load_int2: @ |i| {
-                let v = (p as &[1][simd[i32 * 4]])(i);
-                (v(0), v(1))
-            },
-            load_int3: @ |i| {
-                let v = (p as &[1][simd[i32 * 4]])(i);
-                (v(0), v(1), v(2))
-            },
-            load_int4: @ |i| {
-                let v = (p as &[1][simd[i32 * 4]])(i);
-                (v(0), v(1), v(2), v(3))
-            }
-        }
-    };
-    let atomics = Atomics {
-        add_global_i32: @ |p, i| amdgcn_atomic_add_global(p as &mut[1]i32, i),
-        add_global_f32: @ |p, i| {
-            let mut assumed = *p;
-            while true {
-                let (old, success) = amdgcn_atomic_cmpxchg_global(p as &mut [1]i32, bitcast[i32](assumed), bitcast[i32](i + assumed));
-                assumed = bitcast[f32](old);
-                if success { break() }
-            }
-            assumed
-        },
-        add_shared_i32: @ |p, i| amdgcn_atomic_add_shared(p, i),
-        add_shared_f32: @ |p, i| {
-            let mut assumed = *p;
-            while true {
-                let (old, success) = amdgcn_atomic_cmpxchg_shared(p as &mut [3]i32, bitcast[i32](assumed), bitcast[i32](i + assumed));
-                assumed = bitcast[f32](old);
-                if success { break() }
-            }
-            assumed
-        }
-    };
-    make_gpu_device(
-        dev_id,
-        amdgpu_accelerator(dev),
-        amdgpu_intrinsics,
-        make_amdgpu_min_max(),
-        load_bvh,
-        read_pixel,
-        make_buffer,
-        atomics,
-        streaming
-    )
-}
+//fn @make_amdgpu_device(dev: i32, streaming: bool) -> Device {
+//    let dev_id = runtime_device(3, dev);
+//    let load_bvh = @ |filename| {
+//        let mut nodes;
+//        let mut tris;
+//        rodent_load_bvh2_tri1(dev_id, filename, &mut nodes, &mut tris);
+//        make_gpu_bvh2_tri1(nodes, tris, false)
+//    };
+//    let read_pixel = @ |p, i| p(i);
+//    let make_buffer = @ |p| {
+//        DeviceBuffer {
+//            load_f32:  @ |i| (p as &[1][f32])(i),
+//            load_i32:  @ |i| (p as &[1][i32])(i),
+//            load_vec2: @ |i| {
+//                let v = (p as &[1][simd[f32 * 4]])(i);
+//                make_vec2(v(0), v(1))
+//            },
+//            load_vec3: @ |i| {
+//                let v = (p as &[1][simd[f32 * 4]])(i);
+//                make_vec3(v(0), v(1), v(2))
+//            },
+//            load_vec4: @ |i| {
+//                let v = (p as &[1][simd[f32 * 4]])(i);
+//                make_vec4(v(0), v(1), v(2), v(3))
+//            },
+//            load_int2: @ |i| {
+//                let v = (p as &[1][simd[i32 * 4]])(i);
+//                (v(0), v(1))
+//            },
+//            load_int3: @ |i| {
+//                let v = (p as &[1][simd[i32 * 4]])(i);
+//                (v(0), v(1), v(2))
+//            },
+//            load_int4: @ |i| {
+//                let v = (p as &[1][simd[i32 * 4]])(i);
+//                (v(0), v(1), v(2), v(3))
+//            }
+//        }
+//    };
+//    let atomics = Atomics {
+//        add_global_i32: @ |p, i| amdgcn_atomic_add_global(p as &mut[1]i32, i),
+//        add_global_f32: @ |p, i| {
+//            let mut assumed = *p;
+//            while true {
+//                let (old, success) = amdgcn_atomic_cmpxchg_global(p as &mut [1]i32, bitcast[i32](assumed), bitcast[i32](i + assumed));
+//                assumed = bitcast[f32](old);
+//                if success { break() }
+//            }
+//            assumed
+//        },
+//        add_shared_i32: @ |p, i| amdgcn_atomic_add_shared(p, i),
+//        add_shared_f32: @ |p, i| {
+//            let mut assumed = *p;
+//            while true {
+//                let (old, success) = amdgcn_atomic_cmpxchg_shared(p as &mut [3]i32, bitcast[i32](assumed), bitcast[i32](i + assumed));
+//                assumed = bitcast[f32](old);
+//                if success { break() }
+//            }
+//            assumed
+//        }
+//    };
+//    make_gpu_device(
+//        dev_id,
+//        amdgpu_accelerator(dev),
+//        amdgpu_intrinsics,
+//        make_amdgpu_min_max(),
+//        load_bvh,
+//        read_pixel,
+//        make_buffer,
+//        atomics,
+//        streaming
+//    )
+//}

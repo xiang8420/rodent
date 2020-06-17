@@ -3,10 +3,11 @@
 #include <cstring>
 #include <cstdlib>
 #include <cctype>
+#include <iomanip>
 
 #include "common.h"
 #include "obj.h"
-#include "distribution.h"
+#include "decomposition.h"
 namespace obj {
 
 struct TriIdx {
@@ -100,7 +101,7 @@ inline bool read_index(char** ptr, obj::Index& idx) {
 
     return true;
 }
-static bool parse_obj(std::istream& stream, obj::File& file, int rank, int size) {
+static bool parse_obj(std::istream& stream, obj::File& file) {
     // Add an empty object to the scene
     int cur_object = 0;
     file.objects.emplace_back();
@@ -373,10 +374,10 @@ static bool parse_mtl(std::istream& stream, obj::MaterialLib& mtl_lib) {
     return (err_count == 0);
 }
 
-bool load_obj(const FilePath& path, obj::File& obj_file, int rank, int size) {
+bool load_obj(const FilePath& path, obj::File& obj_file) {
     // Parse the OBJ file
     std::ifstream stream(path);
-    bool res = stream && parse_obj(stream, obj_file, rank, size);
+    bool res = stream && parse_obj(stream, obj_file);
     return res;
 }
 
@@ -386,7 +387,51 @@ bool load_mtl(const FilePath& path, obj::MaterialLib& mtl_lib) {
     return stream && parse_mtl(stream, mtl_lib);
 }
 
-static void compute_face_normals(const std::vector<uint32_t>& indices,
+void write_obj(TriMesh * tri_mesh, int c) {
+	std::ofstream outfile;
+	outfile.open("simplemodel_" + std::to_string(c) + ".obj");	
+
+	int trx_size = tri_mesh->indices.size() / 4;
+	int vtx_size = tri_mesh->vertices.size();
+	printf("vtx_size %d\n", vtx_size);
+	for(int i = 0; i < vtx_size; i++) {
+		outfile << "v " <<std::fixed<<std::setprecision(4) 
+						<< tri_mesh->vertices[i].x << " " 
+						<< tri_mesh->vertices[i].y << " " 
+						<< tri_mesh->vertices[i].z<<std::endl; 
+	}
+
+//	for(int i = 0; i < vtx_size; i++) {
+//		outfile << "vn " <<std::fixed<<std::setprecision(4) 
+//						<< tri_mesh->normals[i].x << " " 
+//						<< tri_mesh->normals[i].y << " " 
+//						<< tri_mesh->normals[i].z<<std::endl; 
+//	}
+//	for(int i = 0; i < size * 3; i++) {
+//		outfile << "vt " <<std::fixed<<std::setprecision(4) 
+//						<< tri_mesh->texcoords[i].x << " " 
+//						<< tri_mesh->texcoords[i].y << " "
+//						<< 0.0 << std::endl; 
+//	}
+	
+	for(int i = 0; i < trx_size; i++){
+//		if (has_uv)
+//		{
+//			fprintf(file, "f %d/%d %d/%d %d/%d\n", triangles[i].v[0]+1, uv, triangles[i].v[1]+1, uv+1, triangles[i].v[2]+1, uv+2);
+//			uv += 3;
+//		}
+//		else
+//		{
+			outfile << "f " << tri_mesh->indices[i * 4] + 1 <<" "
+					        << tri_mesh->indices[i * 4 + 1] + 1 <<" "
+							<< tri_mesh->indices[i * 4 + 2] + 1<<std::endl;
+//		}
+		//fprintf(file, "f %d// %d// %d//\n", triangles[i].v[0]+1, triangles[i].v[1]+1, triangles[i].v[2]+1); //more compact: remove trailing zeros
+	}
+	outfile.close();
+}
+
+void compute_face_normals(const std::vector<uint32_t>& indices,
                                  const std::vector<float3>& vertices,
                                  std::vector<float3>& face_normals,
                                  size_t first_index) {
@@ -398,7 +443,7 @@ static void compute_face_normals(const std::vector<uint32_t>& indices,
     }
 }
 
-static void compute_vertex_normals(const std::vector<uint32_t>& indices,
+void compute_vertex_normals(const std::vector<uint32_t>& indices,
                                    const std::vector<float3>& face_normals,
                                    std::vector<float3>& normals,
                                    size_t first_index) {
@@ -413,7 +458,34 @@ static void compute_vertex_normals(const std::vector<uint32_t>& indices,
     }
 }
 
-void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis) {
+void mesh_add(TriMesh &tri_mesh, TriMesh &sub_mesh) {
+    auto vtx_offset = tri_mesh.vertices.size();
+    auto idx_offset = tri_mesh.indices.size() / 4;
+    auto vtx_increment = sub_mesh.vertices.size();
+    auto idx_increment = sub_mesh.indices.size() / 4;
+    
+    tri_mesh.indices.resize(4 * (idx_offset + idx_increment));
+    tri_mesh.vertices.resize(vtx_offset + vtx_increment);
+    tri_mesh.texcoords.resize(vtx_offset + vtx_increment);
+    tri_mesh.normals.resize(vtx_offset + vtx_increment);
+    tri_mesh.face_normals.resize(idx_offset + idx_increment);
+
+    memcpy(&tri_mesh.indices[idx_offset * 4], sub_mesh.indices.data(), 4 * idx_increment * sizeof(uint32_t)); 
+    int idx_size = 4 * (idx_offset + idx_increment - 1);
+    printf("vtx offset %ld idx_offset%ld idx increment%ld vtx increment %ld %ld\n", vtx_offset, idx_offset, idx_increment, vtx_increment, tri_mesh.indices[idx_offset * 4] + vtx_offset);
+    for(int i = idx_offset * 4; i < idx_size; i += 4) {
+        tri_mesh.indices[i]     += vtx_offset; 
+        tri_mesh.indices[i + 1] += vtx_offset; 
+        tri_mesh.indices[i + 2] += vtx_offset;
+    }
+//    printf("normals %ld, texcoords %ld, face normals %ld \n", sub_mesh.normals.size(), sub_mesh.texcoords.size(), sub_mesh.face_normals.size());
+    memcpy(&tri_mesh.vertices[vtx_offset], sub_mesh.vertices.data(), vtx_increment * sizeof(float3)); 
+    memcpy(&tri_mesh.normals[vtx_offset], sub_mesh.normals.data(), vtx_increment * sizeof(float3)); 
+    memcpy(&tri_mesh.texcoords[vtx_offset], sub_mesh.texcoords.data(), vtx_increment * sizeof(float2)); 
+    memcpy(&tri_mesh.face_normals[idx_offset], sub_mesh.face_normals.data(), idx_increment * sizeof(float2)); 
+}
+
+void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
     std::vector<TriIdx> triangles;
     auto vtx_offset = tri_mesh.vertices.size();                                                       
     auto idx_offset = tri_mesh.indices.size();                                                        
@@ -423,9 +495,8 @@ void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis)
     tri_mesh.normals.resize(vtx_offset + 4);                                                          
    
 //    printf("face %f %f %f %f %f\n", bbox.max.x, bbox.min.y, bbox.min.z, bbox.max.y, bbox.max.z);
-
-    size_t m = obj_file.materials.size();   
-    size_t idx[] = {0 + vtx_offset, 1 + vtx_offset, 2 + vtx_offset, m, 0 + vtx_offset, 2 + vtx_offset, 3 + vtx_offset, m};
+    //Add 2 triangles
+    size_t idx[] = {0 + vtx_offset, 1 + vtx_offset, 2 + vtx_offset, mtl_size, 0 + vtx_offset, 2 + vtx_offset, 3 + vtx_offset, mtl_size};
     for(int i = 0; i < 8; i++) {
         tri_mesh.indices[idx_offset + i] = idx[i];                                                
     }
@@ -468,18 +539,18 @@ void virtual_face(TriMesh &tri_mesh, const File& obj_file, BBox& bbox, int axis)
 //            );   
 }
 
-void compute_virtual_portal(TriMesh &tri_mesh, const File& obj_file, BBox& bbox_local, BBox& bbox_global) {
+void compute_virtual_portal(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox_local, BBox& bbox_global) {
      for(int i = 0; i < 3; i++) {
         if(bbox_local.min[i] > bbox_global.min[i]) {
             printf("min %d \n", i);
             BBox tmp = bbox_local;
             tmp.max[i] = tmp.min[i];
-            virtual_face(tri_mesh, obj_file, tmp, i); 
+            virtual_face(tri_mesh, mtl_size, tmp, i); 
         }
         if(bbox_local.max[i] < bbox_global.max[i]) {
             printf("max %d \n", i);
             BBox tmp = bbox_local;
-            virtual_face(tri_mesh, obj_file, tmp, i); 
+            virtual_face(tri_mesh, mtl_size, tmp, i); 
         }
      } 
 }
@@ -523,7 +594,6 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
                 }
             }
         }
-
         if (triangles.size() == 0) continue;
 
         // Add this object to the mesh
@@ -575,7 +645,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
 //    BBox big_bbox(float3(-5, 0.3, -4), float3(3, 0.5, 1));
     BBox global = obj_file.bbox;
 //    if(bbox.max.x > 0){
-        compute_virtual_portal(tri_mesh, obj_file, bbox, global);
+        compute_virtual_portal(tri_mesh, obj_file.materials.size(), bbox, global);
 //    }
     // Re-normalize all the values in the OBJ file to handle invalid meshes
     bool fixed_normals = false;

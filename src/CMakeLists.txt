@@ -5,7 +5,7 @@ set(SCENE_FILE "${PROJECT_SOURCE_DIR}/bench_scenes/bedroom/bedroom.obj" CACHE FI
 set(MEGAKERNEL_FUSION ON CACHE BOOLEAN "Set to true to enable simple shader fusion for megakernel mappings")
 set(MAX_PATH_LEN "64" CACHE STRING "Maximum path length")
 set(DISABLE_GUI TRUE CACHE BOOLEAN "Set to true to disable GUI")
-set(SPP "256" CACHE STRING "Samples per pixel")
+set(SPP "4" CACHE STRING "Samples per pixel")
 if (SCENE_FILE STREQUAL "")
     message(FATAL_ERROR "Please specify a valid OBJ scene in the SCENE_FILE variable")
 endif()
@@ -20,7 +20,6 @@ if (NOT TARGET_DEVICE STREQUAL "")
         set(CONVERTER_OPTIONS ${CONVERTER_OPTIONS} "--fusion")
     endif()
 endif()
-
 set(RODENT_SRCS
     core/color.impala
     core/common.impala
@@ -43,9 +42,7 @@ set(RODENT_SRCS
     traversal/intersection.impala
     traversal/stack.impala
     traversal/mapping_cpu.impala
-    traversal/mapping_gpu.impala
-    driver/mpi.impala
-    )
+    traversal/mapping_gpu.impala)
 
 set(DRIVER_SRCS
     driver/communicator.cpp
@@ -63,10 +60,11 @@ set(DRIVER_SRCS
     driver/file_path.h
     driver/common.h
     driver/color.h
-    driver/mpi.cpp
-    driver/multiproc.cpp
     driver/buffer.h
-    )
+    driver/multiproc.cpp
+    driver/raylist.cpp
+    driver/message.cpp
+    driver/messageQ.cpp)
 
 set(CONVERTER_SRCS
     driver/converter.cpp
@@ -75,8 +73,7 @@ set(CONVERTER_SRCS
     driver/file_path.h
     driver/interface.h
     driver/bvh.h
-    driver/distribution.h
-    )
+    driver/distributedMesh.h)
 
 
 find_package(MPI REQUIRED)
@@ -107,9 +104,10 @@ find_package(TBB REQUIRED)
 find_package(LZ4 REQUIRED)
 
 add_executable(converter ${CONVERTER_SRCS})
-target_link_libraries(converter ${LZ4_LIBRARY} ${MPI_LIBRARIES})
 target_include_directories(converter PUBLIC ${LZ4_INCLUDE_DIR})
+target_link_libraries(converter ${LZ4_LIBRARY})
 target_compile_definitions(converter PUBLIC -DCPUINFO_PATH="${CPUINFO_PATH}")
+target_compile_features(converter PRIVATE cxx_std_14)
 if (COLORIZE)
     target_compile_definitions(converter PUBLIC -DCOLORIZE)
 endif()
@@ -128,21 +126,21 @@ endif()
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/main.impala PROPERTIES GENERATED TRUE)
 
 add_library(driver ${DRIVER_SRCS})
+target_include_directories(driver PUBLIC ${LZ4_INCLUDE_DIR})
 if (EMBREE_FOUND)
     target_include_directories(driver PUBLIC ${EMBREE_ROOT_DIR}/include ${EMBREE_ROOT_DIR} ${EMBREE_LIBRARY_DIR} ${PNG_INCLUDE_DIRS} ${JPEG_INCLUDE_DIRS} ${TBB_INCLUDE_DIRS} ${LZ4_INCLUDE_DIR})
     target_link_libraries(driver ${EMBREE_DEPENDENCIES})
     target_compile_definitions(driver PUBLIC -DENABLE_EMBREE_DEVICE)
 endif()
 if (NOT DISABLE_GUI)
-    target_include_directories(driver PUBLIC ${SDL2_INCLUDE_DIRS} ${LZ4_INCLUDE_DIR} )
+    target_include_directories(driver PUBLIC ${SDL2_INCLUDE_DIR})
     target_link_libraries(driver ${SDL2_LIBRARY})
 else()
-    target_include_directories(driver PUBLIC ${SDL2_INCLUDE_DIRS} ${LZ4_INCLUDE_DIR} )
-    target_compile_definitions(driver PUBLIC -DDISABLE_GUI )
+    target_compile_definitions(driver PUBLIC -DDISABLE_GUI)
 endif()
 if (COLORIZE)
     target_compile_definitions(driver PUBLIC -DCOLORIZE)
 endif()
 
-add_executable(rodent driver/mpi.cpp ${RODENT_OBJS})
+add_executable(rodent ${RODENT_OBJS})
 target_link_libraries(rodent driver ${AnyDSL_runtime_LIBRARIES} ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TBB_LIBRARIES} ${LZ4_LIBRARY} ${MPI_LIBRARIES} -lpthread)

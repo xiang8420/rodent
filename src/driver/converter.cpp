@@ -14,7 +14,8 @@
 #include "interface.h"
 #include "obj.h"
 #include "buffer.h"
-#include "distribution.h"
+#include "decomposition.h" //domain split
+#include "simplify.h"
 #ifdef WIN32
 #include <direct.h>
 #define create_directory(d) _mkdir(d)
@@ -403,22 +404,30 @@ static std::vector<uint8_t> pad_buffer(const std::vector<T>& elems, bool enable,
 }
 
 template <typename Array>
-static void write_buffer_hetero(std::string path, std::string file_name, const Array& array, unsigned short padding_flag) {
-    if(padding_flag & 1){
+static void write_buffer_hetero(std::string path, std::string file_name, const Array& array, unsigned short mask, bool padding) {
+    if(mask & 1){
         create_directory((path + "cpu/").c_str());
-        write_buffer(path + "cpu/" + file_name, pad_buffer(array, false, sizeof(float) * 4));
+        if(padding)
+            write_buffer(path + "cpu/" + file_name, pad_buffer(array, false, sizeof(float) * 4));
+        else
+            write_buffer(path + "cpu/" + file_name, array);
+
     }
-    if(padding_flag & 2){
+    if(mask & 2){
         create_directory((path + "gpu/").c_str());
-        write_buffer(path + "gpu/" + file_name, pad_buffer(array, true, sizeof(float) * 4));
+        if(padding)
+            write_buffer(path + "gpu/" + file_name, pad_buffer(array, true, sizeof(float) * 4));
+        else 
+            write_buffer(path + "gpu/" + file_name, array);
     }
 }
 
-static void write_tri_mesh(std::string path, const obj::TriMesh& tri_mesh, unsigned short padding_flag ) {
-    write_buffer_hetero(path,  "tri_vert.bin",     tri_mesh.vertices,     padding_flag);
-    write_buffer_hetero(path,  "tri_norm.bin",      tri_mesh.normals,      padding_flag);
-    write_buffer_hetero(path,  "face_nor.bin", tri_mesh.face_normals, padding_flag);
-    write_buffer_hetero(path,  "text_cod.bin",    tri_mesh.texcoords,    padding_flag);
+static void write_tri_mesh(std::string path, const obj::TriMesh& tri_mesh, unsigned short target ) {
+    printf("write tri mesh %s\n", path.c_str());
+    write_buffer_hetero(path,  "tri_vert.bin", tri_mesh.vertices,     target, true);
+    write_buffer_hetero(path,  "tri_norm.bin", tri_mesh.normals,      target, true);
+    write_buffer_hetero(path,  "face_nor.bin", tri_mesh.face_normals, target, true);
+    write_buffer_hetero(path,  "text_cod.bin", tri_mesh.texcoords,    target, true);
     write_buffer(path + "tri_indx.bin",      tri_mesh.indices);
 }
 
@@ -462,8 +471,8 @@ static void build_muti_bvh(const obj::TriMesh& tri_mesh, obj::File& file,
 }
 
 template <typename Node, typename Tri>
-static void write_bvh(std::vector<Node>& nodes, std::vector<Tri>& tris, std::string path) {
-    std::ofstream of(path, std::ios::app | std::ios::binary);
+static void write_bvh_buffer(std::vector<Node>& nodes, std::vector<Tri>& tris, std::string path) {
+    std::ofstream of(path, std::ios::binary);
 //    std::ofstream of("data/bvh.bin", std::ios::app | std::ios::binary);
     size_t node_size = sizeof(Node);
     size_t tri_size  = sizeof(Tri);
@@ -605,19 +614,61 @@ void get_grid(size_t n, int* grid){
     printf("grid %d %d %d\n", grid[0], grid[1], grid[2]);
 }
 
+void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export, std::string &data_path, std::string &chunk_path) 
+{
+    if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
+        target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
+        printf("nvvm\n");
+        if(!(bvh_export&1)){
+            create_directory((data_path + "gpu/").c_str());
+            std::vector<typename BvhNTriM<2, 1>::Node> nodes;
+            std::vector<typename BvhNTriM<2, 1>::Tri> tris;
+            build_bvh<2, 1>(tri_mesh, nodes, tris);
+            printf("bvh built\n");
+            write_bvh_buffer(nodes, tris, chunk_path + "bvh_nvvm.bin");
+            bvh_export ++;
+        }
+    } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
+        printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
+        if(!(bvh_export&2)){
+            create_directory((data_path + "cpu/").c_str());
+            std::vector<typename BvhNTriM<4, 4>::Node> nodes;
+            std::vector<typename BvhNTriM<4, 4>::Tri> tris;
+#ifdef ENABLE_EMBREE_BVH
+            if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
+            else
+#endif
+            build_bvh<4, 4>(tri_mesh, nodes, tris);
+            write_bvh_buffer(nodes, tris, chunk_path + "bvh_sse_.bin");
+            bvh_export += 2;
+        }
+    } else {
+        printf("avx \n");
+        if(!(bvh_export&4)){
+            create_directory((data_path + "cpu/").c_str());
+            std::vector<typename BvhNTriM<8, 4>::Node> nodes;
+            std::vector<typename BvhNTriM<8, 4>::Tri> tris;
+#ifdef ENABLE_EMBREE_BVH
+            if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
+            else
+#endif
+            build_bvh<8, 4>(tri_mesh, nodes, tris);
+            write_bvh_buffer(nodes, tris, chunk_path + "bvh_avx_.bin");
+            bvh_export += 4;
+        }
+    }
+}
+
 static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, 
                         bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, size_t grid_num) {
     info("Converting OBJ file '", file_name, "'");
-    int mpi_size, mpi_id;
-    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_id);
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath scene_path(file_name);
     int *grid = new int[3];
     get_grid(grid_num, grid);
 
-    if (!obj::load_obj(scene_path, obj_file, mpi_id, mpi_size)) {
+    if (!obj::load_obj(scene_path, obj_file)) {
         error("Invalid OBJ file '", file_name, "'");
         return false;
     }
@@ -657,7 +708,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "    right: Vec3,\n"
        << "    width: f32,\n"
        << "    height: f32,\n"
-       << "    range: Vec4,\n"
+       << "    image_region: Vec4_i32,\n"
        << "    spp: i32\n"
        << "};\n";
 
@@ -666,7 +717,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "extern fn get_chunk_num() -> i32{ "<< grid_num << " }\n";
 
 
-    os << "\nfn @make_scene(device: Device, settings: &Settings, file: File_path, chunk: i32)-> Scene {\n";
+    os << "\nfn @make_scene(device: Device, settings: &Settings, file: File_path, chunk: i32, generateRays: bool)-> Scene {\n";
 
     os << "    let math     = device.intrinsics;\n"
        << "    let spp      = settings.spp;\n";
@@ -678,8 +729,9 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        make_mat3x3(settings.right, settings.up, settings.dir),\n"
        << "        settings.width,\n"
        << "        settings.height,\n"
-       << "        settings.range,\n"
-       << "        spp\n"
+       << "        settings.image_region,\n"
+       << "        spp,\n"
+       << "        generateRays\n"
        << "    );\n";
     
     int gpu_num = 0; 
@@ -700,7 +752,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     if(gpu_num != dev_num){
         padding_flag |= 1;
     }
-
+	
+  //  printf("memory used %d\n", physical_memory_used_by_process());
     // Setup camera
 
     MeshChunk chunk = MeshChunk(obj_file, grid[0], grid[1], grid[2]);
@@ -720,7 +773,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
        << "        attrs:        @ |_| (false, @ |j| vec2_to_4(texcoords.load_vec2(j), 0.0f, 0.0f)),\n"
        << "        num_attrs:    1,\n"
-       << "        num_tris:     27\n"  //fake num tris
+       << "        num_tris:     27\n"  //wrong num tris
  //      << "        num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
        << "    };\n"
        << "    let bvh = device.load_bvh(file.bvh);\n"
@@ -738,13 +791,22 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     std::vector<float3> light_norms;
     std::vector<float>  light_areas;
     std::vector<obj::Material> light_mats;
-    for(int c = 0, n = chunk.size(); c < n; c++){
+   
+    bool PreRendering = true; 
+    obj::TriMesh simple_mesh; 
+    for(int c = 0, n = chunk.size(); c < n; c++) {
         auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c), false);
-        // if chunk is empty ??
-        printf("tri mesh num %d \n", tri_mesh.indices.size() / 4);
-        std::string chunk_path = c > 9 ? "data/0" : "data/00";
-        chunk_path = chunk_path + std::to_string(c) + "/";
-        
+        //if chunk is empty ??
+		
+		if(PreRendering) {
+            int target_count = round((tri_mesh.indices.size() / 4) * 0.2);
+            auto sub_mesh = Simplify::simplify_TriMesh(&tri_mesh, target_count, 7, true);
+            obj::mesh_add(simple_mesh, sub_mesh);
+      //      obj::write_obj(&simple_mesh, c);
+            printf("tri mesh num %ld \n", tri_mesh.indices.size() / 4);
+            //gather all simple tri mesh
+        }
+		std::string chunk_path = (c > 9 ? "data/0" : "data/00") + std::to_string(c) + "/";
         create_directory(chunk_path.c_str());
         num_complex = fusion ? num_complex : num_mats;
         has_simple |= num_complex < num_mats;
@@ -772,66 +834,23 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                     simple_ns[j] = 1.0f;
                 }
             }
-            
-            write_buffer_hetero(chunk_path, "simpl_kd.bin", simple_kd, padding_flag);
-            write_buffer_hetero(chunk_path, "simpl_ks.bin", simple_ks, padding_flag);
+            write_buffer_hetero(chunk_path, "simpl_kd.bin", simple_kd, padding_flag, true);
+            write_buffer_hetero(chunk_path, "simpl_ks.bin", simple_ks, padding_flag, true);
             write_buffer(chunk_path + "simpl_ns.bin", simple_ns);
         }
         write_tri_mesh(chunk_path, tri_mesh, padding_flag);
         
+        printf("after write tri mesh\n");
         unsigned short bvh_export = 0;
-        for(int dev_id = 0; dev_id < dev_num; dev_id++){
+        for(int dev_id = 0; dev_id < dev_num; dev_id++) {
             Target target = target_list[dev_id];
             info("Generating BVH for '", file_name, "'");
-            if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
-                target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-                printf("nvvm\n");
-                if(!(bvh_export&1)){
-                    create_directory((data_path + "gpu/").c_str());
-                    std::remove((chunk_path + "bvh_nvvm.bin").c_str());
-                    std::vector<typename BvhNTriM<2, 1>::Node> nodes;
-                    std::vector<typename BvhNTriM<2, 1>::Tri> tris;
-                    build_bvh<2, 1>(tri_mesh, nodes, tris);
-                    printf("bvh built\n");
-                    write_bvh(nodes, tris, chunk_path + "bvh_nvvm.bin");
-                    bvh_export ++;
-                }
-            } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-                printf("sse42 %d bvh_export %d \n", bvh_export, bvh_export&2);
-                if(!(bvh_export&2)){
-                    create_directory((data_path + "cpu/").c_str());
-                    std::remove((chunk_path + "bvh_sse_.bin").c_str());
-                    std::vector<typename BvhNTriM<4, 4>::Node> nodes;
-                    std::vector<typename BvhNTriM<4, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-                    if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
-                    else
-#endif
-                    build_bvh<4, 4>(tri_mesh, nodes, tris);
-                    write_bvh(nodes, tris, chunk_path + "bvh_sse_.bin");
-                    bvh_export += 2;
-                }
-            } else {
-                printf("avx \n");
-                if(!(bvh_export&4)){
-                    create_directory((data_path + "cpu/").c_str());
-                    std::remove((chunk_path + "bvh_avx_.bin").c_str());
-                    std::vector<typename BvhNTriM<8, 4>::Node> nodes;
-                    std::vector<typename BvhNTriM<8, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-                    if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
-                    else
-#endif
-                    build_bvh<8, 4>(tri_mesh, nodes, tris);
-                    write_bvh(nodes, tris, chunk_path + "bvh_avx_.bin");
-                    bvh_export += 4;
-                }
-            }
+            write_bvh(tri_mesh, target, bvh_export, data_path, chunk_path);
         }
         printf("light\n"); 
         //Local Light data light id
         std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
-        printf("tri mesh size %d\n", tri_mesh.indices.size() / 4);
+        printf("tri mesh size %ld\n", tri_mesh.indices.size() / 4);
         for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
             light_ids[i / 4] = 0;
@@ -848,17 +867,17 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
             auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
 
-            int find_light = 0;
-            for(find_light; find_light < num_lights; find_light++){
-                int vert_id = find_light * 3;
-                if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
-                    break;
-            } 
-            light_ids[i / 4] = find_light;
-            if(find_light != num_lights)
-                continue;
-           
-            num_lights++;
+ //           int find_light = 0;
+ //           for(find_light; find_light < num_lights; find_light++){
+ //               int vert_id = find_light * 3;
+ //               if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
+ //                   break;
+ //           } 
+ //           light_ids[i / 4] = find_light;
+ //           if(find_light != num_lights)
+ //               continue;
+ //           num_lights++;
+            light_ids[i / 4] = num_lights++;
 
             if (has_map_ke){
                 os << "    let light" << i << " = make_triangle_light(\n"
@@ -888,6 +907,38 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         write_buffer(chunk_path + "ligt_ids.bin", light_ids);
         printf("chunk over\n"); 
     }
+    ///write simple mesh
+	if(PreRendering) {
+        std::string simple_mesh_path = "data/999/";
+        create_directory(simple_mesh_path.c_str());
+        unsigned short t = 0; 
+        write_tri_mesh(simple_mesh_path, simple_mesh, padding_flag);
+        write_bvh(simple_mesh, Target::AVX2, t, data_path, simple_mesh_path);
+        std::vector<int> light_ids(simple_mesh.indices.size() / 4, 0);
+        for (size_t i = 0; i < simple_mesh.indices.size(); i += 4) {
+            // Do not leave this array undefined, even if this triangle is not a light
+            light_ids[i / 4] = 0;
+            auto& mtl_name = obj_file.materials[simple_mesh.indices[i + 3]];
+            if (mtl_name == "")
+                continue;
+            auto& mat = mtl_lib.find(mtl_name)->second;
+            if (mat.ke == rgb(0.0f) && mat.map_ke == "")
+                continue;
+
+            auto& v0 = simple_mesh.vertices[simple_mesh.indices[i + 0]];
+            auto& v1 = simple_mesh.vertices[simple_mesh.indices[i + 1]];
+            auto& v2 = simple_mesh.vertices[simple_mesh.indices[i + 2]];
+
+            int find_light = 0;
+            for(find_light; find_light < num_lights; find_light++){
+                int vert_id = find_light * 3;
+                if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
+                    break;
+            } 
+            light_ids[i / 4] = find_light;
+        }
+        write_buffer(simple_mesh_path + "ligt_ids.bin", light_ids);
+    }
 
     os << "\n    // Lights\n";
     if (has_map_ke || num_lights == 0){
@@ -905,10 +956,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         }
     } else {
 //        write_buffer("data/light_areas.bin",  light_areas);
-        write_buffer_hetero(data_path, "ligt_are.bin",  light_areas,  padding_flag);
-        write_buffer_hetero(data_path, "ligt_ver.bin",  light_verts,  padding_flag);
-        write_buffer_hetero(data_path, "ligt_nor.bin",  light_norms,  padding_flag);
-        write_buffer_hetero(data_path, "ligt_col.bin",  light_colors, padding_flag);
+        write_buffer_hetero(data_path, "ligt_are.bin",  light_areas,  padding_flag, true);
+        write_buffer_hetero(data_path, "ligt_ver.bin",  light_verts,  padding_flag, true);
+        write_buffer_hetero(data_path, "ligt_nor.bin",  light_norms,  padding_flag, true);
+        write_buffer_hetero(data_path, "ligt_col.bin",  light_colors, padding_flag, true);
         os << "    let light_verts = device.load_buffer(file.light_verts);\n"
            << "    let light_areas = device.load_buffer(file.light_areas);\n"
            << "    let light_norms = device.load_buffer(file.light_norms);\n"
@@ -924,7 +975,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
            << "            vec3_to_color(light_colors.load_vec3(i))\n"
            << "        )\n"
            << "    };\n";
-
     }
 
 
@@ -1058,12 +1108,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        bvh:            bvh, \n"
        << "        bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
                                                          << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
-       << "        grid:          make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
+       << "        grid:           make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
        << "        chunk:          chunk \n"
        << "    }\n"
-       << "}\n";
+       << "}\n\n";
     
-    os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32) -> () { \n"   
+    os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, generate_rays: bool) -> () { \n"   
        << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, " << spp << " /*spp*/); \n";
     for(int dev_id = 0; dev_id < dev_num; dev_id++){                            
                                                                                 
@@ -1093,19 +1143,60 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         }
         if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
             target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
-            os << "        let scene  = make_scene(device, settings, make_file_path(0, chunk), chunk);\n";    
+            os << "        let scene  = make_scene(device, settings, make_file_path(0, chunk), chunk, generate_rays);\n";    
         } else if (target == Target::GENERIC || target == Target::ASIMD || target == Target::SSE42) {
-            os << "        let scene  = make_scene(device, settings, make_file_path(2, chunk), chunk);\n";    
+            os << "        let scene  = make_scene(device, settings, make_file_path(2, chunk), chunk, generate_rays);\n";    
         } else {
-            os << "        let scene  = make_scene(device, settings, make_file_path(1, chunk), chunk);\n";    
+            os << "        let scene  = make_scene(device, settings, make_file_path(1, chunk), chunk, generate_rays);\n";    
         }
         os << "        renderer(scene, device, iter);\n"
            << "        device.present();\n"
            << "    }\n";
     }
         
-    os << "}\n";
-       
+    os << "}\n\n";
+     
+    bool ray_queuing = false;
+    bool preprocess  = true; 
+
+    if(preprocess) {
+        os << "extern fn prerender(settings: &Settings) -> () {\n"   
+           << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, 1 /*spp*/); \n"
+           << "    let device = make_prerender_avx2_device(); \n"
+           << "    let scene    = make_scene(device, settings, make_file_path(1, 999), 0, true);\n"
+           << "    renderer(scene, device, 0);\n"
+           << "}\n";
+    } else {
+        os << "extern fn preprocess(settings: &Settings) -> () {}\n";
+    }
+
+    if(ray_queuing) {
+        os << "extern fn raybatching(settings: &Settings, iter: i32, dev: i32) -> () { \n"   
+           << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, " << spp << " /*spp*/); \n"
+           << "    let device = make_avx2_device(false); \n"
+           << "    let domain = Domain { \n"
+           << "        bbox: make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), make_vec3(" 
+                                                   << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f)),\n"
+           << "        grid: make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
+           << "    };\n\n"
+           << "    // Camera\n"
+           << "    let camera = make_perspective_camera(\n"
+           << "        device.intrinsics,\n"
+           << "        settings.eye,\n"
+           << "        make_mat3x3(settings.right, settings.up, settings.dir),\n"
+           << "        settings.width,\n"
+           << "        settings.height,\n"
+           << "        settings.image_region,\n"
+           << "        settings.spp,\n"
+           << "        true\n"
+           << "    );\n"
+           << "    device.ray_batching(camera, domain, settings.spp);\n"
+           << "}\n";
+    } else {
+        os << "extern fn raybatching(settings: &Settings, iter: i32, dev: i32) -> () {} \n";   
+    } 
+
+
     info("Scene was converted successfully");
     return true;
 }
@@ -1142,10 +1233,6 @@ int main(int argc, char** argv) {
         std::cerr << "Not enough arguments. Run with --help to get a list of options." << std::endl;
         return 1;
     }
-    MPI_Init(NULL, NULL); 
-    int world_size, world_rank;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     std::string obj_file;
     
     size_t dev_num = 1;

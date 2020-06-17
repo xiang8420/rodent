@@ -9,21 +9,31 @@ struct Vec3 {
     z: f32
 }
 
+struct Vec3_i32{
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
 struct Vec4 {
     x: f32,
     y: f32,
     z: f32,
     w: f32
 }
-struct Vec3i{
-    x: i32,
-    y: i32,
-    z: i32,
+
+struct Vec4_i32 {
+    xmin: i32,
+    ymin: i32,
+    xmax: i32,
+    ymax: i32
 }
+
 fn @make_vec2(x: f32, y: f32) -> Vec2 { Vec2 { x: x, y: y } }
 fn @make_vec3(x: f32, y: f32, z: f32) -> Vec3 { Vec3 { x: x, y: y, z: z } }
+fn @make_vec3_i32(x: i32, y: i32, z: i32) -> Vec3_i32 {Vec3_i32 {x: x, y: y, z: z} }
 fn @make_vec4(x: f32, y: f32, z: f32, w: f32) -> Vec4 { Vec4 { x: x, y: y, z: z, w: w } }
-fn @make_vec3i(x: i32, y: i32, z: i32) -> Vec3i {Vec3i {x: x, y: y, z: z} }
+fn @make_vec4_i32(xmin: i32, ymin: i32, xmax: i32, ymax: i32) ->Vec4_i32  { Vec4_i32 { xmin: xmin, ymin: ymin, xmax: xmax, ymax: ymax } }
 
 fn @vec2_to_3(v: Vec2, z: f32) -> Vec3 { make_vec3(v.x, v.y, z) }
 fn @vec2_to_4(v: Vec2, z: f32, w: f32) -> Vec4 { make_vec4(v.x, v.y, z, w) }

@@ -1,7 +1,7 @@
 // Driver functions ----------------------------------------------------------------
 
 extern "C" {
-    fn rodent_get_film_data(i32, &mut &mut [f32], &mut i32, &mut i32) -> ();
+    fn rodent_get_film_data(i32, &mut &mut [f32], &mut i32, &mut i32, bool) -> ();
     
     fn rodent_cpu_get_primary_stream(&mut PrimaryStream, i32) -> ();
     fn rodent_cpu_get_primary_outcome_stream(&mut PrimaryStream, i32) -> ();
@@ -10,6 +10,7 @@ extern "C" {
     fn rodent_cpu_get_secondary_outcome_stream(&mut SecondaryStream, i32) -> ();
     fn rodent_cpu_get_secondary_income_stream(&mut SecondaryStream, i32) -> ();
     
+    fn rodent_initial_gpu_host_data(i32) -> ();
     fn rodent_gpu_get_first_primary_stream(i32, &mut PrimaryStream, i32) -> ();
     fn rodent_gpu_get_second_primary_stream(i32, &mut PrimaryStream, i32) -> ();
     fn rodent_gpu_get_primary_buffer_stream(i32, &mut PrimaryStream, i32) -> ();
@@ -30,11 +31,14 @@ extern "C" {
     fn rodent_cpu_intersect_primary_embree(&PrimaryStream, i32, i32) -> ();
     fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
-    
-    fn rodent_primary_send(i32, i32, bool) -> ();    
-    fn rodent_secondary_send(i32, i32, bool) -> ();    
-    fn rodent_primary_recv(i32, i32, bool, bool) -> i32;
-    fn rodent_secondary_recv(i32, i32, bool, bool) -> i32;
+
+    fn rodent_cpu_get_thread_num() -> i32; 
+    fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
+    fn rodent_worker_primary_send(i32, i32) -> ();    
+    fn rodent_worker_secondary_send(i32, i32) -> ();    
+    fn rodent_worker_primary_recv(i32, i32, bool, i32, bool) -> i32;
+    fn rodent_worker_secondary_recv(i32, i32, bool, i32, bool) -> i32;
+    fn rodent_master_save_ray_batches(i32, i32, i32) -> ();
 }
 
 // Ray streams ---------------------------------------------------------------------
@@ -76,6 +80,13 @@ struct SecondaryStream {
     color_g: &mut [f32],
     color_b: &mut [f32],
     size: i32
+}
+
+struct PreprocessRecord {
+    its:    &mut[i32],  //chunk * depth
+    time:   &mut[f32],
+    length: i32,
+    chunk:  i32
 }
 
 fn @copy_primary_ray( primary: PrimaryStream
