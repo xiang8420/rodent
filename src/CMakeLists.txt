@@ -72,8 +72,7 @@ set(CONVERTER_SRCS
     driver/obj.h
     driver/file_path.h
     driver/interface.h
-    driver/bvh.h
-    driver/distributedMesh.h)
+    driver/bvh.h)
 
 
 find_package(MPI REQUIRED)

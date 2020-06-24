@@ -19,6 +19,7 @@ Communicator::Communicator() {
     quit = false;
     pause = false;
 
+    os = std::ofstream("out/proc_" + std::to_string(rank));
 }
     
 Communicator::~Communicator() {
@@ -47,7 +48,6 @@ void Communicator::send_noray(int dst) {
 }
 
 void Communicator::send_end(int dst) {
-//    printf("send end %d %d\n",rank, dst);
     int msg[MSG_SIZE];
     msg[0] = -1;
     MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
@@ -72,7 +72,7 @@ void Communicator::recv_msg(int dst, int *msg) {
 void Communicator::recv_rays(int src, int recv_size, struct Rays* raylist) {
     if(recv_size == 0) return;
     int width = raylist->store_width;
-    printf("%d <- %d |recv %d %d\n", rank, src, recv_size, width);
+    os<< rank << " <- " << src << "|recv" <<  recv_size <<" "<<width<<std::endl;
     float *rays = &raylist->get_data()[raylist->get_size() * width];
     raylist->size += recv_size;
 
@@ -89,7 +89,7 @@ void Communicator::send_rays(int dst, int send_size, struct Rays* buffer) {
     int width = buffer->store_width;
     float *rays = &buffer->get_data()[(buffer->get_size() - send_size) * width];
     buffer->size -= send_size;
-    printf("%d -> %d |send %d %d \n", rank, dst, send_size, width);
+    os << rank << "-> " <<  dst << "|send " << send_size << width << std::endl;
     MPI_Send(rays, send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
 }
 
@@ -124,14 +124,14 @@ void Communicator::purge_completed_mpi_buffers() {
     }
 }
 
-int Communicator::Export(Message *m) {
+int Communicator::Export(Message *m, ProcSettings *rs) {
+	int root = m->get_root();
 	static int t = 0;
 	int k = 0;
-	int root = m->get_root();
-
 	// My rank relative to the broadcast root
-	int d = ((size + rank) - m->get_root()) % size;
-
+	int d = ((size + rank) - root) % size;
+    
+    os << "mthread root " << root<< " rank " << rank << std::endl;
 	// Only export if its either P2P or broadcast and this isn't a leaf
 	if (m->is_broadcast() && (2*d + 1) >= size)
 		return 0;
@@ -147,12 +147,12 @@ int Communicator::Export(Message *m) {
     msb->total_size = m->get_header_size() + (m->has_content() ? m->get_size() : 0);
     msb->send_buffer = (char *)malloc(msb->total_size);
     memcpy(msb->send_buffer, m->get_header(), m->get_header_size());
-    printf("msb->total size %d %d\n", msb->total_size, m->get_size());
+    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size() <<std::endl;
     if (m->has_content())
         memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_size());
     
     if (m->is_broadcast()) {
-        printf("broadcast\n\n");
+        os<<"mthread broadcast\n";
         int l = (2 * d) + 1;
 		int destination = (root + l) % size;
 		MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->lrq);
@@ -165,117 +165,120 @@ int Communicator::Export(Message *m) {
 			k++;
 		}
     } else {
-        printf("send\n\n");
+        os<< "mthread send rays" << m->get_ray_size() <<"to "<<m->get_destination()<< std::endl;
         MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, m->get_destination(), tag, MPI_COMM_WORLD, &msb->lrq);
-        printf("send over\n");
 		k++;
 	}
+    if(m->has_content())
+        rs->accumulate_sent(k * m->get_ray_size());
 	msb->n = k;
 	mpi_in_flight.push_back(msb);
 	
     return k;
-      
 }
 
-bool Communicator::collective(RenderSettings *rs) {
+void Communicator::collective(ProcSettings *rs) {
 
     rs->lock();
 
-    int global_counts[4]; // [4] -> [3] camera active is not necessary
-	int local_counts[] = {rs->get_local_ray_count(), rs->get_sent_ray_count(), rs->get_recv_ray_count(), rs->is_busy() ? 1 : 0};
+    int global_counts[3]; // [4] -> [3] camera active is not necessary
+	int local_counts[] = {rs->all_thread_waiting() ? 0 : 1, rs->get_sent_ray_count(), rs->get_recv_ray_count()};
 
-    MPI_Allreduce(local_counts, global_counts, 4, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(local_counts, global_counts, 3, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
+    os << "mthread all end collective: local " << global_counts[0] << "sent " << global_counts[1] <<"recv "<< global_counts[2]<< std::endl;
 	// If no raylists exist anywhere, and the number of received pixels matches the number of sent pixels,
 	// and there are no camera rays currently being generated, this rendering is done.
 
-    if (global_counts[0] == 0 && global_counts[3] == 0) {
-        rs->finalize(); 
+//    rs->unlock();
+//    return true;
+     
+    if (global_counts[0] == 0 && global_counts[1] == global_counts[2]) {
+        //all process done, no local rays, global sent rays == recv rays 
+        rs->set_exit();
+        rs->unlock();
     } else {
-        if (rs->get_mpi_rank() == 0){
-            if (global_counts[0] != 0 && global_counts[3] != 0)
-                 std::cerr << "not done due to ray lists AND cameras\n";
-            else if (global_counts[0] != 0)
-                 std::cerr << "not done due to ray lists\n";
-            else std::cerr << "not done due to cameras\n";
-        }
-        //rs->busy = true;
+        if (global_counts[0] != 0)
+             std::cerr << "not done due to ray lists AND cameras"<<global_counts[0]<<" "<<global_counts[1]<<"\n";
+        else if (global_counts[1] != global_counts[2])
+             std::cerr << "not done due to ray lists"<<global_counts[0]<<"\n";
+        os<<"set proc busy\n"; 
+        rs->set_proc_busy(rank);
+        rs->unlock();
     }
-
-    rs->unlock();
-
-    return false;
 }
 
-bool Communicator::recv_message(RayList** List, RenderSettings *rs) {
+bool Communicator::recv_message(RayList** List, ProcSettings *rs) {
     int recv_ready;
     MPI_Status status;
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_ready, &status);
 
     if (recv_ready) {
-        printf("recv ready\n");
         Message *incoming_message = new Message(status, MPI_COMM_WORLD); 
-        printf("recv success\n");
+        os<<"mthread recv rays from "<<incoming_message->get_sender()<<"size "<<incoming_message->get_ray_size()
+          <<"root: "<<incoming_message->get_root()<<"chunk "<<incoming_message->get_chunk()<<"\n";
         if (incoming_message->is_broadcast()) {
-            printf("recv broadcast\n");
-            Export(incoming_message); 
+            os << "mthread recv broadcast\n";
+            Export(incoming_message, rs); 
             if (incoming_message->is_collective()) {
                 //check if need to synchronous
                 collective(rs);
-                delete incoming_message;
             } else {
-               // RayList *in = List[incoming_message->get_chunk()];
-               // incoming_message->deserialize(in);
+                os << "mthread| set proc " << incoming_message->get_root() << "idle \n";
+                rs->set_proc_idle(incoming_message->get_root());
             }
         } else {
+            os << "mthread| incoming chunk "<<incoming_message->get_chunk()<< "root" << incoming_message->get_root() << "\n";
             RayList *in = List[incoming_message->get_chunk()];
+            rs->accumulate_recv(incoming_message->get_ray_size());
             incoming_message->deserialize(in);
-            printf("after deserialize%d \n", in->size());
+            os << "mthread| after deserialize "<<in->size()<<std::endl;
+            //set itself busy
+            rs->set_proc_busy(rank);
         }
+        return true; 
+    } else {
+        return false;
     } 
-    return quit; 
 }
 
-bool Communicator::send_message(Message *outgoing_message, RenderSettings *rs) {
+bool Communicator::send_message(Message *outgoing_message, ProcSettings *rs) {
 
     //outList lock
     //serialize
     
     //current process is not destination or broadcast, send to destination 
-    printf("send message\n");
+    os << "mthread| send message"<<outgoing_message->get_destination() <<"\n";
     if (outgoing_message->is_broadcast() || (outgoing_message->get_destination() != rank))
-        Export(outgoing_message);
+        Export(outgoing_message, rs);
+    if (outgoing_message->is_broadcast()) {
+        if (outgoing_message->is_collective()) {
+            os << "mthread|send collective\n";    
+            collective(rs);
+            // We copy the message in Export, and put the copy on the list to be held until 
+            // the message actually leaves.   So here we acknowlege that the
+            // collective action finishes.   The collective action can block, so we won't get here
+            // until the messages have arrived down the tree
 
-//    if (outgoing_message->is_broadcast()) {
-//        if (outgoing_message->is_collective()) {
-//                collective(rs);
-//            // We copy the message in Export, and put the copy on the list to be held until 
-//            // the message actually leaves.   So here we acknowlege that the
-//            // collective action finishes.   The collective action can block, so we won't get here
-//            // until the messages have arrived down the tree
-//
 //            if (outgoing_message->isBlocking())
 //            {
 //              outgoing_message->Signal();        // blocked guy will delete
 //            }
-//        } else {
+        } else {
+            os << "mthread| broadcast status";    
+        } 
+//        else {
 //            // If we enqueue the message for async work, we will wait until its been performed
 //            // (in MessageManager::workThread) to signal or delete the message
 //            
 //            income_queue->enqueue(outgoing_message);
 //            message_deserialize(inList);
-//        }
-//    }
+    }
+    
     return quit;
 }
 
 bool Communicator::barrier(struct RayList* out) {
 
-}
-
-bool Communicator::broadcast_status() {
-    MessageHeader header(rank, -1, 0, false, 0, -1, true); 
-    Message m(&header);
-    Export(&m);
 }
 

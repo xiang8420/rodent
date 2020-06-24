@@ -10,7 +10,7 @@
 #define MAX_CLIENT_CHUNK 3
 
 #include "raylist.h"
-#include "RenderSettings.h"
+#include "process_settings.h"
 
 struct Master {
     struct Communicator *comm;
@@ -20,10 +20,10 @@ struct Master {
     int recv_capacity, buffer_capacity, comm_count;
     int chunk_size, worker_size; 
     bool *mpi_worker_wait;
-    struct RenderSettings *rs;
+    struct ProcSettings *rs;
     double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
-    Master(struct Communicator *comm, struct RenderSettings *rs);
+    Master(struct Communicator *comm, struct ProcSettings *rs);
     
     ~Master();
     
@@ -57,12 +57,11 @@ class Worker {
 
 protected:
     struct Communicator *comm;
-    struct RenderSettings *rs;
+    struct ProcSettings *rs;
     
     int buffer_capacity, buffer_size;
     int master, worker_size; 
     bool proc_idle;
-    bool current_chunk_empty;
     bool exit; 
     
     int recv_loop_count, master_loop_count;
@@ -71,7 +70,7 @@ protected:
     std::condition_variable buffer_not_empty; // primary + secondary > 0 
 
 public: 
-    Worker(struct Communicator *comm, struct RenderSettings *rs);
+    Worker(struct Communicator *comm, struct ProcSettings *rs);
 
     ~Worker(){}
     
@@ -92,9 +91,10 @@ protected:
     struct RayList * inList;
     struct RayList * buffer;
     struct RayList *outList;
+    bool current_chunk_empty;
 public:    
 
-    StupidWorker(struct Communicator *comm, struct RenderSettings *rs);
+    StupidWorker(struct Communicator *comm, struct ProcSettings *rs);
 
     ~StupidWorker();
 
@@ -113,7 +113,7 @@ public:
 
     static void message_thread(void* tmp); 
     
-    static void work_thread(struct RenderSettings *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
+    static void work_thread(struct ProcSettings *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
 
     void run(float* rProcessTime, int deviceNum); 
 }; 
@@ -132,10 +132,9 @@ protected:
     MessageQ *outMsgQ;
 
     std::mutex   out_mutex, buffer_mutex, in_mutex;
-    bool * mpi_worker_wait;
     
 public:    
-    SmartWorker(struct Communicator *comm, struct RenderSettings *rs);
+    SmartWorker(struct Communicator *comm, struct ProcSettings *rs);
 
     ~SmartWorker();
 
@@ -154,19 +153,6 @@ public:
         return res;
     }
     
-    bool all_worker_idle(){
-        mpi_worker_wait[comm->rank] = proc_idle;
-        for(int i = 0; i < comm->size; i++){
-            if(!mpi_worker_wait[i]) 
-                return false;
-        } 
-        return true;
-    }
-
-    void set_worker_status(int i, bool s){
-        mpi_worker_wait[i] = s;
-    }
-
     bool check_rendering_status(); 
    
     void set_distributed_buffer(); 

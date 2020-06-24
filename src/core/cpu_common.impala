@@ -1,16 +1,16 @@
 // Vectorizer intrinsics  ----------------------------------------------------------
 
 extern "C" {
-//    fn rv_any(bool) -> bool;
-//    fn rv_all(bool) -> bool;
-//    fn rv_ballot(bool) -> i32;
-//    fn rv_extract(f32, i32) -> f32;
-//    fn rv_insert(f32, i32, f32) -> f32;
-//    fn rv_load(&f32, i32) -> f32;
-//    fn rv_store(&mut f32, i32, f32) -> ();
-//    fn rv_shuffle(f32, i32) -> f32;
-//    fn rv_align(&i8, i32)-> &i8;
-//    fn rv_compact(f32, bool) -> f32;
+    fn rv_any(bool) -> bool;
+    fn rv_all(bool) -> bool;
+    fn rv_ballot(bool) -> i32;
+    fn rv_extract(f32, i32) -> f32;
+    fn rv_insert(f32, i32, f32) -> f32;
+    fn rv_load(&f32, i32) -> f32;
+    fn rv_store(&mut f32, i32, f32) -> ();
+    fn rv_shuffle(f32, i32) -> f32;
+    fn rv_align(&i8, i32)-> &i8;
+    fn rv_compact(f32, bool) -> f32;
 
     fn clock_us() -> i64;
 }
@@ -29,7 +29,8 @@ fn @cpu_profile(counter: &mut i64, body: fn () -> ()) -> () {
         if cpu_profiling_serial {
             *counter += end - start;
         } else {
-            atomic(1u32, counter, end - start, 7u32, "");
+            atomic(1u32, counter, end - start);
+            //atomic(1u32, counter, end - start, 7u32, "");
         }
     } else {
         body()

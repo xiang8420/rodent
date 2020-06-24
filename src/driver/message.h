@@ -7,22 +7,21 @@ struct MessageHeader {
     int  broadcast_root; // will be -1 for point-to-point
     int  sender;                 // will be -1 for broadcast
     int  type;
-    bool collective;
     int  content_size;
-    int  in_size[3];       //logic size of 3 types of rays primary, secondary, camera ray
-    bool idle;      //if this process is idle
+    int  primary;
+    int  secondary;       //logic size of 3 types of rays primary, secondary, camera ray
     int  chunk;
+    bool collective;
+    bool idle;      //if this process is idle
 
     MessageHeader(){}
 
-    MessageHeader(int a, int b, int c, bool d, int e, int *in, bool f) 
-        : broadcast_root(a), sender(b), type(c), collective(d), content_size(e), idle(f){
-       in_size[0] = in[0]; 
-       in_size[1] = in[1]; 
-    }
-
     MessageHeader(int a, int b, int c, bool d, int e, bool f, int g) 
-        : broadcast_root(a), sender(b), type(c), collective(d), content_size(e), idle(f), chunk(g){}
+        : broadcast_root(a), sender(b), type(c), collective(d), content_size(e), idle(f), chunk(g)
+    {
+       primary   = 0; 
+       secondary = 0; 
+    }
     
     bool HasContent() { return content_size > 0; }
     
@@ -74,6 +73,8 @@ public:
     
     char *get_content() { return content.data(); }
     
+    size_t get_ray_size() {return header->primary + header->secondary;}
+
     size_t get_size() { return content.size(); }
 
     int get_root() { return header->broadcast_root; }
@@ -134,3 +135,8 @@ public:
     CollectiveMsg(int src);
 };
 
+class StatusMsg : public Message {
+
+public:
+    StatusMsg(int src);
+};

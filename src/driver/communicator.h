@@ -1,6 +1,7 @@
 #include "mpi.h"
 #include "messageQ.h"
-#include "RenderSettings.h"
+#include "process_settings.h"
+#include <fstream>
 #define MSG_SIZE 5
 
 struct mpi_send_buffer {
@@ -23,9 +24,9 @@ struct Communicator {
     int group_rank, group_size;
     bool first;
     bool pause, quit;
-
+    std::ofstream os;
+    
     const int message_capacity = 1048608 * 21 * 4;
-
     std::mutex mutex;
     std::condition_variable cond; // primary, secondary buffer size < max
 
@@ -61,19 +62,18 @@ struct Communicator {
     void send_rays(int dst, int send_size, struct Rays* buffer);
 
     // broadcast or p2p. return sent number 1, in p2p, 0, 1 or 2 in bcast
-    int  Export(Message * m); 
+    int  Export(Message * m, ProcSettings *rs); 
 
-    bool recv_message(RayList** list, RenderSettings *rs); 
+    bool recv_message(RayList** list, ProcSettings *rs); 
     
-    bool send_message(Message* msg, RenderSettings *rs); 
+    bool send_message(Message* msg, ProcSettings *rs); 
 
-    bool collective(RenderSettings *rs); 
+    void collective(ProcSettings *rs); 
 
     bool barrier(struct RayList* out);
 
-    bool broadcast_status(); 
-    
     void purge_completed_mpi_buffers(); 
+
 };
 
 
