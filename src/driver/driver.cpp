@@ -15,7 +15,7 @@
 #include "float3.h"
 #include "common.h"
 #include "image.h"
-#include "process_settings.h"
+#include "process_status.h"
 #include "communicator.h"
 #include "multiproc.h"
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
@@ -28,9 +28,9 @@ float* get_pixels();
 void clear_pixels();
 void cleanup_interface();
 float* get_first_primary();
-void setup_master(struct Communicator *, struct ProcSettings *);
+void setup_master(struct Communicator *, struct ProcStatus *);
 void master_run();
-void setup_worker(struct Communicator *, struct ProcSettings *, bool);
+void setup_worker(struct Communicator *, struct ProcStatus *, bool);
 void worker_run(float*, int);
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
     int    worker_size = use_master ? comm.size - 1: comm.size;
     int    master_id = worker_size; 
     int    rank = comm.rank;
-    ProcSettings rs(eye, dir, up, fov, width, height, spp, rank, worker_size, 
+    ProcStatus rs(eye, dir, up, fov, width, height, spp, rank, worker_size, 
             imageDecompose, get_chunk_num(), false/*ray queuing*/, comm.size, 1/*thread_num*/);
     printf("after construct rendersettings \n "); 
     if(rank == master_id) {

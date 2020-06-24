@@ -13,7 +13,7 @@
 
 int32_t * get_prerender_result();
 
-Master::Master(struct Communicator *comm, struct ProcSettings *rs)
+Master::Master(struct Communicator *comm, struct ProcStatus *rs)
     :comm(comm), rs(rs)
 {
     worker_size    = comm->size - 1;
@@ -296,7 +296,7 @@ void Master::run() {
     }
 }
 
-Worker::Worker(struct Communicator *comm, struct ProcSettings *rs) 
+Worker::Worker(struct Communicator *comm, struct ProcStatus *rs) 
         : comm(comm), rs(rs)
 {
     master = comm->size - 1;
@@ -307,13 +307,12 @@ Worker::Worker(struct Communicator *comm, struct ProcSettings *rs)
     recv_loop_count = 0;
     master_loop_count = 0;    
     proc_idle = false;
-    exit = false;
     
 }
 
 
 //
-StupidWorker::StupidWorker(struct Communicator *comm, struct ProcSettings *rs) 
+StupidWorker::StupidWorker(struct Communicator *comm, struct ProcStatus *rs) 
     : Worker(comm, rs) {
     inList  = new RayList(buffer_capacity * 4, "in");
     outList = new RayList(buffer_capacity * 4, "out");
@@ -453,7 +452,7 @@ void StupidWorker::message_thread(void* tmp) {
     }   
 }
 
-void StupidWorker::work_thread(struct ProcSettings *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool camera_ray){
+void StupidWorker::work_thread(struct ProcStatus *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool camera_ray){
     printf("image region %d %d %d %d", region[0], region[1], region[2], region[3]);
     Settings settings {
         Vec3 { rs->eye.x, rs->eye.y, rs->eye.z },
@@ -529,7 +528,7 @@ void SmartWorker::set_distributed_buffer() {
     rs->set_chunks();
 }
 
-SmartWorker::SmartWorker(struct Communicator *comm, struct ProcSettings *rs) 
+SmartWorker::SmartWorker(struct Communicator *comm, struct ProcStatus *rs) 
     : Worker(comm, rs) 
 {
     int chunk_size = rs->get_chunk_size();
@@ -546,18 +545,16 @@ SmartWorker::~SmartWorker() {
 }
 
 void SmartWorker::write_rays_buffer() {
+    comm->os<<"mthread write ray buffer\n";
     if(inList->empty()) return;
     inList->lock();
     if(buffer->get_primary()->empty() && !inList->get_primary()->empty()) {
-        comm->os<<"mthread before primary"<<inList->get_primary()->size<<"|"<<inList->get_primary()->empty() 
-              <<" buffer primary: " <<buffer->get_primary()->size<<"|"<< buffer->get_primary()->empty()<<"\n";
-        
-        comm->os<<"copy primary\n";
+        comm->os<<"mthread before copy primaryary  "<<inList->get_primary()->size<<"|"<<inList->get_primary()->empty() 
+                         <<" buffer primary: "<<buffer->get_primary()->size<<"|"<< buffer->get_primary()->empty()<<"\n";
         struct Rays *rays = buffer->get_primary();
         rays->size = inList->get_primary()->write_dev_rays(rays->get_data(), buffer_size, buffer_capacity);
-    
-        comm->os<<"mthread after primary"<<inList->get_primary()->size<<"|"<<inList->get_primary()->empty() 
-            <<" buffer primary: " <<buffer->get_primary()->size<<"|"<< buffer->get_primary()->empty()<<"\n";
+        comm->os<<"mthread after copy primaryary  "<<inList->get_primary()->size<<"|"<<inList->get_primary()->empty() 
+                         <<" buffer primary: "<<buffer->get_primary()->size<<"|"<< buffer->get_primary()->empty()<<"\n";
     }
     if(buffer->get_secondary()->empty() && !inList->get_secondary()->empty()) {
         comm->os<<"mthread before copy secondaryary  "<<inList->get_secondary()->size<<"|"<<inList->get_secondary()->empty() 
@@ -568,9 +565,7 @@ void SmartWorker::write_rays_buffer() {
         comm->os<<"mthread after copy secondaryary  "<<inList->get_secondary()->size<<"|"<<inList->get_secondary()->empty() 
                          <<" buffer secondary: "<<buffer->get_secondary()->size<<"|"<< buffer->get_secondary()->empty()<<"\n";
     }
-    if(!buffer->empty()) {
-         buffer_not_empty.notify_one();
-    }
+    buffer_not_empty.notify_one();
     inList->unlock();
 }
 
@@ -592,7 +587,7 @@ int SmartWorker::worker_load_incoming_buffer(float **rays, size_t rays_size, boo
              <<" buffersize"<<buffer->size()
              <<" thread wait"<<thread_wait
              <<std::endl;
-    while (thread_wait && buffer->empty() && !rs->Exit()/*current_chunk_empty*/) {
+    while (thread_wait && buffer->empty() && !rs->Exit()) {
         comm->os<<"rthread wait for incoming lock"<<rs->is_thread_idle(thread_id)<<"\n";
         buffer_not_empty.wait(inList_lock);
         comm->os<<"rthread get not empty condition" <<thread_wait<<" "<<buffer->empty()<<rs->Exit()<<"\n";
@@ -616,7 +611,7 @@ int SmartWorker::worker_load_incoming_buffer(float **rays, size_t rays_size, boo
         
     inList_lock.unlock(); 
 
-    if(rs->Exit()/*current_chunk_empty*/){  
+    if(rs->Exit()){  
 //        printf("ray size %ld   queue primary  size %d queue secondary size %d\n", 
 //                rays_size, inList->get_primary()->size, inList->get_secondary()->size);
 //        printf("recv stop mpi %d thread %d %ld\n", comm->rank, thread_id, rays_size);
@@ -636,10 +631,6 @@ void SmartWorker::worker_save_outgoing_buffer(float *retired_rays, size_t size, 
     }
     comm->os<<"\n";
     RayList::classification(outList, retired_rays, size, capacity, primary);
-//                wk->out_mutex.lock();
-//                int cId = get_sent_list(wk->outList, rs->get_chunk_size());
-//                SendMsg smsg(wk->outList[cId], comm->rank, rs->get_dst_proc(cId), cId, false); 
-//                wk->out_mutex.unlock(); 
     out_mutex.unlock(); 
 }
 
@@ -647,7 +638,7 @@ void SmartWorker::work_thread(void* tmp, float *process_time, int devId, int dev
   
     SmartWorker * wk = (struct SmartWorker*)tmp;
     Communicator * comm = wk->comm; 
-    ProcSettings *rs = wk->rs;
+    ProcStatus *rs = wk->rs;
    
     int region[4]; 
     int sppProc = rs->get_tile_info(&region[0], process_time); 
@@ -683,25 +674,32 @@ int get_sent_list(RayList ** raylist, int n) {
     return t;
 }
 
+//check proc status, return if proc need to wait 
 bool SmartWorker::check_rendering_status() {
     if(rs->all_thread_waiting()) {
-        if(all_queue_empty() && rs->all_thread_waiting()) {
-            comm->os<< "set self proc idle\n";
-            rs->set_proc_idle(comm->rank);
+        if(all_queue_empty()) {
+            comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
+            rs->set_self_idle();
             if(rs->all_proc_idle()){
                 //if all worker end synchronous 
-                comm->os<<"proc idle\n";
+                comm->os<<"mthread all proc idle send collective\n";
                 CollectiveMsg coll_msg(comm->rank); 
                 comm->send_message(&coll_msg, rs);
             } else {
+                comm->os<<"mthread proc idle send status\n";
                 StatusMsg status(comm->rank); 
                 comm->send_message(&status, rs);
             }
+            return true; 
+        } else if(!incoming_empty()){
+            comm->os<<"mthread incoming rays left inlist:"<<inList->size()<<" buffer:"<<buffer->size()<<"\n";
+            rs->set_proc_busy(comm->rank);
+            return false;
         } else {
-            comm->os<<"load another chunk\n";
             //load new chunk
+            comm->os<<"mthread load another chunk\n";
+            return true; 
         }
-        return true; 
     } else {
         rs->set_proc_busy(comm->rank);
         return false;
@@ -712,7 +710,7 @@ void SmartWorker::message_thread(void* tmp) {
   
     SmartWorker *wk = (struct SmartWorker*)tmp;
     Communicator * comm = wk->comm; 
-    ProcSettings * rs = wk->rs;
+    ProcStatus * rs = wk->rs;
 
     comm->os<<"message thread\n";
     int recv_count = 0;
@@ -740,7 +738,6 @@ void SmartWorker::message_thread(void* tmp) {
             comm->send_message(ray_msg, rs);
         }
         comm->purge_completed_mpi_buffers();
-//        if(msg->collective) {allreduce}
 	}
     comm->os<<"end message thread"<<rs->all_thread_waiting()<<"\n";
     wk->buffer_not_empty.notify_all();
@@ -810,14 +807,14 @@ void SmartWorker::run(float* frame_time, int deviceNum) {
 static std::unique_ptr<Master> master;
 static std::unique_ptr<Worker> worker;
 
-void setup_master(struct Communicator *comm, struct ProcSettings *rs) {
+void setup_master(struct Communicator *comm, struct ProcStatus *rs) {
     master.reset(new Master(comm, rs));
 }
 void master_run() {
     master->run();
 }
 
-void setup_worker(struct Communicator *comm, struct ProcSettings *rs, bool with_master) {
+void setup_worker(struct Communicator *comm, struct ProcStatus *rs, bool with_master) {
     if(with_master) {
         worker.reset(new StupidWorker(comm, rs));
     } else {

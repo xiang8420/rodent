@@ -124,7 +124,7 @@ void Communicator::purge_completed_mpi_buffers() {
     }
 }
 
-int Communicator::Export(Message *m, ProcSettings *rs) {
+int Communicator::Export(Message *m, ProcStatus *rs) {
 	int root = m->get_root();
 	static int t = 0;
 	int k = 0;
@@ -147,7 +147,7 @@ int Communicator::Export(Message *m, ProcSettings *rs) {
     msb->total_size = m->get_header_size() + (m->has_content() ? m->get_size() : 0);
     msb->send_buffer = (char *)malloc(msb->total_size);
     memcpy(msb->send_buffer, m->get_header(), m->get_header_size());
-    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size() <<std::endl;
+    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size()<<"broadcast"<<m->is_broadcast()<<std::endl;
     if (m->has_content())
         memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_size());
     
@@ -177,7 +177,7 @@ int Communicator::Export(Message *m, ProcSettings *rs) {
     return k;
 }
 
-void Communicator::collective(ProcSettings *rs) {
+void Communicator::collective(ProcStatus *rs) {
 
     rs->lock();
 
@@ -186,29 +186,30 @@ void Communicator::collective(ProcSettings *rs) {
 
     MPI_Allreduce(local_counts, global_counts, 3, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-    os << "mthread all end collective: local " << global_counts[0] << "sent " << global_counts[1] <<"recv "<< global_counts[2]<< std::endl;
+    os << "mthread all end collective: local " << local_counts[0] << "sent " << local_counts[1] <<"recv "<< local_counts[2]<< std::endl;
+    os << "mthread all end collective: global " << global_counts[0] << "sent " << global_counts[1] <<"recv "<< global_counts[2]<< std::endl;
 	// If no raylists exist anywhere, and the number of received pixels matches the number of sent pixels,
 	// and there are no camera rays currently being generated, this rendering is done.
 
 //    rs->unlock();
 //    return true;
      
-    if (global_counts[0] == 0 && global_counts[1] == global_counts[2]) {
+    if (global_counts[0] == 0 && global_counts[1] <= 10000 + global_counts[2]) {
         //all process done, no local rays, global sent rays == recv rays 
         rs->set_exit();
         rs->unlock();
     } else {
         if (global_counts[0] != 0)
-             std::cerr << "not done due to ray lists AND cameras"<<global_counts[0]<<" "<<global_counts[1]<<"\n";
+             std::cerr << "thread havent finish"<<global_counts[0]<<" "<<global_counts[1]<<"\n";
         else if (global_counts[1] != global_counts[2])
-             std::cerr << "not done due to ray lists"<<global_counts[0]<<"\n";
+             std::cerr << "rays havent recv"<<global_counts[0]<<"\n";
         os<<"set proc busy\n"; 
         rs->set_proc_busy(rank);
         rs->unlock();
     }
 }
 
-bool Communicator::recv_message(RayList** List, ProcSettings *rs) {
+bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
     int recv_ready;
     MPI_Status status;
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_ready, &status);
@@ -242,7 +243,7 @@ bool Communicator::recv_message(RayList** List, ProcSettings *rs) {
     } 
 }
 
-bool Communicator::send_message(Message *outgoing_message, ProcSettings *rs) {
+bool Communicator::send_message(Message *outgoing_message, ProcStatus *rs) {
 
     //outList lock
     //serialize

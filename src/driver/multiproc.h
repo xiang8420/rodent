@@ -10,7 +10,7 @@
 #define MAX_CLIENT_CHUNK 3
 
 #include "raylist.h"
-#include "process_settings.h"
+#include "process_status.h"
 
 struct Master {
     struct Communicator *comm;
@@ -20,10 +20,10 @@ struct Master {
     int recv_capacity, buffer_capacity, comm_count;
     int chunk_size, worker_size; 
     bool *mpi_worker_wait;
-    struct ProcSettings *rs;
+    struct ProcStatus *rs;
     double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
-    Master(struct Communicator *comm, struct ProcSettings *rs);
+    Master(struct Communicator *comm, struct ProcStatus *rs);
     
     ~Master();
     
@@ -57,12 +57,11 @@ class Worker {
 
 protected:
     struct Communicator *comm;
-    struct ProcSettings *rs;
+    struct ProcStatus *rs;
     
     int buffer_capacity, buffer_size;
     int master, worker_size; 
     bool proc_idle;
-    bool exit; 
     
     int recv_loop_count, master_loop_count;
 
@@ -70,7 +69,7 @@ protected:
     std::condition_variable buffer_not_empty; // primary + secondary > 0 
 
 public: 
-    Worker(struct Communicator *comm, struct ProcSettings *rs);
+    Worker(struct Communicator *comm, struct ProcStatus *rs);
 
     ~Worker(){}
     
@@ -94,7 +93,7 @@ protected:
     bool current_chunk_empty;
 public:    
 
-    StupidWorker(struct Communicator *comm, struct ProcSettings *rs);
+    StupidWorker(struct Communicator *comm, struct ProcStatus *rs);
 
     ~StupidWorker();
 
@@ -113,7 +112,7 @@ public:
 
     static void message_thread(void* tmp); 
     
-    static void work_thread(struct ProcSettings *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
+    static void work_thread(struct ProcStatus *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
 
     void run(float* rProcessTime, int deviceNum); 
 }; 
@@ -134,7 +133,7 @@ protected:
     std::mutex   out_mutex, buffer_mutex, in_mutex;
     
 public:    
-    SmartWorker(struct Communicator *comm, struct ProcSettings *rs);
+    SmartWorker(struct Communicator *comm, struct ProcStatus *rs);
 
     ~SmartWorker();
 

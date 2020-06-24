@@ -1,6 +1,6 @@
 #include "mpi.h"
 #include "messageQ.h"
-#include "process_settings.h"
+#include "process_status.h"
 #include <fstream>
 #define MSG_SIZE 5
 
@@ -62,13 +62,13 @@ struct Communicator {
     void send_rays(int dst, int send_size, struct Rays* buffer);
 
     // broadcast or p2p. return sent number 1, in p2p, 0, 1 or 2 in bcast
-    int  Export(Message * m, ProcSettings *rs); 
+    int  Export(Message * m, ProcStatus *rs); 
 
-    bool recv_message(RayList** list, ProcSettings *rs); 
+    bool recv_message(RayList** list, ProcStatus *rs); 
     
-    bool send_message(Message* msg, ProcSettings *rs); 
+    bool send_message(Message* msg, ProcStatus *rs); 
 
-    void collective(ProcSettings *rs); 
+    void collective(ProcStatus *rs); 
 
     bool barrier(struct RayList* out);
 
