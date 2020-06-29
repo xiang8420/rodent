@@ -13,14 +13,16 @@
 #include "process_status.h"
 
 struct Master {
+    
+    struct ProcStatus *rs;
     struct Communicator *comm;
     struct RayList **raylists;
     struct RayList *buffer;
+    
     int worker_local_chunks[128][3];
     int recv_capacity, buffer_capacity, comm_count;
-    int chunk_size, worker_size; 
+    int worker_size; 
     bool *mpi_worker_wait;
-    struct ProcStatus *rs;
     double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
     Master(struct Communicator *comm, struct ProcStatus *rs);
@@ -32,7 +34,7 @@ struct Master {
     int get_max_rays_chunk(bool unloaded); 
 
     bool all_queue_empty(){ 
-        for(int i = 0; i < chunk_size; i++) {
+        for(int i = 0; i < rs->get_chunk_size(); i++) {
             if(!raylists[i]->empty()) {return false;}
         }
         return true;
@@ -77,7 +79,7 @@ public:
 
     virtual int worker_load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) = 0;
     
-    virtual void run(float* rProcessTime, int deviceNum) = 0;
+    virtual void run(float* rProcessTime) = 0;
 
     virtual void worker_save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary) = 0;
   
@@ -114,7 +116,7 @@ public:
     
     static void work_thread(struct ProcStatus *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
 
-    void run(float* rProcessTime, int deviceNum); 
+    void run(float* rProcessTime); 
 }; 
 
 
@@ -127,10 +129,7 @@ protected:
     struct RayList * inList;
     struct RayList * buffer;
     
-    MessageQ *inMsgQ;
-    MessageQ *outMsgQ;
-
-    std::mutex   out_mutex, buffer_mutex, in_mutex;
+    std::mutex  out_mutex, buffer_mutex, in_mutex;
     
 public:    
     SmartWorker(struct Communicator *comm, struct ProcStatus *rs);
@@ -170,7 +169,7 @@ public:
     
     static void work_thread(void* tmp, float* processTime, int devId, int devNum, bool preprocess);
 
-    void run(float* processTime, int deviceNum);
+    void run(float* processTime);
 
 }; 
 

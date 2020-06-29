@@ -117,26 +117,20 @@ public:
     RayMsg(RayList* outList, int src, int dst, int chunk, bool idle);
 };
 
-class BroadcastMsg : public Message {
-
-public:
-    BroadcastMsg(int src, int idle);
-};
-
 class RecvMsg : public Message {
 
 public:
     
 };
 
-class CollectiveMsg : public Message {
+class QuitMsg : public Message {
 
 public:
-    CollectiveMsg(int src);
+    QuitMsg(int src);
 };
 
 class StatusMsg : public Message {
 
 public:
-    StatusMsg(int src);
+    StatusMsg(int , int* , int);
 };

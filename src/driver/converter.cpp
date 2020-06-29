@@ -794,6 +794,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
    
     bool PreRendering = true; 
     obj::TriMesh simple_mesh; 
+   
+    int size = -1, rank = -1; 
+    MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, NULL);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+     
     for(int c = 0, n = chunk.size(); c < n; c++) {
         auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c), false);
         //if chunk is empty ??
@@ -804,7 +810,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             obj::mesh_add(simple_mesh, sub_mesh);
       //      obj::write_obj(&simple_mesh, c);
             printf("tri mesh num %ld \n", tri_mesh.indices.size() / 4);
-            //gather all simple tri mesh
         }
 		std::string chunk_path = (c > 9 ? "data/0" : "data/00") + std::to_string(c) + "/";
         create_directory(chunk_path.c_str());
@@ -907,6 +912,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         write_buffer(chunk_path + "ligt_ids.bin", light_ids);
         printf("chunk over\n"); 
     }
+    MPI_Finalize();
+    
     ///write simple mesh
 	if(PreRendering) {
         std::string simple_mesh_path = "data/999/";

@@ -854,19 +854,13 @@ void rodent_worker_secondary_send(int32_t dev, int buffer_size) {
 int32_t rodent_worker_primary_recv(int32_t dev, int32_t rays_size, bool isFirst, int32_t thread_id, bool thread_wait) {
     int size_new = 0;
     if(dev == -1){
-        printf("worker_recv_rays\n");
         float* array = interface->cpu_primary.data();
-        printf("before recv\n");
         size_new = worker_recv_rays(&array, rays_size, true, thread_id, thread_wait); 
-        printf("recv %d\n", size_new);
     } else {
         float* array = interface->host_primary.data();
-        printf("worker_recv_rays\n");
         size_new = worker_recv_rays(&array, rays_size, true, thread_id, thread_wait);
-        printf("after recv size new %d\n", size_new);
         if(size_new > 0)
             isFirst ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
-        printf("load new %d\n", size_new);
     }
     return size_new;
 }
@@ -874,15 +868,11 @@ int32_t rodent_worker_primary_recv(int32_t dev, int32_t rays_size, bool isFirst,
 int32_t rodent_worker_secondary_recv(int32_t dev, int32_t rays_size, bool isFirst, int32_t thread_id, bool thread_wait) {
     int size_new = 0;
     if(dev == -1){
-        printf("worker_recv_rays\n");
         float* array = interface->cpu_secondary.data();
-        printf("before recv\n");
         size_new = worker_recv_rays(&array, rays_size, false, thread_id, thread_wait); 
-        printf("recv %d\n", size_new);
     } else {
         float* array = interface->host_secondary.data();
         size_new = worker_recv_rays(&array, rays_size, false, thread_id, thread_wait);
-        printf("after secondary recv %d \n", size_new);
         if(size_new > 0) {
             isFirst ? interface->load_first_secondary(dev) : interface->load_second_secondary(dev);
         }

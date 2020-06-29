@@ -1,48 +1,59 @@
+fn @cpu_get_tile( width: i32
+                , height: i32
+                , thread: i32
+                ) -> (i32, i32) {
+    let (w, h) = match thread {
+        1  => (width, height), 
+        2  => (width / 2, height),
+        4  => (width / 2, height / 2),
+        8  => (width / 4, height / 2),
+        16 => (width / 4, height / 4),
+        24 => (width / 4, height / 6),
+        _  => (width / 4, height / 8)
+    };
+    (w, h)  
+}
+
 // Trace function ------------------------------------------------------------------
 fn @cpu_parallel_tiles( image: Tile 
-                      , tile_width: i32
-                      , tile_height: i32
-                      , multiproc: bool
+                      , tile_size: i32
+                      , fixed_tile: bool 
                       , body: fn (i32, i32, i32, i32, i32, i32) -> ()) -> () {  
     
     let width  = image.xmax - image.xmin;
     let height = image.ymax - image.ymin;
+    let num_cores = rodent_cpu_get_thread_num(); 
+    print_string("num_cores");
+    print_i32(num_cores);
+    let (tile_width, tile_height) = match fixed_tile {
+        true => (tile_size, tile_size), 
+        _ => cpu_get_tile(width, height, num_cores)
+    };
+    
+   //  let spp_thread = image.spp / num_cores as i32;
+   //  for i in parallel(num_cores, 0, num_cores) {
+   //      @@body(image.xmin, image.ymin, image.xmax, image.ymax, spp_thread, i)
+   //  }
     let num_tiles_x = round_up(width as i32, tile_width)  / tile_width;
     let num_tiles_y = round_up(height as i32, tile_height) / tile_height;
     let num_tiles = num_tiles_x * num_tiles_y;
     let tiles_div = make_fast_div(num_tiles_x as u32);
-    let num_cores  = 1; //rodent_cpu_get_thread_num(); 
-    
-    print_string("num_cores");
-    print_i32(num_cores);
-    if multiproc {
-        let spp_thread = image.spp / num_cores as i32;
-        for i in parallel(num_cores, 0, num_cores) {
-            @@body(image.xmin, image.ymin, image.xmax, image.ymax, spp_thread, i)
-        }
-//        for i in parallel(num_cores, 0, num_tiles) {
-//            print_string("rodent thread");
-//            print_i32(i);
-//            print_string("\n");
-//            let y = fast_div(tiles_div, i as u32) as i32;
-//            let x = i - num_tiles_x * y;
-//            let xmin = x * tile_width;
-//            let ymin = y * tile_height;
-//            let xmax = cpu_intrinsics.min(xmin + tile_width,  width);
-//            let ymax = cpu_intrinsics.min(ymin + tile_height, height);
-//            @@body(xmin, ymin, xmax, ymax, i)
-//        }
-
-    } else {
-        for i in parallel(num_cores, 0, num_tiles) {
-            let y = fast_div(tiles_div, i as u32) as i32;
-            let x = i - num_tiles_x * y;
-            let xmin = x * tile_width;
-            let ymin = y * tile_height;
-            let xmax = cpu_intrinsics.min(xmin + tile_width,  width);
-            let ymax = cpu_intrinsics.min(ymin + tile_height, height);
-            @@body(xmin, ymin, xmax, ymax, image.spp, i)
-        }
+    for i in parallel(num_cores, 0, num_cores) {
+        let y = fast_div(tiles_div, i as u32) as i32;
+        let x = i - num_tiles_x * y;
+        let xmin = x * tile_width;
+        let ymin = y * tile_height;
+        let xmax = cpu_intrinsics.min(xmin + tile_width,  width);
+        let ymax = cpu_intrinsics.min(ymin + tile_height, height);
+        print_i32(xmin);
+        print_string(" ");
+        print_i32(xmax); 
+        print_string(" ");
+        print_i32(ymin);
+        print_string(" ");
+        print_i32(ymax); 
+        print_string("\n");
+        @@body(xmin, ymin, xmax, ymax, image.spp, i)
     }
 }
 
@@ -441,7 +452,7 @@ fn @cpu_trace( scene: Scene
 //    let mut total_counter   = 0i64;
 //
 //    print_string("start rendering\n");
-//    for xmin, ymin, xmax, ymax, spp, tid in cpu_parallel_tiles(scene.camera.tile, tile_size, tile_size, true) {
+//    for xmin, ymin, xmax, ymax, spp, tid in cpu_parallel_tiles(scene.camera.tile, tile_size, true) {
 //        with cpu_profile(&mut total_counter) {
 //            // Get ray streams/states from the CPU driver
 //            let capacity = spp * tile_size * tile_size;
@@ -705,22 +716,10 @@ fn @check_primary_grid_id(primary: PrimaryStream, chunk: i32, pos: i32) -> () {
 //    }
 }
 
-fn @cpu_get_tile( width: i32
-                , height: i32
-                , thread: i32
-                ) -> (i32, i32) {
-    if thread == 1 {(width, height)} 
-    else if thread == 2 {(width / 2, height)}
-    else if thread == 4 {(width / 2, height / 2)} 
-    else if thread == 8 {(width / 4, height / 4)}
-    else {(width / 4, height / 4)}
-}
-
 fn @cpu_dis_trace( scene: Scene
                  , path_tracer: PathTracer
                  , min_max: MinMax
                  , single: bool
-                 , tile_size: i32
                  , Spp: i32
                  , vector_width: i32
                  , use_embree: bool
@@ -744,7 +743,7 @@ fn @cpu_dis_trace( scene: Scene
     let valid_camera = scene.camera.valid; 
     print_string("start rendering\n");   
     print_i32(valid_camera as i32);
-    for xmin, ymin, xmax, ymax, spp_thread, tid in cpu_parallel_tiles(scene.camera.tile, tile_size, tile_size, true) {
+    for xmin, ymin, xmax, ymax, spp_thread, tid in cpu_parallel_tiles(scene.camera.tile, 0, false) {
         with cpu_profile(&mut total_counter) {
             // Get ray streams/states from the CPU driver
             let mut primary   : PrimaryStream;
@@ -973,7 +972,7 @@ fn @cpu_ray_batching(camera: Camera
 //    
 //    print_string("ray queuing\n");   
 //    let iter = 0;
-//    for xmin, ymin, xmax, ymax, tid in cpu_parallel_tiles(image_region, tile_width, tile_height, true) {
+//    for xmin, ymin, xmax, ymax, tid in cpu_parallel_tiles(image_region, tile_size, true) {
 //        let mut primary   : PrimaryStream;
 //        let capacity = spp * tile_width * tile_height;
 //        rodent_cpu_get_primary_stream(&mut primary,     capacity);
@@ -1024,7 +1023,7 @@ fn @make_cpu_device(  use_embree: bool
                 cpu_trace(scene, path_tracer, min_max, single, tile_size, 
                      spp, vector_width, use_embree, vector_compact)
             } else {
-                cpu_dis_trace(scene, path_tracer, min_max, single, tile_size, 
+                cpu_dis_trace(scene, path_tracer, min_max, single, 
                      spp, vector_width, use_embree, vector_compact)
             }
         },

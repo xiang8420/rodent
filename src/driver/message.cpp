@@ -112,16 +112,22 @@ RayMsg::RayMsg(RayList* outList, int src, int dst, int chunk, bool idle) {
     outList->clear();
 }
 
-CollectiveMsg::CollectiveMsg(int src) {
+QuitMsg::QuitMsg(int src) {
     printf("construct message collective\n");
     header = new MessageHeader(src, -1, 0, true, 0, true, -1);
     printf("new Message root %d collective %d\n", header->broadcast_root, header->collective);
     destination = -1;
 }
 
-StatusMsg::StatusMsg(int src) {
+StatusMsg::StatusMsg(int src, int* status, int proc_size) {
     printf("construct message status\n");
     header = new MessageHeader(src, -1, 0, false, 0, true, -1);
+   
+    int status_length = proc_size * proc_size * sizeof(int);
+    content.resize(status_length);
+    memcpy(content.data(), status, status_length);
+    header->content_size = status_length;
+    
     printf("new Message root %d collective %d\n", header->broadcast_root, header->collective);
     destination = -1;
 }

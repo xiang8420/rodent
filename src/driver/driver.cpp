@@ -29,9 +29,12 @@ void clear_pixels();
 void cleanup_interface();
 float* get_first_primary();
 void setup_master(struct Communicator *, struct ProcStatus *);
+void cleanup_master();
 void master_run();
+
 void setup_worker(struct Communicator *, struct ProcStatus *, bool);
-void worker_run(float*, int);
+void cleanup_worker();
+void worker_run(float*);
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
@@ -148,20 +151,19 @@ int main(int argc, char** argv) {
     setup_interface(width, height);
     auto film = get_pixels();
     auto spp = get_spp();
-    auto dev_num = get_dev_num();
     uint64_t timing = 0;
     uint32_t frames = 0;
     uint32_t iter = 0;
     
     // mpi
     struct Communicator comm;
-    bool   use_master = false;
+    bool   use_master = comm.size % 2;
     printf("comm size %d\n", comm.size); 
     int    worker_size = use_master ? comm.size - 1: comm.size;
     int    master_id = worker_size; 
     int    rank = comm.rank;
-    ProcStatus rs(eye, dir, up, fov, width, height, spp, rank, worker_size, 
-            imageDecompose, get_chunk_num(), false/*ray queuing*/, comm.size, 1/*thread_num*/);
+    ProcStatus rs(eye, dir, up, fov, width, height, spp, rank, comm.size, 
+            imageDecompose, get_chunk_num(), false/*ray queuing*/, get_dev_num(),  use_master);
     printf("after construct rendersettings \n "); 
     if(rank == master_id) {
         setup_master(&comm, &rs);
@@ -192,17 +194,17 @@ int main(int argc, char** argv) {
             printf("start master\n");
             master_run();
         } else {
-            worker_run(processTime, dev_num);
+            worker_run(processTime);
         }
         printf("end init\n");
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
         film = get_pixels();
         if(rank != master_id) {
-            printf("before reduce\n");
+            printf("%d before reduce\n", rank);
             comm.reduce_image(film, reduce_buffer, pixel_num, use_master);
         }
-        printf("end reduce\n");
+        printf("%d end reduce\n", rank);
 
         printf("process %d time %f", rank, float(elapsed_ms));
         
@@ -223,6 +225,11 @@ int main(int argc, char** argv) {
          "/", samples_sec[samples_sec.size() / 2] * inv,
          "/", samples_sec.back() * inv,
          " (min/med/max Msamples/s)");
-    printf("end\n");  
+    printf("%d end\n", rank);  
+    if(rank == master_id) 
+        cleanup_master();
+    else 
+        cleanup_worker();
+    
     return 0;
 }

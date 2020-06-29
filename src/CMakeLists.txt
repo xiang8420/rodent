@@ -42,7 +42,8 @@ set(RODENT_SRCS
     traversal/intersection.impala
     traversal/stack.impala
     traversal/mapping_cpu.impala
-    traversal/mapping_gpu.impala)
+    traversal/mapping_gpu.impala
+)
 
 set(DRIVER_SRCS
     driver/communicator.cpp
@@ -64,7 +65,7 @@ set(DRIVER_SRCS
     driver/multiproc.cpp
     driver/raylist.cpp
     driver/message.cpp
-    driver/messageQ.cpp)
+)
 
 set(CONVERTER_SRCS
     driver/converter.cpp
@@ -104,7 +105,7 @@ find_package(LZ4 REQUIRED)
 
 add_executable(converter ${CONVERTER_SRCS})
 target_include_directories(converter PUBLIC ${LZ4_INCLUDE_DIR})
-target_link_libraries(converter ${LZ4_LIBRARY})
+target_link_libraries(converter ${LZ4_LIBRARY} ${MPI_LIBRARIES} )
 target_compile_definitions(converter PUBLIC -DCPUINFO_PATH="${CPUINFO_PATH}")
 target_compile_features(converter PRIVATE cxx_std_14)
 if (COLORIZE)

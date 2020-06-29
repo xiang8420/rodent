@@ -16,9 +16,11 @@ int32_t * get_prerender_result();
 Master::Master(struct Communicator *comm, struct ProcStatus *rs)
     :comm(comm), rs(rs)
 {
+    int chunk_size = rs->get_chunk_size();
     worker_size    = comm->size - 1;
     comm_count     = 0;
     raylists       = new RayList *[chunk_size];
+    comm->os<< "master chunk size"<<chunk_size<<"\n";
     mpi_worker_wait = new bool[worker_size];
     for(int i = 0; i < worker_size; i++) {
         mpi_worker_wait[i] = false;
@@ -39,6 +41,7 @@ Master::Master(struct Communicator *comm, struct ProcStatus *rs)
 }
 
 Master::~Master(){
+    int chunk_size = rs->get_chunk_size();
     for(int i = 0; i < chunk_size; i++){
         delete raylists[i];
     }
@@ -51,11 +54,12 @@ int Master::get_dst_worker_id(){
 }
 
 int Master::get_max_rays_chunk(bool unloaded) {
+    int chunk_size = rs->get_chunk_size();
     int max_ray = 0, id_max = 0;
-    printf("get max rays:");
+    comm->os<<"get max rays:";
     for(int i = 0; i < chunk_size; i++) {
         int ray_size = raylists[i]->size(); 
-        printf("|%d ", ray_size);
+        comm->os<<"| "<<ray_size;
         if(ray_size > max_ray) {
             if(unloaded) {
                 int j;
@@ -75,7 +79,7 @@ int Master::get_max_rays_chunk(bool unloaded) {
             
         }
     }
-    printf("\n");
+    comm->os<<"\n";
     if(max_ray == 0) return -1;
     return id_max;
 }
@@ -92,30 +96,35 @@ bool Master::all_worker_finish() {
 }
 
 void Master::asyn_master() {
-    printf("asyn master\n");
+    comm->os<<"asyn master\n";
+    int chunk_size = rs->get_chunk_size();
     int msg[MSG_SIZE];
     int stopped = 0; 
 //        return;
     for(;;) {
         int workerId = get_dst_worker_id();
         int workerChunk = worker_local_chunks[workerId][0]; 
-        printf("master %d %d\n", workerId, workerChunk);
+        comm->os<<"master "<<workerId<<" "<<workerChunk<<"\n"; 
         comm->recv_msg(workerId, &msg[0]);
-            printf("master recv msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
+        comm->os<<"master recv msg"<< msg[0]<<" "<< msg[1]<<" "<<msg[2]<<" "<<msg[3]<<" "<<msg[4]<<"\n";
         mpi_worker_wait[workerId] = (msg[0] == -1);
        
         // scene chunk schedule
         if(mpi_worker_wait[workerId] && raylists[workerChunk]->empty()) {
-            printf("has queues ");
+            comm->os<<"has queues ";
             for(int i = 0; i < chunk_size;i++) {
-                printf("%d %d %d|", i, raylists[i]->primary->size, raylists[i]->secondary->size);
+                comm->os<<i<<"| "<<raylists[i]->primary->size<<" "<<raylists[i]->secondary->size;
             }
-            printf("\n");
+            comm->os<<"\n";
             if(!all_queue_empty()) {
                 int tmp = workerChunk;
                 workerChunk = get_max_rays_chunk(true);
                 if(workerChunk != -1) {
                     msg[0] = workerChunk; 
+                    msg[3] = std::min(msg[3], raylists[workerChunk]->primary->size); 
+                    msg[4] = std::min(msg[4], raylists[workerChunk]->secondary->size);
+                    comm->os<<"msg[3]"<<msg[3]<<" raylist primary"<<raylists[workerChunk]->primary->size
+                            <<"msg[4]"<<msg[4]<<"  secondary "    <<raylists[workerChunk]->secondary->size<<"\n";
                     worker_local_chunks[workerId][0] = workerChunk;
                     comm->send_msg(workerId, &msg[0]);
                     
@@ -123,43 +132,46 @@ void Master::asyn_master() {
                     RayList::classification(raylists, buffer->get_primary());
                     comm->recv_rays(workerId, msg[2], buffer->get_secondary());
                     RayList::classification(raylists, buffer->get_secondary());
-                    printf("master send %d need new chunk%d", workerId, workerChunk);
+                    comm->os<<"master send"<<workerId<<"need new chunk"<<workerChunk;
                     mpi_worker_wait[workerId] = false; 
                     continue;     
                 } else {
-                    printf("no chunk need to be loaded, use old chunk \n");
+                    comm->os<<"no chunk need to be loaded, use old chunk \n";
                     workerChunk = tmp; 
                     // Nothing happened, the worker still idle
                 }
             } else if(all_worker_finish()) {
-                printf("send end %d", workerId);
+                comm->os<<"send end"<<workerId;
                 comm->send_end(workerId);
                 stopped ++;
-                printf("master stop %d\n", stopped);
+                comm->os<<"master stop"<<stopped<<"\n";
                 if(stopped == worker_size) {break;}
                 continue;
             } 
         } 
+        comm->os<<"msg[3]"<<msg[3]<<" raylist primary"<<raylists[workerChunk]->primary->size
+                <<"msg[4]"<<msg[4]<<"  secondary "    <<raylists[workerChunk]->secondary->size<<"\n";
+        
         msg[0] = workerChunk;
         msg[3] = std::min(msg[3], raylists[workerChunk]->primary->size); 
         msg[4] = std::min(msg[4], raylists[workerChunk]->secondary->size);
         
         comm->send_msg(workerId, &msg[0]);
-        printf("master send msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
         //if workerId idle send new rays and new scene id 
         comm->recv_rays(workerId, msg[1], buffer->get_primary());
         RayList::classification(raylists, buffer->get_primary());
-        printf("master classify primary\n");
+        comm->os<<"master classify primary\n";
         comm->recv_rays(workerId, msg[2], buffer->get_secondary());
         RayList::classification(raylists, buffer->get_secondary());
         
+        comm->os<<"master send msg"<<msg[0]<<" "<<msg[1]<<" "<<msg[2]<<" "<<msg[3]<<" "<<msg[4];
         comm->send_rays(workerId, msg[3], raylists[workerChunk]->primary);
         comm->send_rays(workerId, msg[4], raylists[workerChunk]->secondary);
         if(msg[3] > 1 || msg[4] > 0) {
             mpi_worker_wait[workerId] = false;
         } 
     }
-    printf("master send all over\n");
+    comm->os<<"master send all over\n";
     for(int i = 0; i < worker_size;i++){
         printf("%d %d \n", i, raylists[i]->primary->get_size());
     }
@@ -192,6 +204,7 @@ void Master::rayQueuing(float * buffer, int size, int capacity) {
 
 void Master::save_ray_batches(float *buffer, size_t size, size_t capacity, size_t thread_id) {
     rayQueuing(buffer, size, capacity);   
+    int chunk_size = rs->get_chunk_size();
     printf("%ld size %ld batch status \n", thread_id, size);
     for(int i = 0; i< chunk_size;i++) {
         printf("%d ", raylists[i]->primary->size); 
@@ -228,6 +241,7 @@ void Master::ray_batching_master(int sppTask, int film_width, int film_height) {
         int workerChunk = worker_local_chunks[workerId][0]; 
         mpi_worker_wait[workerId] = (msg[0] == -1);
         if(workerChunk < 0 || (mpi_worker_wait[workerId] && raylists[workerChunk]->empty())) {
+            int chunk_size = rs->get_chunk_size();
             for(int i = 0; i < chunk_size;i++) {
                 printf("%d %d %d|", i, raylists[i]->primary->size, raylists[i]->secondary->size);
             }
@@ -261,6 +275,7 @@ void Master::ray_batching_master(int sppTask, int film_width, int film_height) {
             } 
         } 
         msg[0] = workerChunk;
+        printf("master before send msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
         msg[3] = std::min(msg[3], raylists[workerChunk]->primary->size); 
         msg[4] = std::min(msg[4], raylists[workerChunk]->secondary->size);
         
@@ -327,8 +342,9 @@ StupidWorker::~StupidWorker(){
 }
 
 void StupidWorker::write_rays_buffer() {
-    printf("buffer %d %d %d %d %d\n", comm->rank, buffer->get_primary()->get_size(), inList->get_primary()->get_size(), 
-                buffer->get_secondary()->get_size(), inList->get_secondary()->get_size());
+    if(inList->empty()) return;
+    comm->os<<"mthread before copy primaryary  "<<inList->get_primary()->size<<"|"<<inList->get_primary()->empty() 
+                     <<" buffer primary: "<<buffer->get_primary()->size<<"|"<< buffer->get_primary()->empty()<<"\n";
     
     if(buffer->get_primary()->empty() && !inList->get_primary()->empty()) {
         struct Rays *rays = buffer->get_primary();
@@ -345,41 +361,45 @@ void StupidWorker::write_rays_buffer() {
 
 int StupidWorker::worker_load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
     struct Rays *queue = primary ? buffer->get_primary() : buffer->get_secondary();
-    printf("thread %d %d read incoming buffer %d\n", thread_id, comm->rank, thread_wait);
+    comm->os <<"rthread "<<thread_id<<"read incoming buffer"<<thread_wait<< "size "<<queue->size<<"\n";
     int width = primary ? 21 : 14;
     std::unique_lock <std::mutex> inList_lock(inList->mutex); 
     
     rs->set_thread_idle(thread_id, thread_wait);
-    printf("%d %d %d %d\n", rs->is_thread_idle(thread_id), !current_chunk_empty, width, queue->size);
+    comm->os <<"rthread idle "<< rs->is_thread_idle(thread_id) 
+             <<" width "<<width
+             <<" queue->size"<< queue->size
+             <<" exit"<<rs->Exit() 
+             <<" buffersize"<<buffer->size()
+             <<" thread wait"<<thread_wait
+             <<std::endl;
     while (thread_wait && buffer->empty() && !current_chunk_empty) {
-        printf("wait for incoming lock %d %d\n",rs->is_thread_idle(thread_id), current_chunk_empty );
+        comm->os<<"rthread wait for incoming lock"<<rs->is_thread_idle(thread_id)<<"\n";
         buffer_not_empty.wait(inList_lock);
-//        printf("%d %dafter get in come stop recv %d %d %d %d\n", comm->rank, thread_id, current_chunk_empty, rs->get(thread_id), thread_wait, incoming_empty());
+        comm->os<<"rthread get not empty condition" <<thread_wait<<" "<<buffer->empty()<<rs->Exit()<<"\n";
     }
     if(!queue->empty() && rays_size < buffer_size) {
-        printf("%d queue size0 %d %d\n", comm->rank, queue->size, primary);
         rs->set_thread_idle(thread_id, false);
         int copy_size;
         if(rays_size == 0) {
             copy_size = queue->size; 
             queue->size = 0;
             memcpy(*rays, queue->data, buffer_capacity * width * sizeof(float)); 
-            printf("%d queue size %d %d %d\n", comm->rank, queue->size, primary, queue->store_width);
         } else {
             copy_size = std::min(queue->size , buffer_size - (int)rays_size); 
             queue->size = queue->size - copy_size;
             int src = queue->size; 
             int dst = rays_size;
             for(int i = 0; i < width; i++) {
-                memcpy( &rays[dst + i * buffer_capacity], &queue->data[src + i * buffer_capacity], copy_size * sizeof(float));
+               memcpy( &rays[dst + i * buffer_capacity], &queue->data[src + i * buffer_capacity], copy_size * sizeof(float));
             }
         }
         int* ids = (int*)(*rays);
-        printf("%d ray to render size %ld width %d copy size %d \n", comm->rank, rays_size, width, copy_size);
+        comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
         for(int i = 0; i < 10; i ++) {
-            printf("| %d %d %d*", ids[i + rays_size], ids[i + rays_size + 1048608 * 9], ids[i + rays_size + 1048608 * 15]);
+            comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + 1048608 * 9];
         }
-        printf("\n");
+        comm->os<<"\n";
         return copy_size + rays_size;
     }
         
@@ -414,18 +434,19 @@ void StupidWorker::mpi_thread() {
     msg[4] = buffer_size - inList -> get_secondary() -> size;
     // worker send information to master
     comm->send_msg(master, &msg[0]);
-    printf("%d worker chunk %d send wait%d all wait%d all empty %d msg %d %d %d %d %d %d %d\n", comm->rank, local_chunks[0], 
-            rs->is_thread_idle(0), rs->all_thread_waiting(), all_queue_empty(), msg[0], msg[1], msg[2], inList->get_primary()->size, 
-            inList->get_secondary()->size, buffer->get_primary()->size, buffer->get_secondary()->size);
+    comm->os<<"worker chunk"<<local_chunks[0]<<"thread idle"<<rs->is_thread_idle(0)<<"all t wait"<<rs->all_thread_waiting()<<" "
+           << "queue empty"<<all_queue_empty()<<" msg "<<msg[0]<<" "<<msg[1]<<" "<<msg[2]<<"inlist primaryi "<<inList->get_primary()->size 
+           << " secondary "<<inList->get_secondary()->size<<"buffer primary "<< buffer->get_primary()->size<<"secondary"<<buffer->get_secondary()->size;
     comm->recv_msg(master, &msg[0]);
     // finish or need new chunk
     if(msg[0] != local_chunks[0] ) {
         local_chunks[0] = msg[0];
         current_chunk_empty = true;
-        printf("recv stop\n");
+        comm->os<<"recv stop\n";
         buffer_not_empty.notify_all();
         return;
     }
+    comm->os<<comm->rank<<"recv msg"<<msg[0]<<" "<< msg[1]<<" "<<msg[2]<<" "<<msg[3];
     comm->send_rays(master, msg[1], outList->get_primary());
     comm->send_rays(master, msg[2], outList->get_secondary());
     outList->unlock();
@@ -466,9 +487,10 @@ void StupidWorker::work_thread(struct ProcStatus *rs, int region[4], int sppTask
     render(&settings, iter + dev, dev, chunk, camera_ray);
 }
 
-void StupidWorker::run(float* frame_time, int deviceNum) {
+void StupidWorker::run(float* frame_time) {
     
     //multi thread
+    int deviceNum = rs->get_dev_num();
     int region[4];
     int spp = rs->spp; 
     int sppProc = rs->get_tile_info(&region[0], frame_time); 
@@ -522,9 +544,6 @@ void SmartWorker::set_distributed_buffer() {
     inList  = List[rs->get_loaded_chunk()];
     buffer  = new RayList(buffer_capacity, "buffer");
 
-    inMsgQ = new MessageQ("in");
-    outMsgQ = new MessageQ("out");
-
     rs->set_chunks();
 }
 
@@ -534,7 +553,6 @@ SmartWorker::SmartWorker(struct Communicator *comm, struct ProcStatus *rs)
     int chunk_size = rs->get_chunk_size();
     statistic = new int[chunk_size * 4/*dep*/ * 2]; 
     std::fill(statistic, statistic + chunk_size * 4/*dep*/ * 2, 0);
-
 }
 
 SmartWorker::~SmartWorker() {
@@ -545,9 +563,11 @@ SmartWorker::~SmartWorker() {
 }
 
 void SmartWorker::write_rays_buffer() {
-    comm->os<<"mthread write ray buffer\n";
+    comm->os<<"mthread write ray buffer"<<inList->empty()<<"\n";
     if(inList->empty()) return;
+    comm->os<<"mthread inlist not empty\n";
     inList->lock();
+    comm->os<<"mthread get inlist lock\n";
     if(buffer->get_primary()->empty() && !inList->get_primary()->empty()) {
         comm->os<<"mthread before copy primaryary  "<<inList->get_primary()->size<<"|"<<inList->get_primary()->empty() 
                          <<" buffer primary: "<<buffer->get_primary()->size<<"|"<< buffer->get_primary()->empty()<<"\n";
@@ -567,6 +587,7 @@ void SmartWorker::write_rays_buffer() {
     }
     buffer_not_empty.notify_one();
     inList->unlock();
+    comm->os<<"mthread release inlist lock\n";
 }
 
 int SmartWorker::worker_load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
@@ -680,14 +701,16 @@ bool SmartWorker::check_rendering_status() {
         if(all_queue_empty()) {
             comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
             rs->set_self_idle();
-            if(rs->all_proc_idle()){
+            if(rs->all_proc_idle() && rs->all_rays_received()) {
                 //if all worker end synchronous 
                 comm->os<<"mthread all proc idle send collective\n";
-                CollectiveMsg coll_msg(comm->rank); 
+                QuitMsg coll_msg(comm->rank); 
                 comm->send_message(&coll_msg, rs);
+                rs->set_exit();
+                buffer_not_empty.notify_all();
             } else {
                 comm->os<<"mthread proc idle send status\n";
-                StatusMsg status(comm->rank); 
+                StatusMsg status(comm->rank, rs->get_status(), comm->size); 
                 comm->send_message(&status, rs);
             }
             return true; 
@@ -701,6 +724,7 @@ bool SmartWorker::check_rendering_status() {
             return true; 
         }
     } else {
+        comm->os<<"mthread proc busy\n";
         rs->set_proc_busy(comm->rank);
         return false;
     }
@@ -729,6 +753,8 @@ void SmartWorker::message_thread(void* tmp) {
         if(rs->Exit()) break;
 
         int cId = get_sent_list(wk->outList, rs->get_chunk_size());
+        comm->os<<"mthread get send list"<<cId<<"\n";
+        
         if(cId >= 0) {
             wk->out_mutex.lock();
             comm->os<<"mthread new RayMsg"<<cId<<"\n";
@@ -738,6 +764,7 @@ void SmartWorker::message_thread(void* tmp) {
             comm->send_message(ray_msg, rs);
         }
         comm->purge_completed_mpi_buffers();
+        comm->os<<"mthread single loop end \n";
 	}
     comm->os<<"end message thread"<<rs->all_thread_waiting()<<"\n";
     wk->buffer_not_empty.notify_all();
@@ -767,7 +794,8 @@ void SmartWorker::count_rays() {
         printf("\n");
     }
 }
-void SmartWorker::run(float* frame_time, int deviceNum) {
+void SmartWorker::run(float* frame_time) {
+    int deviceNum = rs->get_dev_num();
     bool PreRendering = false;
     if(PreRendering && comm->rank == 0) {
         work_thread(this, frame_time, 0, 1, true);
@@ -814,6 +842,14 @@ void master_run() {
     master->run();
 }
 
+void cleanup_master(){
+    master.reset();
+}
+
+void cleanup_worker() {
+    worker.reset();
+}
+
 void setup_worker(struct Communicator *comm, struct ProcStatus *rs, bool with_master) {
     if(with_master) {
         worker.reset(new StupidWorker(comm, rs));
@@ -822,8 +858,8 @@ void setup_worker(struct Communicator *comm, struct ProcStatus *rs, bool with_ma
     }
 }
 
-void worker_run(float* processTime, int dev_num) {
-    worker->run(processTime, dev_num);
+void worker_run(float* processTime) {
+    worker->run(processTime);
 }
 
 void worker_send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){

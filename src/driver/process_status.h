@@ -1,23 +1,26 @@
 #pragma once
 #include "decomposition.h"
 #include <iostream>
+#include <thread>
 #ifndef PI 
 #define PI 3.14159265359f
 #endif
 
 class ProcStatus {
 private:
-    int mpi_rank, mpi_size;
+    int proc_size, proc_rank;
+    int dev_num;
     int chunk_size;
-    int proc_num, thread_num;
+    int cpu_thread_num;
     int loaded_local_chunk_id;
     std::vector<bool> thread_idle;
     std::vector<bool> proc_idle;
     std::vector<int>  local_chunk;
     std::vector<int>  chunk_map;
-    bool exit;
-    int sent_rays, recv_rays;
-
+    
+    std::vector<int> global_rays;
+    
+    bool master, exit;
 public:    
     float3 eye;
     float3 dir;
@@ -36,42 +39,46 @@ public:
     
     void set_chunks(){
         //get chunk infomation from file
-        if(chunk_size > mpi_size) {
-            printf("error, chunk_size > mpi_size %d %d", chunk_size, mpi_size);
+        if(chunk_size > proc_size) {
+            printf("error, chunk_size > proc_size %d %d", chunk_size, proc_size);
             return;
         }
         for(int i = 0; i < chunk_size; i++) {
             chunk_map.emplace_back(i);
         }
-        local_chunk.emplace_back(mpi_rank);
+        local_chunk.emplace_back(proc_rank);
         loaded_local_chunk_id = 0;
     }
   
     void thread_reset() {
-        thread_idle.resize(thread_num);
-        for(int i = 0; i < thread_num; i++) 
+        cpu_thread_num = std::thread::hardware_concurrency() - dev_num + 1;
+        printf("\ncpu thread num %d\n", cpu_thread_num);
+        thread_idle.resize(cpu_thread_num);
+        for(int i = 0; i < cpu_thread_num; i++) 
             thread_idle[i] = false;
     }
     
     void proc_reset() {
-        proc_idle.resize(proc_num);
-        for(int i = 0; i < proc_num; i++) 
+        proc_idle.resize(proc_size);
+        for(int i = 0; i < proc_size; i++) 
             proc_idle[i] = false;
-        printf("proc reset %d proc idle %d %d\n", proc_num, proc_idle[0], proc_idle[1]);
+        printf("proc reset %d proc idle %d %d\n", proc_size, proc_idle[0], proc_idle[1]);
         std::cout<< proc_idle[0] << proc_idle[1] <<std::endl;
     }
   
-    void set_self_idle(){proc_idle[mpi_rank] = true;} 
+    void set_self_idle(){proc_idle[proc_rank] = true;} 
     
-    void set_self_busy(){proc_idle[mpi_rank] = false;}
+    void set_self_busy(){proc_idle[proc_rank] = false;}
 
     void set_proc_busy(int i){proc_idle[i] = false;}
     
     void set_proc_idle(int i){proc_idle[i] = true; }
     
+    int get_dev_num() {return dev_num;}
+
     bool all_proc_idle(){
 //        proc_wait[comm->rank] = proc_idle;
-        for(int i = 0; i < proc_num; i++){
+        for(int i = 0; i < proc_size; i++){
             if(!proc_idle[i]) 
                 return false;
         } 
@@ -97,20 +104,56 @@ public:
     
     bool isRayQueuing() { return rayQ; }
     
-    int get_mpi_rank() {return mpi_rank;}
-    int get_mpi_size() {return mpi_size;}
+    int get_rank() {return proc_rank;}
     
-    int get_sent_ray_count(){return sent_rays;}
-    void accumulate_sent(int n){ sent_rays += n;}
+    int get_size() {return proc_size;}
     
-    int get_recv_ray_count(){return recv_rays;}
-    void accumulate_recv(int n){ recv_rays += n;}
-   
+//    int get_sent_ray_count(int n){ return sent_rays; }
+
+//    int get_recv_ray_count(int n) { return recv_rays; }
+    
+    void accumulate_sent(int n) { global_rays[proc_rank] += n; }
+    
+    void accumulate_recv(int n) { global_rays[proc_rank + proc_size] += n;}
+ 
+    int* get_status() {return global_rays.data();}
+
+    bool all_rays_received() {
+        int sent = 0, recv = 0;
+        for(int i = 0; i < proc_size; i++) {
+            sent += global_rays[i];
+            recv += global_rays[i + proc_size];
+        }
+        printf("check %d %d\n", sent, recv);
+        if (sent * 0.99 <= recv )
+            return true;
+        else 
+            return false;
+    }
+
+    bool updata_global_rays(int* a) {
+        int sent = 0, recv = 0;
+        for(int i = 0; i < proc_size; i++) {
+            global_rays[i] = std::max(global_rays[i], a[i]);
+            global_rays[i + proc_size] = std::max(global_rays[i + proc_size], a[i + proc_size]);
+            sent += global_rays[i];
+            recv += global_rays[i + proc_size];
+        }
+        printf("updata %d %d\n", sent, recv);
+        if (sent * 0.99 <= recv )
+            return true;
+        else 
+            return false;
+        return true;
+    }
+
+
     bool set_exit() {return exit = true;}
+    
     bool Exit() {return exit;}
 
     bool all_thread_waiting() {
-        for(int i = 0; i < thread_num; i++) {
+        for(int i = 0; i < cpu_thread_num; i++) {
             if(!thread_idle[i]) 
                 return false;
         }
@@ -118,9 +161,9 @@ public:
     }
 
     ProcStatus(const float3& e, const float3& d, const float3& u, float fov, int width, int height,
-            int spp, int mRank, int mSize, bool image, int cSize, bool rayQ, int pn, int tn) 
-        : spp(spp), width(width), height(height), image_decompose(image), rayQ(rayQ), mpi_rank(mRank), 
-          mpi_size(mSize), chunk_size(cSize), proc_num(pn), thread_num(tn) 
+            int spp, int rank, int size, bool image, int cSize, bool rayQ, int dev, bool master) 
+        : spp(spp), width(width), height(height), image_decompose(image), rayQ(rayQ), proc_rank(rank), 
+          chunk_size(cSize), dev_num(dev), master(master) 
     {
         
         float ratio = (float) width / (float)height;
@@ -131,9 +174,10 @@ public:
 
         w = std::tan(fov * PI / 360.0f);
         h = w / ratio;
-
+        
+        proc_size = master ? size - 1 : size;
         printf("before tile scheduler\n");
-        tileScheduler  = new TileScheduler(width, height, mpi_rank, mpi_size);
+        tileScheduler  = new TileScheduler(width, height, proc_rank, proc_size);
         printf("after tile scheduler\n");
         thread_reset(); 
         proc_reset();
@@ -144,11 +188,10 @@ public:
         for(int i = 0; i < chunk_size; i++) {
             chunk_map.emplace_back(i);
         }
-        local_chunk.emplace_back(mpi_rank);
+        local_chunk.emplace_back(proc_rank);
         loaded_local_chunk_id = 0;
         
-        sent_rays = 0;
-        recv_rays = 0;
+        global_rays.resize(proc_size * proc_size);
     }
 
     void camera_rotate(float yaw, float pitch) {

@@ -1,5 +1,5 @@
 #include "mpi.h"
-#include "messageQ.h"
+#include "message.h"
 #include "process_status.h"
 #include <fstream>
 #define MSG_SIZE 5
