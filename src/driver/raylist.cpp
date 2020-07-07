@@ -46,8 +46,8 @@ void Rays::read_dev_rays(float *rays, int src, int num, int rays_capacity) {
     size += num;
 }
 
-int Rays::write_dev_rays(float *rays, int num, size_t rays_capacity) {
-    int copy_size = std::min(size, num); 
+int Rays::write_dev_rays(float *rays, int buffer_size, size_t rays_capacity) {
+    int copy_size = std::min(size, buffer_size); 
     size -= copy_size;
     int src = size; 
     for(int i = 0, k = 0; i < logic_width; i++) {

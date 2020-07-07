@@ -25,12 +25,14 @@ struct Communicator {
     bool first;
     bool pause, quit;
     std::ofstream os;
-    
-    const int message_capacity = 1048608 * 21 * 4;
+   
+    int send_ray_count, recv_ray_count;
+    int send_msg_count, recv_msg_count;
+        
+
     std::mutex mutex;
     std::condition_variable cond; // primary, secondary buffer size < max
 
-    std::vector<char> compress_buffer;
     std::vector<mpi_send_buffer*> mpi_in_flight;
 
     Communicator();

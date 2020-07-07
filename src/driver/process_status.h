@@ -19,7 +19,8 @@ private:
     std::vector<int>  chunk_map;
     
     std::vector<int> global_rays;
-    
+   
+    int buffer_size, buffer_capacity; 
     bool master, exit;
 public:    
     float3 eye;
@@ -62,8 +63,8 @@ public:
         proc_idle.resize(proc_size);
         for(int i = 0; i < proc_size; i++) 
             proc_idle[i] = false;
-        printf("proc reset %d proc idle %d %d\n", proc_size, proc_idle[0], proc_idle[1]);
-        std::cout<< proc_idle[0] << proc_idle[1] <<std::endl;
+        printf("proc reset %d proc idle", proc_size);
+    //    std::cout<< proc_idle[0] <<"  "<< proc_idle[1] <<std::endl;
     }
   
     void set_self_idle(){proc_idle[proc_rank] = true;} 
@@ -107,7 +108,13 @@ public:
     int get_rank() {return proc_rank;}
     
     int get_size() {return proc_size;}
+
+    int get_buffer_capacity(){return buffer_capacity;}
+
+    void set_buffer_capacity(int n){buffer_capacity = n;}
     
+    int get_buffer_size(){return buffer_size;}
+
 //    int get_sent_ray_count(int n){ return sent_rays; }
 
 //    int get_recv_ray_count(int n) { return recv_rays; }
@@ -190,6 +197,9 @@ public:
         }
         local_chunk.emplace_back(proc_rank);
         loaded_local_chunk_id = 0;
+        
+        buffer_size = 1048576;
+        buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         
         global_rays.resize(proc_size * proc_size);
     }

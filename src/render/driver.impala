@@ -32,6 +32,7 @@ extern "C" {
     fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
 
+    fn rodent_worker_buffer_size() ->i32;
     fn rodent_cpu_get_thread_num() -> i32; 
     fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
     fn rodent_worker_primary_send(i32, i32) -> ();    

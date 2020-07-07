@@ -19,6 +19,7 @@
 void worker_send_rays(float *, size_t, size_t, bool);
 int  worker_recv_rays(float **, size_t, bool, int, bool);
 void master_save_ray_batches(float*, size_t, size_t, size_t);
+int32_t worker_buffer_size(); 
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -826,7 +827,12 @@ int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, 
     return size_new;
 }
 
-//worker 
+//worker
+
+int32_t rodent_worker_buffer_size() {
+    return worker_buffer_size(); 
+}
+
 void rodent_worker_primary_send(int32_t dev, int buffer_size) {
     if(dev == -1) {
         auto& array = interface->cpu_primary_outcome;

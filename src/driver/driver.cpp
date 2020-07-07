@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
     
     // mpi
     struct Communicator comm;
-    bool   use_master = comm.size % 2;
+    bool   use_master = (comm.size > 1 && comm.size % 2 == 1);
     printf("comm size %d\n", comm.size); 
     int    worker_size = use_master ? comm.size - 1: comm.size;
     int    master_id = worker_size; 

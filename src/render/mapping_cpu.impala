@@ -455,7 +455,7 @@ fn @cpu_trace( scene: Scene
 //    for xmin, ymin, xmax, ymax, spp, tid in cpu_parallel_tiles(scene.camera.tile, tile_size, true) {
 //        with cpu_profile(&mut total_counter) {
 //            // Get ray streams/states from the CPU driver
-//            let capacity = spp * tile_size * tile_size;
+//              let capacity =rodent_worker_buffer_size(); 
 //            
 //            let mut primary    : PrimaryStream;
 //            let mut secondary  : SecondaryStream;
@@ -750,7 +750,7 @@ fn @cpu_dis_trace( scene: Scene
             let mut out_primary   : PrimaryStream;
             let mut secondary : SecondaryStream;
             let mut out_secondary   : SecondaryStream;
-            let capacity = 1024 * 1024;
+            let capacity = rodent_worker_buffer_size();
             rodent_cpu_get_primary_stream(&mut primary,     capacity);
             rodent_cpu_get_primary_outcome_stream(&mut out_primary,     capacity);
             rodent_cpu_get_secondary_stream(&mut secondary, capacity);

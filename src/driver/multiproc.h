@@ -14,18 +14,17 @@
 
 struct Master {
     
-    struct ProcStatus *rs;
+    struct ProcStatus *ps;
     struct Communicator *comm;
     struct RayList **raylists;
     struct RayList *buffer;
     
     int worker_local_chunks[128][3];
-    int recv_capacity, buffer_capacity, comm_count;
-    int worker_size; 
+    int comm_count, worker_size; 
     bool *mpi_worker_wait;
     double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
-    Master(struct Communicator *comm, struct ProcStatus *rs);
+    Master(struct Communicator *comm, struct ProcStatus *ps);
     
     ~Master();
     
@@ -34,7 +33,7 @@ struct Master {
     int get_max_rays_chunk(bool unloaded); 
 
     bool all_queue_empty(){ 
-        for(int i = 0; i < rs->get_chunk_size(); i++) {
+        for(int i = 0; i < ps->get_chunk_size(); i++) {
             if(!raylists[i]->empty()) {return false;}
         }
         return true;
@@ -58,23 +57,24 @@ struct Master {
 class Worker {
 
 protected:
-    struct Communicator *comm;
-    struct ProcStatus *rs;
+    Communicator *comm;
+    ProcStatus *ps;
     
-    int buffer_capacity, buffer_size;
     int master, worker_size; 
     bool proc_idle;
     
     int recv_loop_count, master_loop_count;
 
-    std::condition_variable buffer_not_full; // primary, secondary buffer size < max
+    std::condition_variable buffer_empty; // primary, secondary buffer size < max
     std::condition_variable buffer_not_empty; // primary + secondary > 0 
 
 public: 
-    Worker(struct Communicator *comm, struct ProcStatus *rs);
+    Worker(struct Communicator *comm, struct ProcStatus *ps);
 
     ~Worker(){}
     
+    ProcStatus *proc_status(){return ps;}
+
     virtual void write_rays_buffer() = 0;
 
     virtual int worker_load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) = 0;
@@ -95,7 +95,7 @@ protected:
     bool current_chunk_empty;
 public:    
 
-    StupidWorker(struct Communicator *comm, struct ProcStatus *rs);
+    StupidWorker(struct Communicator *comm, struct ProcStatus *ps);
 
     ~StupidWorker();
 
@@ -114,7 +114,7 @@ public:
 
     static void message_thread(void* tmp); 
     
-    static void work_thread(struct ProcStatus *rs, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
+    static void work_thread(struct ProcStatus *ps, int region[4], int sppTask, int iter, int dev, int chunk, bool valid_camera);
 
     void run(float* rProcessTime); 
 }; 
@@ -132,7 +132,7 @@ protected:
     std::mutex  out_mutex, buffer_mutex, in_mutex;
     
 public:    
-    SmartWorker(struct Communicator *comm, struct ProcStatus *rs);
+    SmartWorker(struct Communicator *comm, struct ProcStatus *ps);
 
     ~SmartWorker();
 

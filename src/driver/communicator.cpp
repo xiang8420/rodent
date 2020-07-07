@@ -15,14 +15,17 @@ Communicator::Communicator() {
     MPI_Comm_size(Client_Comm, &group_size);
     MPI_Comm_rank(Client_Comm, &group_rank);
     
-    compress_buffer.reserve(1048608 * 21);
     quit = false;
     pause = false;
 
     os = std::ofstream("out/proc_" + std::to_string(rank));
+    send_ray_count = 0; recv_ray_count = 0;
+    send_msg_count = 0; recv_msg_count = 0;
 }
     
 Communicator::~Communicator() {
+    std::cout<<"msg send "<< send_msg_count<<"recv "<<recv_msg_count
+      <<"ray send "<< send_ray_count<<"recv "<<recv_ray_count<<"\n";
     MPI_Finalize();
 }
 
@@ -30,10 +33,11 @@ void Communicator::Isend_rays(struct Rays* buffer, int size, int dst, int tag) {
     int buffer_size = buffer->get_size();
     int width = buffer->store_width;
     float *data = buffer->get_data();
-    int    send_size = buffer_size > size ? size : buffer_size;
+    int send_size = buffer_size > size ? size : buffer_size;
  //   printf("send ray send size %d buffer_size%d size %d\n", send_size, buffer_size, size);    
     MPI_Isend(&data[(buffer_size - send_size) * width], send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD, &req[tag]);
     buffer->size -= send_size;
+    send_ray_count ++;
 }
 
 void Communicator::mpi_wait(int tag){
@@ -45,12 +49,14 @@ void Communicator::send_noray(int dst) {
     int msg[MSG_SIZE];
     msg[0] = 0;
     MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
+    send_msg_count++;
 }
 
 void Communicator::send_end(int dst) {
     int msg[MSG_SIZE];
     msg[0] = -1;
     MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
+    send_msg_count++;
 }
 
 void Communicator::reduce_image(float* film, float *reduce_buffer, int pixel_num, bool server){
@@ -63,10 +69,12 @@ void Communicator::reduce_image(float* film, float *reduce_buffer, int pixel_num
 
 void Communicator::send_msg(int dst, int* msg){
     MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
+    send_msg_count++;
 }
 
 void Communicator::recv_msg(int dst, int *msg) {
     MPI_Recv(msg, MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD, sta);
+    recv_msg_count++;
 }
 
 void Communicator::recv_rays(int src, int recv_size, struct Rays* raylist) {
@@ -78,6 +86,7 @@ void Communicator::recv_rays(int src, int recv_size, struct Rays* raylist) {
 
     MPI_Recv(rays, recv_size * width, MPI_FLOAT, src, 1, MPI_COMM_WORLD, sta); 
 
+    recv_ray_count++;
 //    for(int i = 0; i < 10; i ++) {
 //        printf("|r %d %d %d", ids[i * width], ids[i * width + 9], ids[i * width + 15]);
 //    }
@@ -91,9 +100,8 @@ void Communicator::send_rays(int dst, int send_size, struct Rays* buffer) {
     buffer->size -= send_size;
     os << rank << "-> " <<  dst << "|send " << send_size << width << std::endl;
     MPI_Send(rays, send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
+    send_ray_count++;
 }
-
-
 
 void Communicator::purge_completed_mpi_buffers() {
     bool done = false;
@@ -164,15 +172,17 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 		    MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->rrq);
 			k++;
 		}
+        send_msg_count+=k;	
     } else {
         os<< "mthread send rays" << m->get_ray_size() <<"to "<<m->get_destination()<< std::endl;
         MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, m->get_destination(), tag, MPI_COMM_WORLD, &msb->lrq);
         k++;
-	}
+	    send_ray_count++;
+    }
     rs->accumulate_sent(k * m->get_ray_size());
 	msb->n = k;
 	mpi_in_flight.push_back(msb);
-	
+    
     return k;
 }
 
@@ -231,6 +241,7 @@ bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
                 os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
                 rs->set_proc_idle(incoming_message->get_root());
             }
+            recv_msg_count++;
         } else {
             os << "mthread| incoming chunk "<<incoming_message->get_chunk()<< "root" << incoming_message->get_root() 
                << "sender"<<incoming_message->get_sender()<<"\n";
@@ -240,6 +251,7 @@ bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
             os << "mthread| after deserialize "<<in->size()<<std::endl;
             //set itself busy
             rs->set_proc_busy(rank);
+            recv_ray_count++;
         }
         return true; 
     } else {
