@@ -65,7 +65,7 @@ protected:
     
     int recv_loop_count, master_loop_count;
 
-    std::condition_variable buffer_empty; // primary, secondary buffer size < max
+    std::condition_variable buffer_not_full; // primary, secondary buffer size < max
     std::condition_variable buffer_not_empty; // primary + secondary > 0 
 
 public: 

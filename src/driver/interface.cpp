@@ -723,7 +723,7 @@ void rodent_cpu_get_secondary_outcome_stream(SecondaryStream* buffer, int32_t si
 }
 
 int32_t rodent_cpu_get_thread_num() {
-    return std::thread::hardware_concurrency(); 
+    return 1;//std::thread::hardware_concurrency(); 
 }
 //gpu
 //

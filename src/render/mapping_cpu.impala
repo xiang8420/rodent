@@ -770,7 +770,7 @@ fn @cpu_dis_trace( scene: Scene
                                                 film_width, film_height, tid, spp_thread, vector_width);
                 }
 //                print_string("after generate rays\n");
-                with cpu_profile(&mut transfer_counter) {
+//                with cpu_profile(&mut transfer_counter) {
                     let (primary_size, out_primary_size) = cpu_primary_transfer(primary, out_primary, min_max, vector_width, capacity, id == num_rays, scene);
                     primary.size = primary_size; 
                     out_primary.size = out_primary_size; 
@@ -791,7 +791,7 @@ fn @cpu_dis_trace( scene: Scene
                         print_string(" "); print_i32(out_secondary.size);
                         break()
                     }
-                }
+//                }
 //                print_string("after communicator rays\n");
 //                rodent_first_primary_check(-1, primary.size, 1, true);                
                 // Trace primary rays

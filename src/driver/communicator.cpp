@@ -233,13 +233,15 @@ bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
             if (incoming_message->is_collective()) {
                 //check if need to synchronous
                 rs->set_exit();
-               // collective(rs);
+                return true; 
+                os<<"set exit\n";
+                // collective(rs);
             } else {
                 os << "mthread| set proc " << incoming_message->get_root() << "idle \n";
-                rs->updata_global_rays((int*)incoming_message->get_content());
                 int * tmp = rs->get_status();
                 os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
                 rs->set_proc_idle(incoming_message->get_root());
+                return rs->update_global_rays((int*)incoming_message->get_content());
             }
             recv_msg_count++;
         } else {
@@ -252,8 +254,10 @@ bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
             //set itself busy
             rs->set_proc_busy(rank);
             recv_ray_count++;
+            os << "mthread| set busy "<<in->size()<<std::endl;
+            return true; 
         }
-        return true; 
+        os << "mthread| recv return \n";
     } else {
         return false;
     } 
@@ -272,6 +276,7 @@ bool Communicator::send_message(Message *outgoing_message, ProcStatus *rs) {
         if (outgoing_message->is_collective()) {
             os << "mthread|send collective\n";    
             rs->set_exit();
+            os << "set exit\n";    
             
             //collective(rs);
             

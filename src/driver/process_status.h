@@ -52,7 +52,7 @@ public:
     }
   
     void thread_reset() {
-        cpu_thread_num = std::thread::hardware_concurrency() - dev_num + 1;
+        cpu_thread_num = 1;//std::thread::hardware_concurrency() - dev_num + 1;
         printf("\ncpu thread num %d\n", cpu_thread_num);
         thread_idle.resize(cpu_thread_num);
         for(int i = 0; i < cpu_thread_num; i++) 
@@ -66,7 +66,9 @@ public:
         printf("proc reset %d proc idle", proc_size);
     //    std::cout<< proc_idle[0] <<"  "<< proc_idle[1] <<std::endl;
     }
-  
+ 
+    bool is_proc_idle(){return proc_idle[proc_rank]; }
+
     void set_self_idle(){proc_idle[proc_rank] = true;} 
     
     void set_self_busy(){proc_idle[proc_rank] = false;}
@@ -132,13 +134,13 @@ public:
             recv += global_rays[i + proc_size];
         }
         printf("check %d %d\n", sent, recv);
-        if (sent * 0.99 <= recv )
+        if (sent <= recv )
             return true;
         else 
             return false;
     }
 
-    bool updata_global_rays(int* a) {
+    bool update_global_rays(int* a) {
         int sent = 0, recv = 0;
         for(int i = 0; i < proc_size; i++) {
             global_rays[i] = std::max(global_rays[i], a[i]);
@@ -147,7 +149,7 @@ public:
             recv += global_rays[i + proc_size];
         }
         printf("updata %d %d\n", sent, recv);
-        if (sent * 0.99 <= recv )
+        if (sent <= recv )
             return true;
         else 
             return false;
