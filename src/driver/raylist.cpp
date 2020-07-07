@@ -1,4 +1,7 @@
 #include "raylist.h"
+#include <fstream>
+#include <iostream>
+
 inline int set_ray_mask(bool *mask, int width, bool compact) {
     
     for(int i = 0; i < width; i++ ) {
@@ -23,12 +26,15 @@ Rays::Rays(int capacity, int width, bool compact)
     mask = new bool[width];
     store_width = set_ray_mask(mask, width, compact);
     
-    queue.reserve(4 * capacity * store_width);
+//    queue.reserve(2 * capacity * store_width);
     queue.resize(capacity * store_width);
     data = queue.data();
     size = 0;
 }
-void Rays::read_dev_rays(float *rays, int src, int num, int rays_capacity) {
+void Rays::read_dev_rays(float *rays, int src, int num, int rays_capacity, int rank) {
+    std::ofstream os; 
+    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
+    
     if(num + size >= capacity) {
         printf("put resize %ld capacity%ld\n", queue.size(), queue.capacity());
         capacity += 1048608;
@@ -43,26 +49,75 @@ void Rays::read_dev_rays(float *rays, int src, int num, int rays_capacity) {
             k++;
         }
     }
+
+        os<<"read dev rays \n";
+        os<<"rays \n";
+        int *ids = (int*)rays;
+        for(int i = 0; i < 10; i ++) {
+            os<<"||"<<ids[i]<<" "<< ids[i + rays_capacity * 9];
+        }
+        os<<"\n";
+        os<<"list \n";
+        ids = (int*)data;
+        for(int i = 0; i < 10; i ++) {
+            os<<"||"<<ids[i * store_width]<<" "<< ids[i * store_width + 9];
+        }
+        os<<"\n";
+        ids = (int*)data;
+        os<<"list 0 " << num<<" "<<size<<"\n";
+        for(int i = 0; i < 10; i ++) {
+            os<<"#"<<ids[(i + size) * store_width]<<" "<<ids[(i + size) * store_width + 9];
+        }
+        os<<"\n\n";
     size += num;
 }
 
-int Rays::write_dev_rays(float *rays, int buffer_size, size_t rays_capacity) {
+int Rays::copy_to_buffer(float *rays, int buffer_size, size_t rays_capacity, int rank, bool primary) {
+
+    std::ofstream os; 
+    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
+
     int copy_size = std::min(size, buffer_size); 
+    if(primary)
+        os<<"copy to primary "<<copy_size<<" size "<<size<<"\n";
+    else 
+        os<<"copy to secondary "<<copy_size<<" size "<<size<<"\n";
+
+//    size = 0;
     size -= copy_size;
     int src = size; 
     for(int i = 0, k = 0; i < logic_width; i++) {
         if(mask[i]) {
             for(int j = 0; j < copy_size; j++) {
                 rays[j + i * rays_capacity] = data[(src + j) * store_width + k];
+         //       data[(src + j) * store_width + k] = 0;
             }
             k++;
         } else {
-        //    for(int j = 0; j < copy_size; j++) {
-        //        rays[j + i * rays_capacity] = 0 ; //data[(src + j) * store_width + k];
-        //    }
+            for(int j = 0; j < copy_size; j++) {
+                rays[j + i * rays_capacity] = 0 ; //data[(src + j) * store_width + k];
+            }
         }
     }
-    return copy_size;
+        
+        int* ids = (int*)data;
+        for(int i = 0; i < 10; i ++) {
+            os<<"#"<<ids[i * store_width]<<" "<< ids[i * store_width + 9];
+        }
+        os<<"\n";
+        ids = (int*)rays;
+        for(int i = 0; i < 10; i ++) {
+            os<<"#"<<ids[i]<<" "<< ids[i + rays_capacity * 9];
+        }
+        os<<"\n";
+        
+        ids = (int*)data;
+        os<<"copy to buffer inlist 2 " << copy_size<<" "<<size<<"\n";
+        for(int i = 0; i < 10; i ++) {
+            os<<"#"<<ids[(i + size) * store_width]<<" "<<ids[(i + size) * store_width + 9];
+        }
+        os<<"\n\n";
+        return copy_size;
 }
 
 void Rays::copy_rays(struct Rays* a, int st){
@@ -100,6 +155,19 @@ inline void swap(float **a, float **b) {
     *b = *tmp;
 }
 
+void RayList::copy(RayList *inList, int rank) {
+    if(type!="buffer") {
+        std::cerr << "only buffer can copy\n";
+    }
+    if(primary->empty() && !inList->get_primary()->empty()) {
+        primary->size = inList->get_primary()->copy_to_buffer(primary->data, logic_capacity, store_capacity, rank, true);
+    }
+    if(secondary->empty() && !inList->get_secondary()->empty()) {
+        secondary->size = inList->get_secondary()->copy_to_buffer(secondary->data, logic_capacity, store_capacity, rank, false);
+    }
+
+}
+
 void RayList::classification(RayList ** raylist, Rays *raybuffer) {
     int *bufferdata   = (int*) raybuffer->get_data();
     int recv_size     = raybuffer->size;
@@ -124,17 +192,22 @@ void RayList::classification(RayList ** raylist, Rays *raybuffer) {
     raybuffer->clear();
 }
 
-void RayList::classification(RayList ** raylist, float *raybuffer,  size_t size, size_t capacity, bool primary) {
+void RayList::classification(RayList ** raylist, float *raybuffer,  size_t size, size_t capacity, bool primary, int rank) {
     int width       = primary ? 21 : 14;
     int* chunkIds   = (int*)(raybuffer + 9 * capacity);
     printf("classification\n"); 
-    for(int i = 0; i < size; i++) {
-        int chunk = chunkIds[i] >> 12;
-//        printf("chunk %d \n", chunkIds[i]);
-        Rays *list = primary ? raylist[chunk]->primary : raylist[chunk]->secondary;
-        list->read_dev_rays(raybuffer, i, 1, capacity); 
-        if(list->full()){
-            printf("error queue is is full %d %d \n", chunk, raylist[chunk]->primary->get_size());   
-        }
-    }
+    int chunk = chunkIds[0] >> 12;
+    
+    Rays *list = primary ? raylist[chunk]->primary : raylist[chunk]->secondary;
+    list->read_dev_rays(raybuffer, 0, size, capacity, rank); 
+
+//    for(int i = 0; i < size; i++) {
+//        int chunk = chunkIds[i] >> 12;
+////        printf("chunk %d \n", chunkIds[i]);
+//        Rays *list = primary ? raylist[chunk]->primary : raylist[chunk]->secondary;
+//        list->read_dev_rays(raybuffer, i, 1, capacity, rank); 
+//        if(list->full()){
+//            printf("error queue is is full %d %d \n", chunk, raylist[chunk]->primary->get_size());   
+//        }
+//    }
 }

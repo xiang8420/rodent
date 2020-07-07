@@ -35,41 +35,20 @@ Message::Message(MPI_Status &status, MPI_Comm comm) {
 
 void Message::deserialize(struct RayList* inList) {
     char* ptr = content.data();
-    ///////////////ptr = content.data
-    printf("message primary %d, secondary %d\n", header->primary, header->secondary);
     if(header->primary > 0 ) {
         Rays *primary = inList->get_primary();
-        char* primary_copy_ptr = (char*)(primary->get_data() + primary->size * primary->store_width * sizeof(float));
+        char* primary_copy_ptr = (char*)primary->get_data() + primary->size * primary->store_width * sizeof(float);
         int   primary_length = header->primary * inList->get_primary()->store_width * sizeof(float);
         memcpy(primary_copy_ptr, ptr, primary_length);
         primary->size += header->primary; 
-        
-        int width = primary->store_width; 
-        int* ids = (int*)(primary->get_data());
-        printf("deserialize size %d %d:", header->primary, header->secondary);
-        for(int i = 0; i < 5; i ++) {
-            printf("%d %d*", ids[i*width], ids[i*width + 9]);
-        }
-        printf("\n");
         ptr += primary_length;
     } 
     if(header->secondary > 0) { 
-        Rays *secondary = inList->get_secondary();
-        char* secondary_copy_ptr = (char*)(secondary->get_data() + secondary->size * secondary->store_width * sizeof(float));
+        Rays* secondary = inList->get_secondary();
+        char* secondary_copy_ptr  = (char*)secondary->get_data() + secondary->size * secondary->store_width * sizeof(float);
         int secondary_length = header->secondary * inList->get_secondary()->store_width * sizeof(float);
-        printf("secondary copy \n");
         memcpy(secondary_copy_ptr, ptr, secondary_length);
-        printf("after secondary coyp \n");
         secondary->size += header->secondary; 
-        
-        int width = secondary->store_width; 
-        int* ids = (int*)(secondary->get_data());
-        printf("deserialize:");
-        for(int i = 0; i < 5; i ++) {
-            printf("%d %d*", ids[i*width], ids[i*width + 9]);
-        }
-        printf("\n");
-
     }
 }
 

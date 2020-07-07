@@ -199,7 +199,10 @@ int main(int argc, char** argv) {
         printf("end init\n");
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
-        film = get_pixels();
+//        if(comm.rank == 0)
+            film = get_pixels();
+//        else 
+//            film = new float[pixel_num];
         if(rank != master_id) {
             printf("%d before reduce\n", rank);
             comm.reduce_image(film, reduce_buffer, pixel_num, use_master);

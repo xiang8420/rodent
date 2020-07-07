@@ -75,6 +75,9 @@ public:
     
     size_t get_ray_size() {return header->primary + header->secondary;}
 
+    size_t primary_size(){return header->primary;}
+    size_t secondary_size(){return header->secondary;}
+
     size_t get_size() { return content.size(); }
 
     int get_root() { return header->broadcast_root; }

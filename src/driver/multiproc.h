@@ -130,7 +130,8 @@ protected:
     struct RayList * buffer;
     
     std::mutex  out_mutex, buffer_mutex, in_mutex;
-    
+   
+    int renderer_get_rays, renderer_save_rays, recv_rays, write_rays, sent_rays; 
 public:    
     SmartWorker(struct Communicator *comm, struct ProcStatus *ps);
 

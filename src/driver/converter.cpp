@@ -1121,7 +1121,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "}\n\n";
     
     os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, generate_rays: bool) -> () { \n"   
-       << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, " << spp << " /*spp*/); \n";
+       << "    let renderer = make_path_tracing_renderer( "<<max_path_len<<" /*path length*/, " << spp << " /*spp*/); \n";
     for(int dev_id = 0; dev_id < dev_num; dev_id++){                            
                                                                                 
         Target target = target_list[dev_id];

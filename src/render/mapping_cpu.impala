@@ -775,14 +775,14 @@ fn @cpu_dis_trace( scene: Scene
                     primary.size = primary_size; 
                     out_primary.size = out_primary_size; 
                     
-                    idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
-//                    rodent_first_primary_check(-1, primary.size, 1, true);                
-                    if primary.size == 0 {
+                    if primary.size == 0  && secondary.size ==0 && id == num_rays  {
+                        idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
                         if(out_primary.size > 0) {
                             rodent_worker_primary_send(-1, out_primary.size);
                             out_primary.size = 0;
                         }
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, idle); 
+                        rodent_first_primary_check(-1, primary.size, 1, true);                
                     }    
                     if(primary.size < 0) {
                         print_string("end rendering"); print_i32(primary.size); 
@@ -825,17 +825,23 @@ fn @cpu_dis_trace( scene: Scene
                 secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
                 
                 with cpu_profile(&mut transfer_counter) {
-                    idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
-                    if secondary.size == 0 {
+                    if primary.size ==0 && secondary.size == 0 && id == num_rays {
+                        idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
                         if out_secondary.size > 0 {
                             rodent_worker_secondary_send(-1, out_secondary.size);
                             out_secondary.size = 0;
                         }
                         secondary.size = rodent_worker_secondary_recv(-1, secondary.size, true, tid, idle); 
+                        rodent_secondary_check(-1, secondary.size, 1, true); 
                     }
                 }
-                if secondary.size < 0 { break()}
-
+                if secondary.size < 0 {
+                    print_string("end rendering"); print_i32(primary.size); 
+                    print_string(" "); print_i32(out_primary.size);
+                    print_string(" "); print_i32(secondary.size); 
+                    print_string(" "); print_i32(out_secondary.size);
+                    break()
+                }
                 // Compact and trace secondary rays
                 if likely(secondary.size > 0) {
                     with cpu_profile(&mut shadow_counter) {

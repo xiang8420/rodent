@@ -3,19 +3,18 @@
 
 struct Rays {
     std::vector<float> queue;
-    std::mutex mutex;
     float* data;
     int size, capacity, logic_width, store_width;
     bool compact; 
     bool *mask;
 
-    Rays(int capacity, int width, bool compact = true); 
+    Rays(int capacity, int width, bool compact); 
 
     ~Rays(){queue.clear();}
 
-    void read_dev_rays(float *rays, int src, int num, int rays_capacity);
+    void read_dev_rays(float *rays, int src, int num, int rays_capacity, int rank);
 
-    int write_dev_rays(float *rays, int num, size_t rays_capacity); 
+    int copy_to_buffer(float *rays, int num, size_t rays_capacity, int rank, bool primary); 
     
     void copy_rays(struct Rays* a, int st);
 
@@ -36,27 +35,22 @@ struct Rays {
     int get_size() { return size;}
 
     int get_capacity() {return capacity;}
-
-    void lock() {mutex.lock();}
-    void unlock() {mutex.unlock();}
 };
 
 struct RayList {
-    struct Rays *camera;
     struct Rays *primary;
     struct Rays *secondary;
-    int capacity;
+    size_t logic_capacity, store_capacity;
     std::string type;
     std::mutex mutex;
 
-    RayList(int n, std::string type):capacity(n), type(type) {
-        camera    = new struct Rays(capacity, 21);
-        primary   = new struct Rays(capacity, 21);
-        secondary = new struct Rays(capacity, 14);
+    RayList(int n, std::string type, bool compact):logic_capacity(n), type(type) {
+        store_capacity = (n & ~((1 << 5) - 1)) + 32; // round to 32
+        primary   = new struct Rays(store_capacity, 21, compact);
+        secondary = new struct Rays(store_capacity, 14, compact);
     }
     
     ~RayList() {
-        delete camera;
         delete primary;
         delete secondary;
     }
@@ -68,21 +62,20 @@ struct RayList {
     
     int secondary_size(){return secondary->size;}    
    
-    int camera_ray_size() {return camera->size;}
 
-    int size() { return primary->size + secondary->size + camera->size; }
-    bool empty() { return primary->empty() && secondary->empty() && camera->empty(); } 
+    int size() { return primary->size + secondary->size; }
+    bool empty() { return primary->empty() && secondary->empty(); } 
 
     void clear() {
         primary->size = 0 ;
         secondary->size = 0;
-        camera->size = 0;
     }
 
     void lock() {mutex.lock();}
     void unlock() {mutex.unlock();}
-
+    
+    void copy(RayList *, int);
     static void classification(RayList ** raylists, Rays *raybuffer);
-    static void classification(RayList ** raylists, float *raybuffer, size_t size, size_t capacity, bool primary);
+    static void classification(RayList ** raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank);
 };
 

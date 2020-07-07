@@ -8,7 +8,6 @@
 
 class ProcStatus {
 private:
-    int proc_size, proc_rank;
     int dev_num;
     int chunk_size;
     int cpu_thread_num;
@@ -18,11 +17,13 @@ private:
     std::vector<int>  local_chunk;
     std::vector<int>  chunk_map;
     
-    std::vector<int> global_rays;
    
     int buffer_size, buffer_capacity; 
     bool master, exit;
 public:    
+    int proc_size, proc_rank;
+    std::vector<int> global_rays;
+    
     float3 eye;
     float3 dir;
     float3 right;
@@ -200,7 +201,7 @@ public:
         local_chunk.emplace_back(proc_rank);
         loaded_local_chunk_id = 0;
         
-        buffer_size = 1048576;
+        buffer_size =  1048576;
         buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         
         global_rays.resize(proc_size * proc_size);
