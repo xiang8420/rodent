@@ -1,5 +1,6 @@
 #include <vector>
 #include <mutex>
+#include "raylist.h"
 #include <condition_variable>
 #include "mpi.h"
 
@@ -13,6 +14,7 @@ struct MessageHeader {
     int  chunk;
     bool collective;
     bool idle;      //if this process is idle
+    char padding[2]; 
 
     MessageHeader(){}
 
@@ -40,6 +42,8 @@ public:
     Message();
     
     Message(MPI_Status &status, MPI_Comm comm);
+    
+    Message(RayList** List, MPI_Status &status, MPI_Comm comm); 
     
     Message(MessageHeader *h): header(h) { }
 
@@ -109,7 +113,7 @@ public:
     //! is this message collective (i.e. synchrnoizing across processes)?
 	bool is_collective() { return header->collective; }
     
-    void deserialize(struct RayList* outList); 
+    void deserialize(char* ptr, struct RayList* outList); 
     
     int serialize(struct RayList* outList); 
 };

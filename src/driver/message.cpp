@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <cstring>
-#include "raylist.h"
 #include "message.h"
 
 Message::Message() {
@@ -14,41 +13,40 @@ Message::Message(MPI_Status &status, MPI_Comm comm) {
     MPI_Status s0;
     header = new MessageHeader();
     if (count == sizeof(*header)) {
-        printf("only header %d\n", count);
         MPI_Recv((char *)header, count, MPI_UNSIGNED_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
-        printf("Message count %d root %d collective %d\n", count, header->broadcast_root, header->collective);
-        if(header->collective)
-            printf("is collective\n");
     } else {
         char *buffer = (char *)malloc(count);
-        printf("content\n");
-        printf("before recv \n");
         MPI_Recv(buffer, count, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
         memcpy(header, buffer, sizeof(*header));
-        printf("recv Message::Message %d\n", header->content_size);
         content.resize(header->content_size);
         memcpy(content.data(), buffer+sizeof(*header), header->content_size);
-        printf("Message copy success\n");
         free(buffer);
     }
 }
 
-void Message::deserialize(struct RayList* inList) {
-    char* ptr = content.data();
-    if(header->primary > 0 ) {
-        Rays *primary = inList->get_primary();
-        char* primary_copy_ptr = (char*)primary->get_data() + primary->size * primary->store_width * sizeof(float);
-        int   primary_length = header->primary * inList->get_primary()->store_width * sizeof(float);
-        memcpy(primary_copy_ptr, ptr, primary_length);
-        primary->size += header->primary; 
-        ptr += primary_length;
-    } 
-    if(header->secondary > 0) { 
-        Rays* secondary = inList->get_secondary();
-        char* secondary_copy_ptr  = (char*)secondary->get_data() + secondary->size * secondary->store_width * sizeof(float);
-        int secondary_length = header->secondary * inList->get_secondary()->store_width * sizeof(float);
-        memcpy(secondary_copy_ptr, ptr, secondary_length);
-        secondary->size += header->secondary; 
+Message::Message(RayList** List, MPI_Status &status, MPI_Comm comm) {
+    int count;
+    MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
+    MPI_Status s0;
+    header = new MessageHeader();
+    if (count == sizeof(*header)) {
+        MPI_Recv((char *)header, count, MPI_UNSIGNED_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
+        if(header->collective)
+            printf("is collective\n");
+    } else {
+        char *buffer = (char *)malloc(count);
+        MPI_Recv(buffer, count, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
+        memcpy(header, buffer, sizeof(*header));
+        if(header->primary == 0 && header->secondary ==0 ) {
+            //status
+            content.resize(header->content_size);
+            memcpy(content.data(), buffer+sizeof(*header), header->content_size);
+        } else {
+            //rays 
+            RayList *in = List[header->chunk];
+            in->read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, destination);
+        }
+        free(buffer);
     }
 }
 

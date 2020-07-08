@@ -224,7 +224,8 @@ bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_ready, &status);
 
     if (recv_ready) {
-        Message *incoming_message = new Message(status, MPI_COMM_WORLD); 
+        os<<"mthread recv msg\n ";
+        Message *incoming_message = new Message(List, status, MPI_COMM_WORLD); 
         os<<"mthread recv rays from "<<incoming_message->get_sender()<<"size "<<incoming_message->get_ray_size()
           <<"root: "<<incoming_message->get_root()<<"chunk "<<incoming_message->get_chunk()<<"\n";
         if (incoming_message->is_broadcast()) {
@@ -249,123 +250,13 @@ bool Communicator::recv_message(RayList** List, ProcStatus *rs) {
             }
             recv_msg_count++;
         } else {
-            RayList *in = List[incoming_message->get_chunk()];
-//            int old_primary_size = in->get_primary()->size; 
-//            int old_secondary_size = in->get_secondary()->size; 
-//            os<<"\n\n\n/start////////////////////////////\n";
-//            ////////////////////      
-//            char* ptr = incoming_message->get_content();
-//            
-//            Rays* primary  = in->get_primary();
-//            int width = primary->store_width; 
-//            os<<"before deserial primary :";
-//            os<<"message primary: "<<incoming_message->primary_size()<<" ";
-//            os<<"primary->queue->size() "<<primary->queue.size()<<"\n";
-//            if(primary->size > 0) {
-//                int* ids = (int*)primary->get_data();
-//                for(int i = primary->size - 5 ; i < primary->size; i ++) {
-//                    os<<ids[i*width]<<" "<<ids[i*width + 9]<<" ";
-//                }
-//                os<<"\n";
-//            }
-////            ids = (int*)ptr; //(primary_copy_ptr);
-////            for(int i = incoming_message->primary_size() - 5; i < incoming_message->primary_size(); i ++) {
-////                os<< ids[i * width]<<" "<<ids[i * width + 9]<<"| ";
-////            }
-////            os<<"\n";
-////
-////            os<<"copy primary :";
-////            ids = (int*)primary->get_data();
-////            for(int i = primary->size - 5; i < primary->size; i ++) {
-////                os<<ids[i * width]<<" "<<ids[i * width + 9]<<"| ";
-////            }
-////            os<<"\n";
-////            ////////////////////      
-////            ///////////////
-////            os<<"before deserial secondary data: ";
-////            Rays* secondary = in->get_secondary();
-////            width = secondary->store_width; 
-////            os<<"list 0 secondary :";
-////            ids = (int*)secondary->get_data();
-////            for(int i = secondary->size - 5; i < secondary->size; i ++) {
-////                os<<ids[i*width]<<" "<<ids[i*width + 9]<<" ";
-////            }
-//            ////////////////
-            
-                os << "mthread| incoming chunk "<<incoming_message->get_chunk()<< "root" << incoming_message->get_root() 
-                   << "sender"<<incoming_message->get_sender()<<"\n";
-                os << "mthread| before deserialize primary "<<in->get_primary()->size<<" secondary "<<in->get_secondary()->size <<std::endl;
+            os << "mthread| ray recv return \n";
             rs->accumulate_recv(incoming_message->get_ray_size());
-         
-//            in->get_primary()->size = 0; 
-//            in->get_secondary()->size = 0; 
-
-            /////////////// 
-            /////////////////
-
-            incoming_message->deserialize(in);
-        
-//            
-//            if(old_primary_size > 0) {
-//                int* ids = (int*)primary->get_data();
-//                ids = (int*)primary->get_data();
-//                for(int i = old_primary_size - 5; i < old_primary_size; i ++) {
-//                    os<<ids[i*width]<<" "<<ids[i*width + 9]<<" ";
-//                }
-//                os<<"\n";
-//            }
-//            ////////////////////      
-//            width = primary->store_width; 
-//            os<<"#### after deserial primary :";
-//            os<<"message primary: "<<incoming_message->primary_size()<<" ";
-//            ids = (int*)ptr; //(primary_copy_ptr);
-//            for(int i = 0; i < 5; i ++) {
-//                os<< ids[i * width]<<" "<<ids[i * width + 9]<<"| ";
-//            }
-//            os<<"\n";
-//
-//            os<<"copy primary :";
-//            ids = (int*)primary->get_data();
-//            for(int i = primary->size - 5; i < primary->size; i ++) {
-//                os<<ids[(i + old_primary_size) * width]<<" "<<ids[(i + old_primary_size) * width + 9]<<"| ";
-//            }
-//            os<<"\n";
-//            ////////////////////      
-//            int  primary_length = incoming_message->primary_size() * in->get_primary()->store_width * sizeof(float);
-//            ptr += primary_length;
-//            
-//            secondary  = in->get_secondary();
-//            width = secondary->store_width; 
-//            os<<"list 0 secondary :";
-//            ids = (int*)secondary->get_data();
-//            for(int i = secondary->size - 5; i < secondary->size; i ++) {
-//                os<<ids[i*width]<<" "<<ids[i*width + 9]<<" ";
-//            }
-//            os<<"\n";
-//            os<<"message secondary: "<<incoming_message->secondary_size()<<" ";
-//            ids = (int*)ptr; //(secondary_copy_ptr);
-//            for(int i = 0; i < 5; i ++) {
-//                os<< ids[i * width]<<" "<<ids[i * width + 9]<<"| ";
-//            }
-//            os<<"\n";
-//
-//            os<<"copy secondary :";
-//            ids = (int*)secondary->get_data();
-//            for(int i = secondary->size - 5; i < secondary->size; i ++) {
-//                os<<ids[(i + old_secondary_size) * width]<<" "<<ids[(i + old_secondary_size) * width + 9]<<"| ";
-//            }
-//            os<<"\n"; 
-            
-      //////////////////////////////////      
-            os << "mthread| after deserialize "<<in->get_primary()->size<<" "<<in->get_secondary()->size <<std::endl;
-            os<<"/end////////////////////////////\n\n\n\n";
             //set itself busy
             rs->set_proc_busy(rank);
             recv_ray_count++;
-            os << "mthread| set busy "<<in->size()<<std::endl;
             return true; 
         }
-        os << "mthread| recv return \n";
     } else {
         return false;
 //        RayList *in = List[rs->get_loaded_chunk()];

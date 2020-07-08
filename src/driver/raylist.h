@@ -1,9 +1,10 @@
+#pragma once
+
 #include <vector>
 #include <mutex>
 
 struct Rays {
     std::vector<float> queue;
-    float* data;
     int size, capacity, logic_width, store_width;
     bool compact; 
     bool *mask;
@@ -12,19 +13,23 @@ struct Rays {
 
     ~Rays(){queue.clear();}
 
-    void read_dev_rays(float *rays, int src, int num, int rays_capacity, int rank);
+    int check_capacity(int);
 
-    int copy_to_buffer(float *rays, int num, size_t rays_capacity, int rank, bool primary); 
+    void read_from_device(float *rays, int src, int num, int rays_capacity, int rank);
+
+    int write_to_device_buffer(Rays * , int, int, int, bool ); 
     
-    void copy_rays(struct Rays* a, int st);
+    void read_from_rays(struct Rays* a, int st);
+    
+    void read_from_ptr(char *src_ptr, int copy_size);
 
-    float& operator[](int id) { return data[id];}
+    float& operator[](int id) { return queue[id];}
 
     bool full() { return size == capacity; }
 
     bool empty() {return size <= 0;}
 
-    float* get_data() {return data; }
+    float* get_data() {return queue.data(); }
 
     int clear() {
         int s = size;
@@ -74,8 +79,12 @@ struct RayList {
     void lock() {mutex.lock();}
     void unlock() {mutex.unlock();}
     
-    void copy(RayList *, int);
+    static void read_from_device_buffer(RayList ** raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank);
+    
+    void write_to_device_buffer(RayList *, int);
+    
+    void read_from_message(char*, int, int, int); 
+    
     static void classification(RayList ** raylists, Rays *raybuffer);
-    static void classification(RayList ** raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank);
 };
 
