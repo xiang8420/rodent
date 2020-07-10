@@ -33,12 +33,12 @@ Rays::Rays(int capacity, int width, bool compact)
 }
 
 int Rays::check_capacity(int num) {
-    printf("check size %d num %d capacity %d queue size %d queue capacity%ld\n", size, num, capacity, queue.size(), queue.capacity());
+//    printf("check size %d num %d capacity %d queue size %d queue capacity%ld\n", size, num, capacity, queue.size(), queue.capacity());
     if(num + size >= capacity) {
-        printf("put resize %ld capacity%ld %ld\n", queue.size(), queue.capacity(), queue.data());
+//        printf("put resize %ld capacity%ld %ld\n", queue.size(), queue.capacity(), queue.data());
         capacity += std::max(num, 1048608);
         queue.resize(capacity * store_width);
-        printf("end put resize %ld capacity%ld %ld\n", queue.size(), queue.capacity(), queue.data());
+//        printf("end put resize %ld capacity%ld %ld\n", queue.size(), queue.capacity(), queue.data());
     }
 }
 
@@ -106,7 +106,7 @@ int Rays::write_to_device_buffer(Rays * buffer, int buffer_size, int rays_capaci
 }
 
 void Rays::read_from_rays(struct Rays* a, int st){
-    printf("write to rays ptr\n");
+//    printf("write to rays ptr\n");
     check_capacity(1);
     if(a->store_width != store_width) printf("width not match");
     for(int i = 0; i < store_width; i++){

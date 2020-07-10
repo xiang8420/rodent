@@ -15,9 +15,9 @@
 #include "float3.h"
 #include "common.h"
 #include "image.h"
-#include "process_status.h"
+#include "ProcessStatus.h"
 #include "communicator.h"
-#include "multiproc.h"
+#include "DistributedFrameWork.h"
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
 #include <x86intrin.h>
 #endif
@@ -28,13 +28,6 @@ float* get_pixels();
 void clear_pixels();
 void cleanup_interface();
 float* get_first_primary();
-void setup_master(struct Communicator *, struct ProcStatus *);
-void cleanup_master();
-void master_run();
-
-void setup_worker(struct Communicator *, struct ProcStatus *, bool);
-void cleanup_worker();
-void worker_run(float*);
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
@@ -162,14 +155,10 @@ int main(int argc, char** argv) {
     int    worker_size = use_master ? comm.size - 1: comm.size;
     int    master_id = worker_size; 
     int    rank = comm.rank;
-    ProcStatus rs(eye, dir, up, fov, width, height, spp, rank, comm.size, 
+    ProcStatus ps(eye, dir, up, fov, width, height, spp, rank, comm.size, 
             imageDecompose, get_chunk_num(), false/*ray queuing*/, get_dev_num(),  use_master);
     printf("after construct rendersettings \n "); 
-    if(rank == master_id) {
-        setup_master(&comm, &rs);
-    } else {
-        setup_worker(&comm, &rs, use_master); 
-    }
+    setup_distributed_framework("P2P", &comm, &ps); 
     
     // time 
     std::vector<double> samples_sec;
@@ -190,12 +179,8 @@ int main(int argc, char** argv) {
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, processTime, 1, MPI_FLOAT, MPI_COMM_WORLD);
 //        rs.camera_rotate(0.3f, 0.0f);
         auto ticks = std::chrono::high_resolution_clock::now();
-        if(rank == master_id) {
-            printf("start master\n");
-            master_run();
-        } else {
-            worker_run(processTime);
-        }
+        
+        dfw_run(processTime);
         printf("end init\n");
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
@@ -222,6 +207,7 @@ int main(int argc, char** argv) {
         frame ++;
     }
     cleanup_interface();
+    cleanup_distributed_framework(); 
     auto inv = 1.0e-6;
     std::sort(samples_sec.begin(), samples_sec.end());
     info("# ", samples_sec.front() * inv,
@@ -229,10 +215,6 @@ int main(int argc, char** argv) {
          "/", samples_sec.back() * inv,
          " (min/med/max Msamples/s)");
     printf("%d end\n", rank);  
-    if(rank == master_id) 
-        cleanup_master();
-    else 
-        cleanup_worker();
     
     return 0;
 }

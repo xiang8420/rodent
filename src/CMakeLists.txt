@@ -62,7 +62,6 @@ set(DRIVER_SRCS
     driver/common.h
     driver/color.h
     driver/buffer.h
-    driver/multiproc.cpp
     driver/raylist.cpp
     driver/message.cpp
 )
