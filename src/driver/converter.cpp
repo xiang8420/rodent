@@ -602,18 +602,6 @@ static size_t cleanup_obj(obj::File& obj_file, obj::MaterialLib& mtl_lib) {
     return num_complex;
 }
 
-void get_grid(size_t n, int* grid){
-    grid[0] = 1; grid[1] = 1; grid[2] = 1;
-    int axit = 0;
-    int cur_n = n;
-    while(cur_n != 1){
-        grid[axit] *= 2;
-        ++axit % 3;
-        cur_n /= 2;
-    }
-    printf("grid %d %d %d\n", grid[0], grid[1], grid[2]);
-}
-
 void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export, std::string &data_path, std::string &chunk_path) 
 {
     if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
@@ -665,8 +653,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
     FilePath scene_path(file_name);
-    int *grid = new int[3];
-    get_grid(grid_num, grid);
 
     if (!obj::load_obj(scene_path, obj_file)) {
         error("Invalid OBJ file '", file_name, "'");
@@ -756,7 +742,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
   //  printf("memory used %d\n", physical_memory_used_by_process());
     // Setup camera
 
-    MeshChunk chunk = MeshChunk(obj_file, grid[0], grid[1], grid[2]);
+    MeshChunk chunk = MeshChunk(obj_file.bbox, grid_num);
     // Setup triangle mesh
     info("Generating triangle mesh for '", file_name, "'");
     const BBox &bbox = chunk.bbox; 
@@ -800,7 +786,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
      
-    for(int c = 0, n = chunk.size(); c < n; c++) {
+    for(int c = 0, n = chunk.size; c < n; c++) {
         auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c), false);
         //if chunk is empty ??
 		
@@ -1176,6 +1162,9 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     } else {
         os << "extern fn preprocess(settings: &Settings) -> () {}\n";
     }
+    os << "extern fn get_bbox() -> &[f32] { &["<< bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f, "
+       << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
+    os << "extern fn get_grid() -> &[f32] { &[" << chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f] }\n";
 
     if(ray_queuing) {
         os << "extern fn raybatching(settings: &Settings, iter: i32, dev: i32) -> () { \n"   

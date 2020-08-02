@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
         
         printf("before all gather %d\n", comm.rank);
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, processTime, 1, MPI_FLOAT, MPI_COMM_WORLD);
-//        rs.camera_rotate(0.3f, 0.0f);
+       // ps.camera_rotate(0.3f, 0.0f);
         auto ticks = std::chrono::high_resolution_clock::now();
         
         printf("before run %d\n", comm.rank);

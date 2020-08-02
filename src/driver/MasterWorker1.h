@@ -261,15 +261,17 @@ void Master::save_ray_batches(float *buffer, size_t size, size_t capacity, size_
 }
 
 void Master::ray_batching_master(int sppTask, int film_width, int film_height) {
+    ImageDecomposition * camera = ps->camera;
     Settings settings {
-        Vec3 { ps->eye.x, ps->eye.y, ps->eye.z },
-        Vec3 { ps->dir.x, ps->dir.y, ps->dir.z },
-        Vec3 { ps->up.x, ps->up.y, ps->up.z },
-        Vec3 { ps->right.x, ps->right.y, ps->right.z },
-        ps->w, ps->h,
+        Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
+        Vec3 { camera->dir.x, camera->dir.y, camera->dir.z },
+        Vec3 { camera->up.x, camera->up.y, camera->up.z },
+        Vec3 { camera->right.x, camera->right.y, camera->right.z },
+        camera->w, camera->h,
         Vec4_i32 { 0, 0, film_width, film_height},
         sppTask
     };
+    
     raybatching(&settings, 0, 0);
     
     int msg[MSG_SIZE];

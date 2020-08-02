@@ -207,12 +207,14 @@ void Node::work_thread(void* tmp, float *process_time, int devId, int devNum, bo
     int seed = comm->rank * devNum + devId;
     printf("width %d height%d spp %d dev id %d local chunk %d\n", ps->width, ps->height, sppDev, devId, ps->get_local_chunk() );
     printf("region %d %d %d %d\n", region[0], region[1], region[2], region[3]);
+    
+    ImageDecomposition * camera = ps->camera;
     Settings settings {
-        Vec3 { ps->eye.x, ps->eye.y, ps->eye.z },
-        Vec3 { ps->dir.x, ps->dir.y, ps->dir.z },
-        Vec3 { ps->up.x, ps->up.y, ps->up.z },
-        Vec3 { ps->right.x, ps->right.y, ps->right.z },
-        ps->w, ps->h,
+        Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
+        Vec3 { camera->dir.x, camera->dir.y, camera->dir.z },
+        Vec3 { camera->up.x, camera->up.y, camera->up.z },
+        Vec3 { camera->right.x, camera->right.y, camera->right.z },
+        camera->w, camera->h,
         Vec4_i32 { region[0], region[1], region[2], region[3]},
         sppDev
     };

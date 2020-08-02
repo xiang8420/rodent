@@ -1,10 +1,8 @@
 #pragma once
-#include "decomposition.h"
+#include "interface.h"
 #include <iostream>
 #include <thread>
-#ifndef PI 
-#define PI 3.14159265359f
-#endif
+#include "decomposition.h"
 
 class ProcStatus {
 private:
@@ -14,7 +12,8 @@ private:
     std::vector<bool> thread_idle;
     int  local_chunk;
     std::vector<int>  chunk_map;
-    
+    std::vector<int>  proc_chunk;
+    int region[4], proc_spp; 
    
     int buffer_size, buffer_capacity; 
     bool master, exit, load_new_chunk;
@@ -23,12 +22,12 @@ public:
     int proc_size, proc_rank;
     std::vector<int> global_rays;
     
+    struct ImageDecomposition *camera;   
     float3 eye;
     float3 dir;
     float3 right;
     float3 up;
     float w, h;
-    struct TileScheduler *tileScheduler;   
     int width, height, spp;
     bool image_decompose;
     bool rayQ;
@@ -38,6 +37,8 @@ public:
     void unlock(){mutex.unlock();}
     
     void set_chunk(int rank, int chunk) {
+        proc_chunk[rank] = chunk;
+
         chunk_map[chunk] = rank;
         if (rank == proc_rank)
             local_chunk = chunk;
@@ -85,14 +86,19 @@ public:
         return -1;
     }
     int* get_chunk_map(){return chunk_map.data();}
+    
+    int* get_proc_chunk(){return proc_chunk.data();}
+
     int get_chunk_size(){return chunk_size;}
 
     int get_local_chunk(){ return local_chunk;}
-    
+   
     int get_proc(int c) {return chunk_map[c];}
     
+    int get_chunk(int p) {return proc_chunk[p];}
+    
     int get_target_proc(int chunk_id) { return chunk_map[chunk_id];}
-
+    
     void set_thread_idle(int id, bool wait) { thread_idle[id] = wait;}
     
     bool is_thread_idle(int id) { return thread_idle[id]; }
@@ -198,7 +204,7 @@ public:
         return true;
     }
 
-    ProcStatus(const float3& e, const float3& d, const float3& u, float fov, int width, int height,
+    ProcStatus(const float3 e, const float3 d, const float3 u, float fov, int width, int height,
             int spp, int rank, int size, bool image, int cSize, bool rayQ, int dev, bool master) 
         : spp(spp), width(width), height(height), image_decompose(image), rayQ(rayQ), proc_rank(rank), 
           chunk_size(cSize), dev_num(dev), master(master) 
@@ -215,7 +221,9 @@ public:
         
         proc_size = master ? size - 1 : size;
         printf("before tile scheduler\n");
-        tileScheduler  = new TileScheduler(width, height, proc_rank, proc_size);
+        
+        camera  = new ImageDecomposition(e, d, u, fov, width, height, proc_rank, proc_size);
+        
         printf("after tile scheduler\n");
         thread_reset(); 
         proc_reset();
@@ -231,30 +239,34 @@ public:
         for(int i = proc_size; i < chunk_size; i++) 
             chunk_map[i] = -1;
         local_chunk = proc_rank;
-       
-
+        // 
+        proc_chunk.resize(proc_size);
+        proc_spp = spp;
+        camera->get_camera_info(&region[0], chunk_map.data(), local_chunk, proc_spp, image_decompose); 
+        printf("region %d %d %d %d \n chunk map ", region[0], region[1], region[2], region[3]);
+        for(int i = 0; i < chunk_size; i++) {
+            printf(" %d", chunk_map[i]);
+        }
+        //
         buffer_size =  1048576;
         buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         
         global_rays.resize(proc_size * proc_size);
     }
 
+    int get_tile_info(int* res, float* processTime) {
+        for(int i = 0; i < proc_size ;i++)
+            res[i] = region[i];
+        return proc_spp; 
+    }
+    
     void camera_rotate(float yaw, float pitch) {
-        dir = ::rotate(dir, right,  -pitch);
-        dir = ::rotate(dir, up,     -yaw);
-        dir = normalize(dir);
-        right = normalize(cross(dir, up));
-        up = normalize(cross(right, dir));
+        camera->rotate(yaw, pitch);
     }
 
     void camera_move(float x, float y, float z) {
         eye += right * x + up * y + dir * z;
     }
-    
-    int get_tile_info(int* region, float* processTime) {
-        return tileScheduler->get_camera_info(region, spp, processTime, image_decompose); 
-    }
-
 };
 
 

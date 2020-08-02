@@ -12,7 +12,7 @@ struct BBox {
     BBox() {}
     BBox(const float3& f) : min(f), max(f) {}
     BBox(const float3& min, const float3& max) : min(min), max(max) {}
-    BBox(float *value){
+    BBox(const float *value){
         min.x = value[0]; min.y = value[1]; min.z = value[2];
         max.x = value[3]; max.y = value[4]; max.z = value[5];
     }

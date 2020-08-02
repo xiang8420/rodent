@@ -14,6 +14,9 @@ struct Settings {
 extern fn get_spp() -> i32 { 1 }
 extern fn get_dev_num() -> i32 { 1 }
 extern fn get_chunk_num() -> i32 { 1 }
+extern fn get_bbox() -> &[f32] { &[-1.02f, 0f, -1.04f, 1f, 1.99f, 0.99f] }
+extern fn get_grid() -> &[f32] { &[2f, 2f, 2f] }
+
 extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, valid_camera: bool) -> () {}
 extern fn raybatching(settings: &Settings, iter: i32, dev: i32) -> () {}
 extern fn prerender(settings: &Settings) -> () {}

@@ -16,6 +16,9 @@ struct float3 {
     float3() {}
     explicit float3(float x) : x(x), y(x), z(x) {}
     explicit float3(const float4& xyz);
+    float3(const float * value) {
+        x = value[0]; y = value[1]; z = value[2];
+    }
     float3(float x, float y, float z) : x(x), y(y), z(z) {}
     float3(const float2& xy, float z) : x(xy.x), y(xy.y), z(z) {}
     float3(float x, const float2& yz) : x(x), y(yz.x), z(yz.y) {}
