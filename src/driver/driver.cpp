@@ -80,7 +80,8 @@ int main(int argc, char** argv) {
     size_t width  = 1024;
     size_t height = 1024;
     float fov = 60.0f;
-    bool imageDecompose = false;
+    bool imageDecompose = true;//false;
+    std::string distributedMode = "P2PNode";
     int granularity = 1; 
     float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
 //    float3 eye(-3.0f, 2.0f, -7.0f), dir(0.0f, 0.0f, 1.0f), up(0.0f, 1.0f, 0.0f);
@@ -126,6 +127,9 @@ int main(int argc, char** argv) {
             } else if (!strcmp(argv[i], "--grid")){
                 check_arg(argc, argv, i, 1);
                 imageDecompose = strtoul(argv[++i], nullptr, 10);
+            } else if (!strcmp(argv[i], "--DMode")){
+                check_arg(argc, argv, i, 1);
+                distributedMode = argv[++i];
             } else {
                 error("Unknown option '", argv[i], "'");
             }
@@ -149,18 +153,17 @@ int main(int argc, char** argv) {
     uint32_t iter = 0;
     
     // mpi
-    struct Communicator comm;
-    bool   use_master = (comm.size > 1 && comm.size % 2 == 1);
+    struct Communicator comm;  
     printf("comm size %d\n", comm.size); 
-    int    worker_size = use_master ? comm.size - 1: comm.size;
-    int    master_id = worker_size; 
-    int    rank = comm.rank;
-    ProcStatus ps(eye, dir, up, fov, width, height, spp, rank, comm.size, 
-            imageDecompose, get_chunk_num(), false/*ray queuing*/, get_dev_num(),  use_master);
-    printf("after construct rendersettings \n "); 
-    setup_distributed_framework("P2P", &comm, &ps); 
+    int    worker_size = comm.pure_master ? comm.size - 1: comm.size;
     
-    // time 
+    // inital process setting and status  
+    ProcStatus ps(eye, dir, up, fov, width, height, spp, comm.rank, comm.size, 
+            imageDecompose, get_chunk_num(), false/*ray queuing*/, get_dev_num(),  comm.pure_master);
+    printf("after construct rendersettings \n "); 
+    setup_distributed_framework(distributedMode, &comm, &ps); 
+    
+    // time statistic 
     std::vector<double> samples_sec;
     float *processTime = new float[worker_size];
     for(int i = 0; i < worker_size; i++){
@@ -172,34 +175,35 @@ int main(int argc, char** argv) {
     int frame = 0;
     int pixel_num = width * height * 3;
     float *reduce_buffer = new float[pixel_num];
-    printf("beforether %d\n", rank);
+    printf("before rendering %d\n", comm.rank);
     
     while(frame < 1) {
         clear_pixels();
+        
+        printf("before all gather %d\n", comm.rank);
         MPI_Allgather(&elapsed_ms, 1, MPI_FLOAT, processTime, 1, MPI_FLOAT, MPI_COMM_WORLD);
 //        rs.camera_rotate(0.3f, 0.0f);
         auto ticks = std::chrono::high_resolution_clock::now();
         
+        printf("before run %d\n", comm.rank);
         dfw_run(processTime);
-        printf("end init\n");
+        printf("after dfw run\n");
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
-//        if(comm.rank == 0)
-            film = get_pixels();
-//        else 
-//            film = new float[pixel_num];
-        if(rank != master_id) {
-            printf("%d before reduce\n", rank);
-            comm.reduce_image(film, reduce_buffer, pixel_num, use_master);
+        
+        film = get_pixels();
+        
+        if(comm.rank != comm.master || !comm.pure_master) {
+            printf("%d before reduce\n", comm.rank);
+            comm.reduce_image(film, reduce_buffer, pixel_num);
         }
-        printf("%d end reduce\n", rank);
-
-        printf("process %d time %f", rank, float(elapsed_ms));
+        
+        printf("end reduce process %d time %f", comm.rank, float(elapsed_ms));
         
         frames++;
         std::string out = out_file + "f" + std::to_string(frames) + "w" + std::to_string(worker_size) + "g" + std::to_string(get_chunk_num());
         out += ".png";
-        if (rank == 0 && out_file != "") {
+        if (comm.rank == 0 && out_file != "") {
             float total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
             save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
             printf("0 node proc time %f \n", total_ms);
@@ -214,7 +218,7 @@ int main(int argc, char** argv) {
          "/", samples_sec[samples_sec.size() / 2] * inv,
          "/", samples_sec.back() * inv,
          " (min/med/max Msamples/s)");
-    printf("%d end\n", rank);  
+    printf("%d end\n", comm.rank);  
     
     return 0;
 }

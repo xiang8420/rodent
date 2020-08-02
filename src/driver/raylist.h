@@ -15,7 +15,7 @@ struct Rays {
 
     int check_capacity(int);
 
-    void read_from_device(float *rays, int src, int num, int rays_capacity, int rank);
+    void read_device_buffer(float *rays, int src, int num, int rays_capacity, int rank);
 
     int write_to_device_buffer(Rays * , int, int, int, bool ); 
     
@@ -85,6 +85,8 @@ struct RayList {
     
     void read_from_message(char*, int, int, int); 
     
+    static void read_from_message(RayList **, char*, int, int);
+     
     static void classification(RayList ** raylists, Rays *raybuffer);
 };
 

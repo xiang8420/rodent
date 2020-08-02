@@ -4,22 +4,23 @@
 #include <condition_variable>
 #include "mpi.h"
 
+enum MsgType {Status, Ray, Schedule, Quit};
+
 struct MessageHeader {
-    int  broadcast_root; // will be -1 for point-to-point
-    int  sender;                 // will be -1 for broadcast
-    int  type;
-    int  content_size;
-    int  primary;
-    int  secondary;       //logic size of 3 types of rays primary, secondary, camera ray
-    int  chunk;
-    bool collective;
-    bool idle;      //if this process is idle
-    char padding[2]; 
+    int      root;                   // will be -1 for point-to-point
+    int      sender;                 // will be -1 for broadcast
+    MsgType  type; //0 status, 1 rays , 2 quit
+    int      content_size;
+    int      primary, secondary;    
+    int      chunk;   //-1 means mixed rays
+    bool     collective;
+    bool     idle;      //if this process is idle
+//    int      padding[2]; 
 
     MessageHeader(){}
 
-    MessageHeader(int a, int b, int c, bool d, int e, bool f, int g) 
-        : broadcast_root(a), sender(b), type(c), collective(d), content_size(e), idle(f), chunk(g)
+    MessageHeader(int root, int sender, MsgType type, bool collective, int size, bool idle, int chunk) 
+        : root(root), sender(sender), type(type), collective(collective), content_size(size), idle(idle), chunk(chunk)
     {
        primary   = 0; 
        secondary = 0; 
@@ -41,10 +42,6 @@ protected:
 public:
     Message();
     
-    Message(MPI_Status &status, MPI_Comm comm);
-    
-    Message(RayList** List, MPI_Status &status, MPI_Comm comm); 
-    
     Message(MessageHeader *h): header(h) { }
 
     // write content to a raylists
@@ -61,11 +58,15 @@ public:
 	    mutex.unlock();
     }
 
+    bool exit_msg() {return header->type == 2; }
+    bool ray_msg() {return header->type == 1; }
+    bool status_msg() {return header->type == 0; }
+
 	bool is_busy() { return !header->idle; }
 
     int  get_type() { return header->type; }
     
-    void set_type(int t) { header->type = t; }
+    void set_type(int t) { header->type = MsgType(t); }
 
     int get_chunk() { 
         if (header->chunk < 0)
@@ -84,11 +85,11 @@ public:
 
     size_t get_size() { return content.size(); }
 
-    int get_root() { return header->broadcast_root; }
+    int get_root() { return header->root; }
     
     int get_sender() { return header->sender; }
 
-    bool is_broadcast() { return header->broadcast_root != -1; }
+    bool is_broadcast() { return header->root != -1; }
     
     bool isP2P() { return ! is_broadcast(); }
 
@@ -122,12 +123,15 @@ class RayMsg : public Message{
 
 public:
     RayMsg(RayList* outList, int src, int dst, int chunk, bool idle);
+    RayMsg(RayList** List, int src, int dst, int chunk_size, bool idle);
 };
 
 class RecvMsg : public Message {
 
 public:
+    RecvMsg(MPI_Status &status, MPI_Comm comm);
     
+    RecvMsg(RayList** List, MPI_Status &status, MPI_Comm comm); 
 };
 
 class QuitMsg : public Message {
@@ -139,5 +143,11 @@ public:
 class StatusMsg : public Message {
 
 public:
-    StatusMsg(int , int* , int);
+    StatusMsg(int , int, int* , int, int);
+};
+
+class ScheduleMsg : public Message {
+
+public:
+    ScheduleMsg(int , int*, int, int);
 };

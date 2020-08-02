@@ -181,12 +181,12 @@ struct MeshChunk{
                 for(int k = 0; k < scale[2]; k++){
                     float z = bbox.min.z + k * step.z;
                     struct BBox bb;
-                    bb.min.x = x - 0.00001f;
-                    bb.min.y = y - 0.00001f;
-                    bb.min.z = z - 0.00001f;
-                    bb.max.x = ((i == scale[0] - 1)? bbox.max.x:x + step.x) + 0.0001f;
-                    bb.max.y = ((j == scale[1] - 1)? bbox.max.y:y + step.y) + 0.0001f;
-                    bb.max.z = ((k == scale[2] - 1)? bbox.max.z:z + step.z) + 0.0001f;
+                    bb.min.x = x - 0.01f;
+                    bb.min.y = y - 0.01f;
+                    bb.min.z = z - 0.1f;
+                    bb.max.x = ((i == scale[0] - 1)? bbox.max.x:x + step.x) + 0.01f;
+                    bb.max.y = ((j == scale[1] - 1)? bbox.max.y:y + step.y) + 0.01f;
+                    bb.max.z = ((k == scale[2] - 1)? bbox.max.z:z + step.z) + 0.01f;
                     printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
                     list.push_back(bb);  //emplace_back
                 }

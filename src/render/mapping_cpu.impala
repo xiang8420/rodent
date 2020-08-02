@@ -23,7 +23,7 @@ fn @cpu_parallel_tiles( image: Tile
     let width  = image.xmax - image.xmin;
     let height = image.ymax - image.ymin;
     let num_cores = rodent_cpu_get_thread_num(); 
-    print_string("num_cores");
+    print_string("rodent num_cores");
     print_i32(num_cores);
     let (tile_width, tile_height) = match fixed_tile {
         true => (tile_size, tile_size), 
@@ -41,10 +41,11 @@ fn @cpu_parallel_tiles( image: Tile
     for i in parallel(num_cores, 0, num_cores) {
         let y = fast_div(tiles_div, i as u32) as i32;
         let x = i - num_tiles_x * y;
-        let xmin = x * tile_width;
-        let ymin = y * tile_height;
-        let xmax = cpu_intrinsics.min(xmin + tile_width,  width);
-        let ymax = cpu_intrinsics.min(ymin + tile_height, height);
+        let xmin = image.xmin + x * tile_width;
+        let ymin = image.ymin + y * tile_height;
+        let xmax = cpu_intrinsics.min(xmin + tile_width,  image.xmax);
+        let ymax = cpu_intrinsics.min(ymin + tile_height, image.ymax);
+        print_string("rener tile setting");
         print_i32(xmin);
         print_string(" ");
         print_i32(xmax); 
@@ -970,8 +971,6 @@ fn @cpu_ray_batching(camera: Camera
                    , min_max: MinMax
                    , vector_width: i32
                    ) -> () {
-   
-//    let (film_pixels, film_width, film_height) = cpu_get_film_data();
 //    let spp = camera.spp;
 //    let image_region = camera.region;
 //    let (tile_width, tile_height) = cpu_get_tile(image_region.xmax - image_region.xmin, image_region.ymax - image_region.ymin, thread_size); 

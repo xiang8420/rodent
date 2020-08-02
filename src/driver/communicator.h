@@ -22,31 +22,21 @@ struct Communicator {
     MPI_Comm Client_Comm;
     int rank, size, master;
     int group_rank, group_size;
-    bool first;
-    bool pause, quit;
+    bool pure_master;
     std::ofstream os;
    
     int send_ray_count, recv_ray_count;
     int send_msg_count, recv_msg_count;
         
-
-    std::mutex mutex;
-    std::condition_variable cond; // primary, secondary buffer size < max
-
     std::vector<mpi_send_buffer*> mpi_in_flight;
 
     Communicator();
     ~Communicator(); 
-    
-    void lock() { mutex.lock(); }
-    void unlock() { mutex.unlock(); }
-    void signal() { cond.notify_all(); }
-    void wait() {
-        std::unique_lock <std::mutex> lk (mutex);
-        cond.wait(lk); 
-    } 
+   
+    int work_node(){return master;} 
+    int isMaster(){return rank == master;} 
 
-    void reduce_image(float* film, float *reduce_buffer, int pixel_num, bool server);
+    void reduce_image(float* film, float *reduce_buffer, int pixel_num);
     
     void Isend_rays(struct Rays* buffer, int size, int dst, int tag); 
     void mpi_wait(int tag);
@@ -68,11 +58,9 @@ struct Communicator {
 
     bool recv_message(RayList** list, ProcStatus *rs); 
     
-    bool send_message(Message* msg, ProcStatus *rs); 
+    void send_message(Message* msg, ProcStatus *rs); 
 
     void collective(ProcStatus *rs); 
-
-    bool barrier(struct RayList* out);
 
     void purge_completed_mpi_buffers(); 
 

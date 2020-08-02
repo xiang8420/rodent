@@ -9,7 +9,8 @@
 
 #include "Node.h"
 #include "P2PNode.h"
-#include "MasterWorker.h"
+#include "MasterWorker1.h"
+#include "MasterWorker2.h"
 
 //
 struct DistributedFrameWork {
@@ -22,13 +23,19 @@ struct DistributedFrameWork {
     DistributedFrameWork(std::string type, Communicator *comm, ProcStatus *ps)
          :type(type), ps(ps), comm(comm) 
     {
-        if(type == "P2P") {
+        if(type == "P2PNode") {
             node = new P2PNode(comm, ps);
         } else if (type == "MasterWorker") {
             if(comm->rank == comm->size - 1)
                 node = new Master(comm, ps);
             else    
                 node = new Worker(comm, ps);
+        } else if(type == "P2PMaster") {
+            
+        } else if(type == "MWNode") {
+                node = new MWNode(comm, ps);
+        } else {
+            std::cerr << "Undifined node type\n";
         } 
     }
 
@@ -37,14 +44,8 @@ struct DistributedFrameWork {
     }
     
     void run(float* time) {
-        if(type == "P2P") {
-            node->run(time);
-        } else if (type == "MasterWorker") {
-            if(comm->rank == comm->size - 1)
-                node->run(time);
-            else    
-                node->run(time);
-        }
+        printf("dis frame worker run\n");
+        node->run(time);
     }
 };
 

@@ -11,16 +11,15 @@ private:
     int dev_num;
     int chunk_size;
     int cpu_thread_num;
-    int loaded_local_chunk_id;
     std::vector<bool> thread_idle;
-    std::vector<bool> proc_idle;
-    std::vector<int>  local_chunk;
+    int  local_chunk;
     std::vector<int>  chunk_map;
     
    
     int buffer_size, buffer_capacity; 
-    bool master, exit;
+    bool master, exit, load_new_chunk;
 public:    
+    std::vector<bool> proc_idle;
     int proc_size, proc_rank;
     std::vector<int> global_rays;
     
@@ -38,18 +37,10 @@ public:
     void lock(){mutex.lock();}
     void unlock(){mutex.unlock();}
     
-    
-    void set_chunks(){
-        //get chunk infomation from file
-        if(chunk_size > proc_size) {
-            printf("error, chunk_size > proc_size %d %d", chunk_size, proc_size);
-            return;
-        }
-        for(int i = 0; i < chunk_size; i++) {
-            chunk_map.emplace_back(i);
-        }
-        local_chunk.emplace_back(proc_rank);
-        loaded_local_chunk_id = 0;
+    void set_chunk(int rank, int chunk) {
+        chunk_map[chunk] = rank;
+        if (rank == proc_rank)
+            local_chunk = chunk;
     }
   
     void thread_reset() {
@@ -69,38 +60,38 @@ public:
     }
  
     bool is_proc_idle(){return proc_idle[proc_rank]; }
-
-    void set_self_idle(){proc_idle[proc_rank] = true;} 
-    
-    void set_self_busy(){proc_idle[proc_rank] = false;}
-
-    void set_proc_busy(int i){proc_idle[i] = false;}
-    
+    void set_proc_busy(int i){
+       // for(int i = 0; i < cpu_thread_num; i++) 
+       //     thread_idle[i] = false;
+        proc_idle[i] = false;
+    }
     void set_proc_idle(int i){proc_idle[i] = true; }
     
     int get_dev_num() {return dev_num;}
 
     bool all_proc_idle(){
-//        proc_wait[comm->rank] = proc_idle;
         for(int i = 0; i < proc_size; i++){
             if(!proc_idle[i]) 
                 return false;
         } 
         return true;
     }
-
+    
+    int get_idle_proc() {
+        for(int i = 0; i < proc_size; i++){
+            if(proc_idle[i]) 
+                return i;
+        } 
+        return -1;
+    }
+    int* get_chunk_map(){return chunk_map.data();}
     int get_chunk_size(){return chunk_size;}
 
-    int get_loaded_chunk(){ return local_chunk[loaded_local_chunk_id];}
+    int get_local_chunk(){ return local_chunk;}
     
-    std::vector<int>& get_local_chunk(){ return local_chunk;}
-
-    int get_new_chunk() {
-        loaded_local_chunk_id = (loaded_local_chunk_id + 1) % local_chunk.size();
-        return local_chunk[loaded_local_chunk_id];
-    }
-
-    int get_dst_proc(int chunk_id) { return chunk_map[chunk_id];}
+    int get_proc(int c) {return chunk_map[c];}
+    
+    int get_target_proc(int chunk_id) { return chunk_map[chunk_id];}
 
     void set_thread_idle(int id, bool wait) { thread_idle[id] = wait;}
     
@@ -108,10 +99,6 @@ public:
     
     bool isRayQueuing() { return rayQ; }
     
-    int get_rank() {return proc_rank;}
-    
-    int get_size() {return proc_size;}
-
     int get_buffer_capacity(){return buffer_capacity;}
 
     void set_buffer_capacity(int n){buffer_capacity = n;}
@@ -140,7 +127,7 @@ public:
         else 
             return false;
     }
-
+    
     bool update_global_rays(int* a) {
         int sent = 0, recv = 0;
         for(int i = 0; i < proc_size; i++) {
@@ -157,8 +144,49 @@ public:
         return true;
     }
 
+    //update chunk map , return if this proc need load new chunk
+    bool update_chunk(int* s) {
+        for(int i = 0; i < chunk_size; i++) {
+            printf("chunk_size %d chunk_map[i] %d  s[i] %d\n", chunk_size, chunk_map[i], s[i]);
+            if(chunk_map[i] != s[i]) {
+                chunk_map[i] = s[i];
+                if(chunk_map[i] == proc_rank) {
+                    local_chunk = i;
+                    load_new_chunk = true;
+                    printf("update chunk true\n");
+                }  
+            } 
+        } 
+        printf("update chunk false\n");
+        return load_new_chunk;
+    }
+    
+    bool update_chunk(int candidate_proc, int candidate_chunk) {
+        for(int i = 0; i < chunk_size; i++) {
+            if(chunk_map[i] == candidate_proc) {
+                chunk_map[i] = -1;  //set previous chunk unloaded
+            } 
+        } 
+        chunk_map[candidate_chunk] = candidate_proc;
+        printf("candidate chunk %d canidate proc %d\n", candidate_chunk, candidate_proc);
+        if(candidate_proc == proc_rank) {
+             local_chunk = candidate_chunk;
+             load_new_chunk = true;
+             return true;
+        } 
+        return false;
+    }
+    
+    void SetNewChunk(){load_new_chunk = true;}
 
-    bool set_exit() {return exit = true;}
+    void chunk_loaded() {
+        thread_reset(); 
+        load_new_chunk = false;
+    }
+
+    bool has_new_chunk(){return load_new_chunk;}
+
+    void set_exit() {exit = true;}
     
     bool Exit() {return exit;}
 
@@ -194,13 +222,17 @@ public:
          
         printf("after tile scheduler\n");
         exit = false;
+        load_new_chunk = true;
+      
+        //inital chunk map  
+        chunk_map.resize(chunk_size);
+        for(int i = 0; i < proc_size; i++) 
+            chunk_map[i] = i;
+        for(int i = proc_size; i < chunk_size; i++) 
+            chunk_map[i] = -1;
+        local_chunk = proc_rank;
+       
 
-        for(int i = 0; i < chunk_size; i++) {
-            chunk_map.emplace_back(i);
-        }
-        local_chunk.emplace_back(proc_rank);
-        loaded_local_chunk_id = 0;
-        
         buffer_size =  1048576;
         buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         

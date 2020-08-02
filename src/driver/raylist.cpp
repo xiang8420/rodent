@@ -27,7 +27,7 @@ Rays::Rays(int capacity, int width, bool compact)
     mask = new bool[width];
     store_width = set_ray_mask(mask, width, compact);
     
-//    queue.reserve(2 * capacity * store_width);
+    queue.reserve(4 * capacity * store_width);
     queue.resize(capacity * store_width);
     size = 0;
 }
@@ -42,14 +42,7 @@ int Rays::check_capacity(int num) {
     }
 }
 
-void Rays::read_from_device(float *rays, int src, int num, int rays_capacity, int rank) {
-    std::ofstream os; 
-    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
-    os<< "check size "<< size <<" num " << num <<" capacity " << capacity <<" queue size "<< queue.size() << " q capacity "<<queue.capacity()<<"\n";
-    if(size + num >= capacity) {
-        os<<"put resize size + num > capacity"<< size << " "<< num << " "<<capacity<<"\n" ;
-    }
-    
+void Rays::read_device_buffer(float *rays, int src, int num, int rays_capacity, int rank) {
     check_capacity(num);
     for(int i = 0, k = 0; i < logic_width; i++) {
         if(mask[i]) {
@@ -59,26 +52,6 @@ void Rays::read_from_device(float *rays, int src, int num, int rays_capacity, in
             k++;
         }
     }
-
-        os<<"read dev rays \n";
-        os<<"rays \n";
-        int *ids = (int*)rays;
-        for(int i = 0; i < 10; i ++) {
-            os<<"||"<<ids[i]<<" "<< ids[i + rays_capacity * 9];
-        }
-        os<<"\n";
-        os<<"list \n";
-        ids = (int*)queue.data();
-        for(int i = 0; i < 10; i ++) {
-            os<<"||"<<ids[i * store_width]<<" "<< ids[i * store_width + 9];
-        }
-        os<<"\n";
-        ids = (int*)queue.data();
-        os<<"list 0 " << num<<" "<<size<<"\n";
-        for(int i = 0; i < 10; i ++) {
-            os<<"#"<<ids[(i + size) * store_width]<<" "<<ids[(i + size) * store_width + 9];
-        }
-        os<<"\n\n";
     size += num;
 }
 
@@ -149,26 +122,23 @@ inline void swap(float **a, float **b) {
 void RayList::read_from_device_buffer(RayList ** raylist, float *raybuffer,  size_t size, size_t capacity, bool primary, int rank) {
     int width       = primary ? 21 : 14;
     int* chunkIds   = (int*)(raybuffer + 9 * capacity);
-    std::ofstream os; 
-    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
-    os<<"classification\n"; 
-    printf("classification\n");
-    int chunk = chunkIds[0] >> 12;
-    
-    Rays *rays = primary ? raylist[chunk]->primary : raylist[chunk]->secondary;
-    rays->read_from_device(raybuffer, 0, size, capacity, rank); 
 
-    os<<"end classification\n"; 
-    printf("end classification\n");
-//    for(int i = 0; i < size; i++) {
-//        int chunk = chunkIds[i] >> 12;
-////        printf("chunk %d \n", chunkIds[i]);
-//        Rays *list = primary ? raylist[chunk]->primary : raylist[chunk]->secondary;
-//        list->read_from_device(raybuffer, i, 1, capacity, rank); 
-//        if(list->full()){
-//            printf("error queue is is full %d %d \n", chunk, raylist[chunk]->primary->get_size());   
-//        }
-//    }
+    int st = 0, num = 0; 
+    int tmp = chunkIds[0] >> 12;
+    for(int i = 0; i < size; i++) {
+        int chunk = chunkIds[i] >> 12;
+        if(chunk == tmp) {
+            num ++;
+        } else {
+            Rays *list = primary ? raylist[tmp]->primary : raylist[tmp]->secondary;
+            list->read_device_buffer(raybuffer, st, num, capacity, rank); 
+            tmp = chunk;
+            st = i; 
+            num = 1; 
+        }
+    }
+    Rays *list = primary ? raylist[tmp]->primary : raylist[tmp]->secondary;
+    list->read_device_buffer(raybuffer, st, num, capacity, rank); 
 }
 
 void RayList::write_to_device_buffer(RayList *buffer, int rank) {
@@ -197,7 +167,6 @@ void RayList::read_from_message(char* src_ptr, int msg_primary_size, int msg_sec
         }
         
         primary->read_from_ptr(src_ptr, msg_primary_size); 
-        int   primary_length = msg_primary_size * primary->store_width * sizeof(float);
         src_ptr += msg_primary_size * primary->store_width * sizeof(float); 
     } 
     if(msg_secondary_size > 0) {
@@ -214,35 +183,44 @@ void RayList::read_from_message(char* src_ptr, int msg_primary_size, int msg_sec
     os<<"end read from message\n"; 
 }
 
-//void RayList::write_to_message(Message *msg){
-//
-//    if(outList->empty()) return 0;
-//  
-//    Rays* primary = outList->get_primary(); 
-//    int width = primary->store_width; 
-//    int* ids = (int*)(primary->get_data());
-//    for(int i = 0; i < 5; i ++) {
-//        printf(" %d %d$", ids[i*width], ids[i*width + 9]);
-//    }
-//    printf("\n");
-//
-//
-//    header->primary = outList->get_primary()->size; 
-//    header->secondary = outList->get_secondary()->size; 
-//
-//    printf("serialize size %d %d:", header->primary, header->secondary);
-//    
-//    int primary_length = header->primary * outList->get_primary()->store_width * sizeof(float);
-//    int secondary_length = header->secondary * outList->get_secondary()->store_width * sizeof(float);
-//    content.resize(primary_length + secondary_length);
-//    printf("Semd Message size %d\n", content.size());  
-//
-//    char* ptr = content.data();
-//    memcpy(ptr, outList->get_primary()->get_data(), primary_length);
-//    memcpy(ptr + primary_length, outList->get_secondary()->get_data(), secondary_length);
-//    
-//    return primary_length + secondary_length;
-//}
+void RayList::read_from_message(RayList** rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {
+    std::ofstream os; 
+    os.open("out/proc_buffer_master", std::ios::out | std::ios::app ); 
+    os<<"master read from message\n"; 
+    
+    int* id_ptr = (int*) ptr;
+    int width = rayList[0]->get_primary()->store_width;
+    int st = 0, ed = 0; 
+    int tmp = id_ptr[9] >> 12;
+    while(ed < msg_primary_size) {
+        ed ++;
+        int chunk = id_ptr[ed * width + 9] >> 12;
+        if( chunk != tmp || ed == msg_primary_size - 1) {
+            os<<"copy st "<<st<<" ed "<<ed<<"chunk "<<chunk<<" tmp "<<tmp<<"\n"; 
+            rayList[tmp]->get_primary()->read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
+            tmp = chunk;
+            st = ed; 
+        } 
+    } 
+    os<<"secondary \n"; 
+    ptr = ptr + msg_primary_size * width * sizeof(float); 
+    width = rayList[0]->get_secondary()->store_width;
+    id_ptr = (int*) ptr;
+    st = 0; ed = 0; 
+    tmp = id_ptr[9] >> 12;
+    while(ed < msg_secondary_size) {
+        ed ++;
+        int chunk = id_ptr[ed * width + 9] >> 12;
+        if( chunk != tmp || ed == msg_secondary_size - 1) {
+            os<<"copy st "<<st<<" ed "<<ed<<"chunk "<<chunk<<" tmp "<<tmp<<"\n"; 
+            rayList[tmp]->get_secondary()->read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
+            tmp = chunk;
+            st = ed; 
+        } 
+    } 
+
+    os<<"end read from message\n\n"; 
+}
 
 void RayList::classification(RayList ** raylist, Rays *raybuffer) {
     int *bufferdata   = (int*) raybuffer->get_data();
