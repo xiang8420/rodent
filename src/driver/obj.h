@@ -7,7 +7,7 @@
 
 #include "float3.h"
 #include "color.h"
-#include "file_path.h"
+#include "FilePath.h"
 #include "bbox.h"
 
 namespace obj {

@@ -3,15 +3,19 @@
 #include <vector>
 #include <mutex>
 
+#define RAY_COMPACT true
+
 struct Rays {
-    std::vector<float> queue;
+    std::vector<float> data;
     int size, capacity, logic_width, store_width;
     bool compact; 
     bool *mask;
 
     Rays(int capacity, int width, bool compact); 
+    
+    Rays(float *, int, int, int); 
 
-    ~Rays(){queue.clear();}
+    ~Rays(){data.clear();}
 
     int check_capacity(int);
 
@@ -23,13 +27,13 @@ struct Rays {
     
     void read_from_ptr(char *src_ptr, int copy_size);
 
-    float& operator[](int id) { return queue[id];}
+    float& operator[](int id) { return data[id];}
 
     bool full() { return size == capacity; }
 
     bool empty() {return size <= 0;}
 
-    float* get_data() {return queue.data(); }
+    float* get_data() {return data.data(); }
 
     int clear() {
         int s = size;
@@ -90,3 +94,62 @@ struct RayList {
     static void classification(RayList ** raylists, Rays *raybuffer);
 };
 
+struct RayStreamList {
+    std::vector<Rays *> primary;
+    std::vector<Rays *> secondary;
+    
+    int logic_capacity, store_capacity;  //1048576 1048608 
+    std::string type;
+    std::mutex mutex;
+
+    RayStreamList (int capacity) {
+        logic_capacity = capacity;
+        store_capacity = (capacity & ~((1 << 5) - 1)) + 32; // round to 32
+    }
+    
+    ~RayStreamList() {}
+    
+    int primary_size(){return primary.size();}    
+    
+    int secondary_size(){return secondary.size();}    
+
+    bool empty() { return primary.empty() && secondary.empty(); } 
+
+    //别忘了delete rays
+    Rays* get_primary() {
+        if(!primary.empty()) {
+            Rays * rays = primary.back();
+            primary.pop_back();
+            return rays;
+        } else {
+            printf("return get primary null \n");
+            return NULL; 
+        }
+    }
+
+    Rays* get_secondary() {
+        if(!secondary.empty()) {
+            Rays * rays = secondary.back();
+            secondary.pop_back();
+            return rays;
+        } else {
+            printf("return get secondary null \n");
+            return NULL; 
+        }
+    }
+
+    int size() {
+        return primary.size() + secondary.size();
+    }
+
+    void clear() {
+        primary.clear() ;
+        secondary.clear();
+    }
+
+    void lock() { mutex.lock();}
+    
+    void unlock() { mutex.unlock();}
+    
+    void read_from_message(char*, int, int, int); 
+};

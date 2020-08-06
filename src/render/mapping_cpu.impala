@@ -758,7 +758,7 @@ fn @cpu_dis_trace( scene: Scene
             rodent_cpu_get_secondary_outcome_stream(&mut out_secondary,   capacity);
             let mut id = 0;
             let num_rays = spp_thread * (ymax - ymin) * (xmax - xmin);
-            if !valid_camera {  id = num_rays; }
+            if !valid_camera { id = num_rays; }
             
             let print_node = 1;
             let mut idle = false;
@@ -770,8 +770,7 @@ fn @cpu_dis_trace( scene: Scene
                     primary.size = cpu_generate_rays(primary, capacity, path_tracer.on_emit, &mut id, xmin, ymin, xmax, ymax, 
                                                 film_width, film_height, tid, spp_thread, vector_width);
                 }
-//                print_string("after generate rays\n");
-//                with cpu_profile(&mut transfer_counter) {
+                with cpu_profile(&mut transfer_counter) {
                     let (primary_size, out_primary_size) = cpu_primary_transfer(primary, out_primary, min_max, vector_width, capacity, id == num_rays, scene);
                     primary.size = primary_size; 
                     out_primary.size = out_primary_size; 
@@ -783,7 +782,7 @@ fn @cpu_dis_trace( scene: Scene
                             out_primary.size = 0;
                         }
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, idle); 
-                        rodent_first_primary_check(-1, primary.size, 1, true);                
+//                        rodent_first_primary_check(-1, primary.size, 1, true);                
                     }    
                     if(primary.size < 0) {
                         print_string("end rendering"); print_i32(primary.size); 
@@ -792,9 +791,7 @@ fn @cpu_dis_trace( scene: Scene
                         print_string(" "); print_i32(out_secondary.size);
                         break()
                     }
-//                }
-//                print_string("after communicator rays\n");
-//                rodent_first_primary_check(-1, primary.size, 1, true);                
+                }
                 // Trace primary rays
                 with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {
                     if use_embree {
@@ -803,7 +800,6 @@ fn @cpu_dis_trace( scene: Scene
                         cpu_traverse_primary(scene, min_max, primary, single, vector_width);
                     }
                 }
-//                print_string("after intersection rays\n");
                 // Sort hits by shader id, and filter invalid hits
                 let mut ray_begins : [i32 * 1024];
                 let mut ray_ends   : [i32 * 1024];
@@ -833,7 +829,6 @@ fn @cpu_dis_trace( scene: Scene
                             out_secondary.size = 0;
                         }
                         secondary.size = rodent_worker_secondary_recv(-1, secondary.size, true, tid, idle); 
-                        rodent_secondary_check(-1, secondary.size, 1, true); 
                     }
                 }
                 if secondary.size < 0 {
@@ -866,9 +861,10 @@ fn @cpu_dis_trace( scene: Scene
                         );
                     }
                 }
+        //        secondary.size = 0; //secondary_size; 
                 with cpu_profile(&mut transfer_counter) {
                     let (secondary_size, out_secondary_size) = cpu_secondary_transfer(secondary, out_secondary, min_max, vector_width, capacity, id == num_rays, scene);
-        //            check_secondary_grid_id(secondary, scene.chunk, 3);
+                    check_secondary_grid_id(secondary, scene.chunk, 3);
                     secondary.size = secondary_size; 
                     out_secondary.size = out_secondary_size;
                 } 
@@ -966,43 +962,6 @@ extern fn cpu_sort_primary_grid(primary: &PrimaryStream, ray_begins: &mut [i32],
     ray_ends(num_grids - 1) 
 }
 
-fn @cpu_ray_batching(camera: Camera
-                   , domain: Domain
-                   , min_max: MinMax
-                   , vector_width: i32
-                   ) -> () {
-//    let spp = camera.spp;
-//    let image_region = camera.region;
-//    let (tile_width, tile_height) = cpu_get_tile(image_region.xmax - image_region.xmin, image_region.ymax - image_region.ymin, thread_size); 
-//    
-//    print_string("ray queuing\n");   
-//    let iter = 0;
-//    for xmin, ymin, xmax, ymax, tid in cpu_parallel_tiles(image_region, tile_size, true) {
-//        let mut primary   : PrimaryStream;
-//        let capacity = spp * tile_width * tile_height;
-//        rodent_cpu_get_primary_stream(&mut primary,     capacity);
-//        let num_rays = spp * (ymax - ymin) * (xmax - xmin);
-//        let mut id = 0; 
-//        // Generate primary rays
-//        primary.size = cpu_generate_rays(primary, capacity, make_camera_emitter(camera, iter), &mut id, xmin, ymin, xmax, ymax, 
-//                                        film_width, film_height, spp, vector_width);
-//        
-////        print_string("primary.size"); print_i32(primary.size);
-////        print_string("thread:"); print_i32(tid); print_string(" ");print_i32(xmin); print_string(" ");print_i32(xmax); print_string(" ");
-////                    print_i32(ymin); print_string(" ");print_i32(ymax); print_string(" \n");
-//        let num_grids = cpu_get_grid( primary, domain, min_max, vector_width, capacity);
-//        
-//        rodent_first_primary_check(-1, primary.size, 1, true);                
-//        let mut ray_begins : [i32 * 1024];
-//        let mut ray_ends   : [i32 * 1024];
-//        //sort
-//        primary.size = cpu_sort_primary_grid(primary, &mut ray_begins, &mut ray_ends, num_grids);
-//        print_string("\n after sort primary.size"); print_i32(primary.size);
-//        rodent_master_save_ray_batches(-1, tid, primary.size); 
-//        //write
-//    }
-
-}
 // CPU device ----------------------------------------------------------------------
 
 fn @make_cpu_device(  use_embree: bool
@@ -1015,14 +974,6 @@ fn @make_cpu_device(  use_embree: bool
                     ) -> Device {
     Device {
         intrinsics: cpu_intrinsics,
-        ray_batching: @|camera, domain, spp| {
-            cpu_ray_batching(
-                  camera,
-                  domain,
-                  min_max,
-                  vector_width
-            )
-        },
         trace: @ |scene, path_tracer, spp| {
             if prerender {
                 cpu_trace(scene, path_tracer, min_max, single, tile_size, 

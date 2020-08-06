@@ -1,4 +1,4 @@
-#include "interface.h"
+#include "../driver/interface.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -7,31 +7,34 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#include "RayList.h"
+#include "communicator.h"
+#include "decomposition.h"
+#include "ProcStatus.h"
+
 #include "Node.h"
-#include "P2PNode.h"
-#include "MasterWorker1.h"
+//#include "P2PNode.h"
+//#include "MasterWorker1.h"
 #include "MasterWorker2.h"
+
+#define PRIMARY_WIDTH 21
+#define SECONDARY_WIDTH 14
 
 //
 struct DistributedFrameWork {
     Node *node;
     std::string type;
     
-    Communicator *comm;
-    ProcStatus *ps;
-
     DistributedFrameWork(std::string type, Communicator *comm, ProcStatus *ps)
-         :type(type), ps(ps), comm(comm) 
+         :type(type) 
     {
         if(type == "P2PNode") {
-            node = new P2PNode(comm, ps);
-        } else if (type == "MasterWorker") {
-            if(comm->rank == comm->size - 1)
-                node = new Master(comm, ps);
-            else    
-                node = new Worker(comm, ps);
-        } else if(type == "P2PMaster") {
-            
+    //        node = new P2PNode(comm, ps);
+    //    } else if (type == "MasterWorker") {
+    //        if(comm->rank == comm->size - 1)
+    //            node = new Master(comm, ps);
+    //        else    
+    //            node = new Worker(comm, ps);
         } else if(type == "MWNode") {
                 node = new MWNode(comm, ps);
         } else {
@@ -40,7 +43,8 @@ struct DistributedFrameWork {
     }
 
     ~DistributedFrameWork() {
-        delete node;
+        printf("delete distributed frame work\n");
+    //    delete node;
     }
     
     void run(float* time) {
@@ -66,6 +70,7 @@ void dfw_run(float* processTime) {
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
     printf("worker send\n");
     dfw->node->save_outgoing_buffer(rays, size, capacity, isPrimary);
+    printf("worker send success\n");
 }
 
 int recv_rays(float **rays, size_t size, bool isPrimary, int thread_id, bool thread_wait){

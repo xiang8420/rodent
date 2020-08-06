@@ -619,7 +619,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
         if primary.size < capacity && id < num_rays {
              primary.size = gpu_generate_rays(primary, capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
         }
-//        rodent_first_primary_check(1, primary.size, 1, true);     
+        rodent_first_primary_check(1, primary.size, 1, true);     
         print_string("before grid id: ");
         print_i32(primary.size);
         gpu_primary_grid(primary, acc, intrinsics, atomics, min_max, scene); 
@@ -656,7 +656,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
             print_string(" ");
             print_i32(num_rays);
         }
-//        rodent_secondary_check(1, secondary.size, 1, true);     
+        rodent_secondary_check(1, secondary.size, 1, true);     
         // Traverse primary rays
         gpu_traverse_primary(primary, acc, intrinsics, min_max, scene);
         print_string("sort\n"); 
@@ -932,7 +932,6 @@ fn @make_gpu_device( dev_id: i32
                    ) -> Device {
     Device {
         intrinsics: intrinsics,
-        ray_batching: @|camera, domain, spp| { },
         trace: @ |scene, path_tracer, spp| {
             if streaming {
                 gpu_streaming_trace(

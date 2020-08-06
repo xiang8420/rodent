@@ -1,4 +1,4 @@
-#include "raylist.h"
+#include "RayList.h"
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -23,23 +23,58 @@ inline int set_ray_mask(bool *mask, int width, bool compact) {
 }
 
 Rays::Rays(int capacity, int width, bool compact) 
-    : capacity(capacity), logic_width(width), compact(compact) {
+    : capacity(capacity), logic_width(width), compact(compact) 
+{
     mask = new bool[width];
     store_width = set_ray_mask(mask, width, compact);
     
-    queue.reserve(4 * capacity * store_width);
-    queue.resize(capacity * store_width);
+    data.reserve(4 * capacity * store_width);
+    data.resize(capacity * store_width);
     size = 0;
 }
 
-int Rays::check_capacity(int num) {
-//    printf("check size %d num %d capacity %d queue size %d queue capacity%ld\n", size, num, capacity, queue.size(), queue.capacity());
-    if(num + size >= capacity) {
-//        printf("put resize %ld capacity%ld %ld\n", queue.size(), queue.capacity(), queue.data());
-        capacity += std::max(num, 1048608);
-        queue.resize(capacity * store_width);
-//        printf("end put resize %ld capacity%ld %ld\n", queue.size(), queue.capacity(), queue.data());
+//read from float AoS ptr, get device SoA rays  capacity = 1048608
+Rays::Rays(float * ptr, int capacity, int width, int copy_size) 
+     :capacity(capacity) 
+{
+    compact = false;
+    logic_width = store_width = width;
+    mask = new bool[width];
+    set_ray_mask(mask, width, false);
+    data.resize(capacity * store_width);
+    
+    // mask used as ptr mask not this 
+    bool *ptr_mask = new bool[width];
+    int  ptr_logic_width = width; 
+    int  ptr_store_width = set_ray_mask(ptr_mask, ptr_logic_width, RAY_COMPACT);
+    
+    printf("new Rays ");
+    int*a = (int*)data.data();
+    int*b = (int*)ptr;
+    for(int i = 0, k = 0; i < ptr_logic_width; i++) {
+        if(ptr_mask[i]) {
+            for(int j = 0; j < copy_size; j++) {
+
+                data[j + i * capacity] = ptr[j * ptr_store_width + k];
+                if(j < 5  && (i == 0 || i ==9) ) 
+                    printf("| %d %d ", a[j + i * capacity], b[j * ptr_store_width + k]);
+            }
+            k++;
+        } 
     }
+    //mask change to ray itself
+    size = copy_size; 
+}
+
+int Rays::check_capacity(int num) {
+//    printf("check size %d num %d capacity %d data size %d data capacity%ld\n", size, num, capacity, data.size(), data.capacity());
+    if(num + size >= capacity) {
+//        printf("put resize %ld capacity%ld %ld\n", data.size(), data.capacity(), data.data());
+        capacity += std::max(num, 1048608);
+        data.resize(capacity * store_width);
+//        printf("end put resize %ld capacity%ld %ld\n", data.size(), data.capacity(), data.data());
+    }
+    return capacity;
 }
 
 void Rays::read_device_buffer(float *rays, int src, int num, int rays_capacity, int rank) {
@@ -47,7 +82,7 @@ void Rays::read_device_buffer(float *rays, int src, int num, int rays_capacity, 
     for(int i = 0, k = 0; i < logic_width; i++) {
         if(mask[i]) {
             for(int j = 0; j < num; j++) {
-                queue[(size + j) * store_width + k]  = rays[src + j + i * rays_capacity];
+                data[(size + j) * store_width + k]  = rays[src + j + i * rays_capacity];
             }
             k++;
         }
@@ -65,7 +100,7 @@ int Rays::write_to_device_buffer(Rays * buffer, int buffer_size, int rays_capaci
     for(int i = 0, k = 0; i < logic_width; i++) {
         if(mask[i]) {
             for(int j = 0; j < copy_size; j++) {
-                rays[j + i * rays_capacity] = queue[(src + j) * store_width + k];
+                rays[j + i * rays_capacity] = data[(src + j) * store_width + k];
             }
             k++;
         } else {
@@ -78,12 +113,13 @@ int Rays::write_to_device_buffer(Rays * buffer, int buffer_size, int rays_capaci
     return copy_size;
 }
 
+
 void Rays::read_from_rays(struct Rays* a, int st){
 //    printf("write to rays ptr\n");
     check_capacity(1);
     if(a->store_width != store_width) printf("width not match");
     for(int i = 0; i < store_width; i++){
-        queue[size * store_width + i] = a->queue[st * store_width + i];
+        data[size * store_width + i] = a->data[st * store_width + i];
     }
     size ++;
 }
@@ -174,11 +210,6 @@ void RayList::read_from_message(char* src_ptr, int msg_primary_size, int msg_sec
             os<<" read from message resize secondary size"<<secondary->size<<" "<<msg_secondary_size<<" "<<secondary->capacity<<"\n"; 
         }
         secondary->read_from_ptr(src_ptr, msg_secondary_size); 
-//        secondary->check_capacity(msg_secondary_size); 
-//        char* secondary_copy_ptr  = (char*)secondary->get_data() + secondary->size * secondary->store_width * sizeof(float);
-//        int secondary_length = msg_secondary_size * secondary->store_width * sizeof(float);
-//        memcpy(secondary_copy_ptr, src_ptr, secondary_length);
-//        secondary->size += msg_secondary_size; 
     }
     os<<"end read from message\n"; 
 }
@@ -231,7 +262,7 @@ void RayList::classification(RayList ** raylist, Rays *raybuffer) {
             int chunk = bufferdata[i * width + 9]  >> 12;
             raylist[chunk]->primary->read_from_rays(raybuffer, i);
             if(raylist[chunk]->primary->full()){
-                printf("error queue is is full %d %d \n", chunk, raylist[chunk]->primary->get_size());   
+                printf("error data is is full %d %d \n", chunk, raylist[chunk]->primary->get_size());   
             }
         }
     } else {
@@ -239,10 +270,76 @@ void RayList::classification(RayList ** raylist, Rays *raybuffer) {
             int chunk = bufferdata[i * width + 9]  >> 12;
             raylist[chunk]->secondary->read_from_rays(raybuffer, i);
             if(raylist[chunk]->secondary->full()){
-                printf("error queue is is full %d %d \n", chunk, raylist[chunk]->secondary->get_size());   
+                printf("error data is is full %d %d \n", chunk, raylist[chunk]->secondary->get_size());   
             }
         }
     }
     raybuffer->clear();
 }
 
+void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int msg_secondary_size, int rank) {
+    std::ofstream os; 
+    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
+    printf("read from message\n");
+    os<<"read from message\n"; 
+
+    int copy_size = std::min(logic_capacity, msg_primary_size);
+    float *ptr = (float*)src_ptr;
+     
+    while(copy_size > 0) {
+        Rays * rays   = new struct Rays(ptr, store_capacity, 21, copy_size);
+        
+
+
+        int * ids = (int*)ptr;
+        os<<"primary copy size "<<copy_size<<"\n"<<" ptr ray";
+        for(int i = 0; i < 5; i ++) {
+            os<<"| "<< ids[i * 16] <<" "<< ids[i * 16 + 9] << " ";
+        } os<<"\n ";
+
+        ids = (int*)(rays->get_data());
+        os<<"rays ray ";
+        for(int i = 0; i < 5; i ++) {
+            os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
+        } os<<"\n";
+
+
+
+        msg_primary_size -= copy_size; 
+        int width = RAY_COMPACT ? 16 : 21; 
+        ptr += copy_size * width; 
+        primary.emplace_back(rays);
+        
+        copy_size = std::min(logic_capacity, msg_primary_size);
+    } 
+    
+    copy_size = std::min(logic_capacity, msg_secondary_size);
+    while(copy_size > 0) {
+        Rays * rays   = new struct Rays(ptr, store_capacity, 14, copy_size);
+        
+ 
+
+        int * ids = (int*)ptr;
+        os<<"secondary copy size "<<copy_size<<"\n"<<" ptr ray";
+        for(int i = 0; i < 5; i ++) {
+            os<<"| "<< ids[i * 14] <<" "<< ids[i * 14 + 9] << " ";
+        } os<<"\n ";
+
+        ids = (int*)(rays->get_data());
+        os<<"rays ray ";
+        for(int i = 0; i < 5; i ++) {
+            os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
+        } os<<"\n";
+ 
+
+
+
+        msg_secondary_size -= copy_size; 
+        int width = 14; 
+        ptr += copy_size * width; 
+        secondary.emplace_back(rays);
+        
+        copy_size = std::min(logic_capacity, msg_secondary_size);
+    } 
+    os<<"RayStreamList end read from ptr\n"; 
+}

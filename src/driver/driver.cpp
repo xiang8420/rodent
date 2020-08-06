@@ -15,9 +15,7 @@
 #include "float3.h"
 #include "common.h"
 #include "image.h"
-#include "ProcessStatus.h"
-#include "communicator.h"
-#include "DistributedFrameWork.h"
+#include "../distributed/DistributedFrameWork.h"
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
 #include <x86intrin.h>
 #endif
@@ -80,7 +78,6 @@ int main(int argc, char** argv) {
     size_t width  = 1024;
     size_t height = 1024;
     float fov = 60.0f;
-    bool imageDecompose = true;//false;
     std::string distributedMode = "P2PNode";
     int granularity = 1; 
     float3 eye(0.0f, 1.0f, 2.5f),dir(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);   //cbox
@@ -124,9 +121,6 @@ int main(int argc, char** argv) {
             } else if (!strcmp(argv[i], "--help")) {
                 usage();
                 return 0;
-            } else if (!strcmp(argv[i], "--grid")){
-                check_arg(argc, argv, i, 1);
-                imageDecompose = strtoul(argv[++i], nullptr, 10);
             } else if (!strcmp(argv[i], "--DMode")){
                 check_arg(argc, argv, i, 1);
                 distributedMode = argv[++i];
@@ -158,8 +152,7 @@ int main(int argc, char** argv) {
     int    worker_size = comm.pure_master ? comm.size - 1: comm.size;
     
     // inital process setting and status  
-    ProcStatus ps(eye, dir, up, fov, width, height, spp, comm.rank, comm.size, 
-            imageDecompose, get_chunk_num(), false/*ray queuing*/, get_dev_num(),  comm.pure_master);
+    ProcStatus ps(eye, dir, up, fov, width, height, spp, comm.rank, comm.size, get_chunk_num(), get_dev_num(),  comm.pure_master);
     printf("after construct rendersettings \n "); 
     setup_distributed_framework(distributedMode, &comm, &ps); 
     
@@ -210,8 +203,6 @@ int main(int argc, char** argv) {
         }
         frame ++;
     }
-    cleanup_interface();
-    cleanup_distributed_framework(); 
     auto inv = 1.0e-6;
     std::sort(samples_sec.begin(), samples_sec.end());
     info("# ", samples_sec.front() * inv,
@@ -220,5 +211,7 @@ int main(int argc, char** argv) {
          " (min/med/max Msamples/s)");
     printf("%d end\n", comm.rank);  
     
+    cleanup_interface();
+    cleanup_distributed_framework(); 
     return 0;
 }

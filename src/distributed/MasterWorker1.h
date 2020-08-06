@@ -72,10 +72,10 @@ Master::Master(struct Communicator *comm, struct ProcStatus *ps)
     } 
     
     for(int i = 0; i < chunk_size; i++) {
-        rayList[i] = new RayList(8 * ps->get_buffer_size(), "out", false);
+        rayList[i] = new RayList(8 * ps->get_buffer_size(), "out");
         worker_local_chunks[i][0] = i;
     }
-    buffer = new RayList(8 * ps->get_buffer_size(), "buffer", false); 
+    buffer = new RayList(8 * ps->get_buffer_size(), "buffer"); 
     
     st = clock();
     recv_t = 0; wait_t = 0;
@@ -89,7 +89,6 @@ Master::~Master(){
         delete rayList[i];
     }
     delete buffer;
-    delete comm;
 }; 
 
 int Master::get_dst_worker_id(){
@@ -260,105 +259,10 @@ void Master::save_ray_batches(float *buffer, size_t size, size_t capacity, size_
     printf("\n");
 }
 
-void Master::ray_batching_master(int sppTask, int film_width, int film_height) {
-    ImageDecomposition * camera = ps->camera;
-    Settings settings {
-        Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
-        Vec3 { camera->dir.x, camera->dir.y, camera->dir.z },
-        Vec3 { camera->up.x, camera->up.y, camera->up.z },
-        Vec3 { camera->right.x, camera->right.y, camera->right.z },
-        camera->w, camera->h,
-        Vec4_i32 { 0, 0, film_width, film_height},
-        sppTask
-    };
-    
-    raybatching(&settings, 0, 0);
-    
-    int msg[MSG_SIZE];
-    int stopped = 0; 
-    for(int i = 0; i < worker_size; i++) {
-        worker_local_chunks[i][0] = -2;
-    }
-    
-    for(;;) { 
-        printf("master wait for msg\n");
-        int workerId = get_dst_worker_id();
-        
-        //comm->Gather_worker_info();
-        comm->recv_msg(workerId, &msg[0]);
-        printf("master recv msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
-        
-        int workerChunk = worker_local_chunks[workerId][0]; 
-        mpi_worker_wait[workerId] = (msg[0] == -1);
-        if(workerChunk < 0 || (mpi_worker_wait[workerId] && rayList[workerChunk]->empty())) {
-            int chunk_size = ps->get_chunk_size();
-            for(int i = 0; i < chunk_size;i++) {
-                printf("%d %d %d|", i, rayList[i]->primary->size, rayList[i]->secondary->size);
-            }
-            printf("\n");
-            if(!rayList_empty()) {
-                int tmp = workerChunk;
-                workerChunk = get_max_rays_chunk(true);
-                if(workerChunk != -1) {
-                    msg[0] = workerChunk; 
-                    worker_local_chunks[workerId][0] = workerChunk;
-                    comm->send_msg(workerId, &msg[0]);
-                    comm->recv_rays(workerId, msg[1], buffer->get_primary());
-                    RayList::classification(rayList, buffer->get_primary());
-                    comm->recv_rays(workerId, msg[2], buffer->get_secondary());
-                    RayList::classification(rayList, buffer->get_secondary());
-                    printf("master send %d need new chunk%d", workerId, workerChunk);
-                    mpi_worker_wait[workerId] = false; 
-                    continue;     
-                } else {
-                    printf("no chunk need to be loaded, use old chunk \n");
-                    workerChunk = tmp; 
-                    // Nothing happened, the worker still idle
-                }
-            } else if(all_worker_finish()) {
-                printf("send end %d", workerId);
-                comm->send_end(workerId);
-                stopped ++;
-                printf("master stop %d\n", stopped);
-                if(stopped == worker_size) {break;}
-                continue;
-            } 
-        } 
-        msg[0] = workerChunk;
-        printf("master before send msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
-        msg[3] = std::min(msg[3], rayList[workerChunk]->primary->size); 
-        msg[4] = std::min(msg[4], rayList[workerChunk]->secondary->size);
-        
-        comm->send_msg(workerId, &msg[0]);
-        printf("master send msg %d %d %d %d %d\n", msg[0], msg[1], msg[2], msg[3], msg[4]);
-        //if workerId idle send new rayList and new scene id 
-        comm->recv_rays(workerId, msg[1], buffer->get_primary());
-        RayList::classification(rayList, buffer->get_primary());
-        comm->recv_rays(workerId, msg[2], buffer->get_secondary());
-        RayList::classification(rayList, buffer->get_secondary());
-        
-        comm->send_rays(workerId, msg[3], rayList[workerChunk]->primary);
-        comm->send_rays(workerId, msg[4], rayList[workerChunk]->secondary);
-        if(msg[3] > 1 || msg[4] > 0) {
-            mpi_worker_wait[workerId] = false;
-        } 
-        //breadcast control worker recv or send to other worker?
-        //if all done return
-        //send to worker
-    }
-    total_t = (double)(clock() - st) / CLOCKS_PER_SEC;
-    printf( "\n Master recv time%f send time %f  total %f \n write %f read %fseconds\n", recv_t, send_t, total_t, write_t, read_t );
-}
 
 void Master::run(float * a) {
-    printf("master->run()"); 
-    if(ps->isRayQueuing()) {
-        printf("batching\n");
-        ray_batching_master(ps->spp, ps->width, ps->height);
-    } else {
-        printf("asyn master\n");
-        asyn_master(); 
-    }
+    printf("master->run()\n asyn master\n"); 
+    asyn_master(); 
 }
 
 void Master::save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary) { 
@@ -369,9 +273,9 @@ void Master::save_outgoing_buffer(float *rays, size_t size, size_t capacity, boo
 
 Worker::Worker(struct Communicator *comm, struct ProcStatus *ps) 
     : Node(comm, ps) {
-    inList  = new RayList(ps->get_buffer_size() * 16, "in", false);
-    outList = new RayList(ps->get_buffer_size() * 16, "out", false);
-    buffer  = new RayList(ps->get_buffer_size(),     "buffer", false);
+    inList  = new RayList(ps->get_buffer_size() * 16, "in");
+    outList = new RayList(ps->get_buffer_size() * 16, "out");
+    buffer  = new RayList(ps->get_buffer_size(),     "buffer");
     current_chunk_empty = false; 
 }
 
@@ -394,18 +298,20 @@ void Worker::save_outgoing_buffer(float *retired_rays, size_t size, size_t capac
 void Worker::mpi_thread() {
     outList->lock();
     int msg[MSG_SIZE];
-    proc_idle =  ps->all_thread_waiting() && inout_list_empty();
-    msg[0] = proc_idle ? -1 : 1;
+    if(ps->all_thread_waiting() && inout_list_empty())
+        ps->set_proc_idle(comm->rank);
+    
+    msg[0] = ps->is_proc_idle() ? -1 : 1;
     msg[1] = outList -> get_primary() -> size; 
     msg[2] = outList -> get_secondary() -> size;
     msg[3] = ps->get_buffer_size() - inList -> get_primary() -> size; 
     msg[4] = ps->get_buffer_size() - inList -> get_secondary() -> size;
     // worker send information to master
-    comm->send_msg(master, &msg[0]);
+    comm->send_msg(comm->master, &msg[0]);
     comm->os<<"worker chunk"<<local_chunks[0]<<"thread idle"<<ps->is_thread_idle(0)<<"all t wait"<<ps->all_thread_waiting()<<" "
            << "queue empty"<<inout_list_empty()<<" msg "<<msg[0]<<" "<<msg[1]<<" "<<msg[2]<<"inlist primaryi "<<inList->get_primary()->size 
            << " secondary "<<inList->get_secondary()->size<<"buffer primary "<< buffer->get_primary()->size<<"secondary"<<buffer->get_secondary()->size;
-    comm->recv_msg(master, &msg[0]);
+    comm->recv_msg(comm->master, &msg[0]);
     // finish or need new chunk
     if(msg[0] != local_chunks[0] ) {
         local_chunks[0] = msg[0];
@@ -415,16 +321,15 @@ void Worker::mpi_thread() {
         return;
     }
     comm->os<<comm->rank<<"recv msg"<<msg[0]<<" "<< msg[1]<<" "<<msg[2]<<" "<<msg[3];
-    comm->send_rays(master, msg[1], outList->get_primary());
-    comm->send_rays(master, msg[2], outList->get_secondary());
+    comm->send_rays(comm->master, msg[1], outList->get_primary());
+    comm->send_rays(comm->master, msg[2], outList->get_secondary());
     outList->unlock();
-    comm->recv_rays(master, msg[3], inList->get_primary());
-    comm->recv_rays(master, msg[4], inList->get_secondary());
+    comm->recv_rays(comm->master, msg[3], inList->get_primary());
+    comm->recv_rays(comm->master, msg[4], inList->get_secondary());
     inList->lock(); 
     write_rays_buffer(); 
     inList->unlock(); 
     
-    master_loop_count ++;
     usleep(100);
 }
 
@@ -468,12 +373,9 @@ void Worker::run(float* frame_time) {
     printf("stupid worker %d\n", comm->rank); 
     int sppDev = sppProc / deviceNum;
     int iter = 0; 
-    if(ps->isRayQueuing()) {
-        local_chunks.emplace_back(-2);
-        iter = 1;
-    } else {
-        local_chunks.emplace_back(comm->rank);
-    }
+
+    local_chunks.emplace_back(comm->rank);
+   
     while(true) {
         current_chunk_empty = false;
         int chunk = local_chunks[0];
@@ -488,7 +390,7 @@ void Worker::run(float* frame_time) {
             threadPool.emplace_back(std::thread(work_thread, this, frame_time, i, deviceNum, false, iter == 0));
             iter ++;
         }
-        if( master != -1) {
+        if( comm->master != -1) {
             threadPool.emplace_back(std::thread(message_thread, (void*)this));
         }
         for( auto &thread: threadPool) {

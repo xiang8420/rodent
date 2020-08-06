@@ -2,7 +2,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include "message.h"
+#include "Message.h"
 
 Message::Message() {
     printf("construct message void\n");
@@ -28,14 +28,14 @@ RecvMsg::RecvMsg(MPI_Status &status, MPI_Comm comm) {
 }
 
 //recv message, if it's ray msg load it to list 
-RecvMsg::RecvMsg(RayList** List, MPI_Status &status, MPI_Comm comm) {
+RecvMsg::RecvMsg(RayList** List, RayStreamList *inList, int local_chunk, MPI_Status &status, MPI_Comm comm) {
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
-    std::ofstream os; 
-    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
-    os<<"master read from message\n"; 
-    printf("construct message recv ray from proc %d\n", status.MPI_SOURCE);
+//    std::ofstream os; 
+//    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
+//    os<<"master read from message\n"; 
+//    printf("construct message recv ray from proc %d\n", status.MPI_SOURCE);
     
     int count;
     MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
@@ -43,29 +43,30 @@ RecvMsg::RecvMsg(RayList** List, MPI_Status &status, MPI_Comm comm) {
     header = new MessageHeader();
     if (count == sizeof(*header)) {
         MPI_Recv((char *)header, count, MPI_UNSIGNED_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
-        if(header->collective)
-            os<<"recv collective\n";
+//        if(header->collective)
+//            os<<"recv collective\n";
     } else {
         char *buffer = (char *)malloc(count);
         MPI_Recv(buffer, count, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
         memcpy(header, buffer, sizeof(*header));
-        printf("recv msg size count %d \n", count);
-        os<<"recv msg sender "<<header->sender <<" root "<<header->root<<"\n";
+//        printf("recv msg size count %d \n", count);
+//        os<<"recv msg sender "<<header->sender <<" root "<<header->root<<"\n";
         if(header->primary == 0 && header->secondary ==0 ) {
             //status
-            os<<"recv status "<<header->content_size<<"\n";
+//            os<<"recv status "<<header->content_size<<"\n";
             content.resize(header->content_size);
             memcpy(content.data(), buffer+sizeof(*header), header->content_size);
-            os<<"recv status over\n";
+//            os<<"recv status over\n";
         } else {
             //rays 
-            if(header->chunk == -1) {
-                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
+            if(header->chunk != local_chunk) {
+//                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
                 RayList::read_from_message(List, (char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
             } else {
-                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
-                RayList *in = List[header->chunk];
-                in->read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank);
+//                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
+                inList->lock();
+                inList->read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
+                inList->unlock();
             }
         }
         free(buffer);

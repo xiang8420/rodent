@@ -46,10 +46,15 @@ set(RODENT_SRCS
 )
 
 set(DRIVER_SRCS
-    driver/communicator.cpp
-    driver/driver.cpp
-    driver/interface.cpp
     driver/interface.h
+    driver/interface.cpp
+    distributed/Node.h 
+    distributed/RayList.cpp
+    distributed/Message.cpp
+    distributed/communicator.cpp
+    distributed/ProcStatus.h
+    distributed/decomposition.h
+    driver/driver.cpp
     driver/obj.cpp
     driver/obj.h
     driver/image.cpp
@@ -58,19 +63,15 @@ set(DRIVER_SRCS
     driver/float2.h
     driver/float3.h
     driver/float4.h
-    driver/file_path.h
     driver/common.h
     driver/color.h
     driver/buffer.h
-    driver/raylist.cpp
-    driver/message.cpp
 )
 
 set(CONVERTER_SRCS
     driver/converter.cpp
     driver/obj.cpp
     driver/obj.h
-    driver/file_path.h
     driver/interface.h
     driver/bvh.h)
 

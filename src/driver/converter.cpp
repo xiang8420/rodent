@@ -14,7 +14,7 @@
 #include "interface.h"
 #include "obj.h"
 #include "buffer.h"
-#include "decomposition.h" //domain split
+#include "../distributed/decomposition.h" //domain split
 #include "simplify.h"
 #ifdef WIN32
 #include <direct.h>
@@ -1149,7 +1149,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         
     os << "}\n\n";
      
-    bool ray_queuing = false;
     bool preprocess  = true; 
 
     if(preprocess) {
@@ -1165,33 +1164,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     os << "extern fn get_bbox() -> &[f32] { &["<< bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f, "
        << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
     os << "extern fn get_grid() -> &[f32] { &[" << chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f] }\n";
-
-    if(ray_queuing) {
-        os << "extern fn raybatching(settings: &Settings, iter: i32, dev: i32) -> () { \n"   
-           << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, " << spp << " /*spp*/); \n"
-           << "    let device = make_avx2_device(false); \n"
-           << "    let domain = Domain { \n"
-           << "        bbox: make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), make_vec3(" 
-                                                   << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f)),\n"
-           << "        grid: make_vec3("<< chunk.scale.x <<"f, "<<chunk.scale.y << "f, "<< chunk.scale.z <<"f),\n"     
-           << "    };\n\n"
-           << "    // Camera\n"
-           << "    let camera = make_perspective_camera(\n"
-           << "        device.intrinsics,\n"
-           << "        settings.eye,\n"
-           << "        make_mat3x3(settings.right, settings.up, settings.dir),\n"
-           << "        settings.width,\n"
-           << "        settings.height,\n"
-           << "        settings.image_region,\n"
-           << "        settings.spp,\n"
-           << "        true\n"
-           << "    );\n"
-           << "    device.ray_batching(camera, domain, settings.spp);\n"
-           << "}\n";
-    } else {
-        os << "extern fn raybatching(settings: &Settings, iter: i32, dev: i32) -> () {} \n";   
-    } 
-
 
     info("Scene was converted successfully");
     return true;

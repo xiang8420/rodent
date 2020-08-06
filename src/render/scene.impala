@@ -20,7 +20,6 @@ struct Domain {
 // Rendering device
 struct Device {
     intrinsics: Intrinsics,
-    ray_batching: fn (Camera, Domain, i32) -> (),
     trace: fn (Scene, PathTracer, i32) -> (),
     present: fn () -> (),
 

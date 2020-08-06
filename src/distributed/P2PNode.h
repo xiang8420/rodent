@@ -52,13 +52,10 @@ P2PNode::~P2PNode() {
         delete rayList[i];
     }
     delete buffer;
-    delete ps;
-    delete comm;
 }
 
 void P2PNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
     comm->os<<"rthread save outgoing buffer"<<size<<"\n";
-    renderer_save_rays += size;
     out_mutex.lock(); 
     int width = primary?21:14; 
     int* ids = (int*)(retired_rays);
@@ -131,16 +128,16 @@ void P2PNode::message_thread(void* tmp) {
         
         if(ps->Exit()) break;
 
-        int cId = get_sent_list(wk->rayList, ps);
+        int cId = wk->get_sent_list();
 //            wk->out_mutex.lock();
 //        comm->os<<"mthread get send list"<<cId<<"size "<<wk->rayList[cId]->size()<<"\n";
 //            wk->out_mutex.unlock(); 
         
         if(cId >= 0 ) {
-            ps->set_proc_busy(ps->get_target_proc(cId));
+            ps->set_proc_busy(ps->get_proc(cId));
             wk->out_mutex.lock();
             comm->os<<"mthread new RayMsg"<<cId<<"size "<<wk->rayList[cId]->size()<<"\n";
-            RayMsg *ray_msg = new RayMsg(wk->rayList[cId], comm->rank, ps->get_target_proc(cId), cId, false); 
+            RayMsg *ray_msg = new RayMsg(wk->rayList[cId], comm->rank, ps->get_proc(cId), cId, false); 
             comm->os<<"mthread RayMsg"<<ray_msg->get_chunk()<<"\n";
             wk->out_mutex.unlock(); 
             comm->send_message(ray_msg, ps);
@@ -152,9 +149,7 @@ void P2PNode::message_thread(void* tmp) {
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
     comm->os <<" inlist "<< wk->inList->size()
              <<" buffersize"<<wk->buffer->size()
-             <<" get render rays "<<wk->renderer_get_rays
-             <<" save render rays" <<wk->renderer_save_rays
-             <<" recv "<<ps->global_rays[ps->proc_rank + ps->proc_size]
+             <<" recv "<<ps->global_rays[comm->rank + comm->size]
              <<std::endl;
     wk->buffer_not_empty.notify_all();
     return;

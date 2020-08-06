@@ -2,11 +2,11 @@
 #include <vector>
 #include <memory>
 #include <mutex>
-#include "float3.h"
-#include "bbox.h"
-#include "obj.h"
-#include "image.h"
-#include "interface.h"
+#include "../driver/float3.h"
+#include "../driver/bbox.h"
+#include "../driver/obj.h"
+#include "../driver/image.h"
+#include "../driver/interface.h"
 
 #ifndef PI 
 #define PI 3.14159265359f
@@ -23,7 +23,7 @@ inline void splat(size_t n, float* grid, int d) {
         ++axit % d;
         cur_n /= 2;
     }
-    printf("grid %f %f %f\n", grid[0], grid[1], grid[2]);
+  //  printf("grid %f %f %f\n", grid[0], grid[1], grid[2]);
 }
 
 //Splitting bounding box for distributed computing
@@ -49,7 +49,7 @@ struct MeshChunk{
     }
     
     bool chunk_division() {
-        printf("min %f %f %f max %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
+      //  printf("min %f %f %f max %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
         
         // shortest axis and cut it
         float3 length = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
@@ -72,13 +72,13 @@ struct MeshChunk{
                 for(int k = 0; k < scale[2]; k++){
                     float z = bbox.min.z + k * step.z;
                     struct BBox bb;
-                    bb.min.x = x;
-                    bb.min.y = y;
-                    bb.min.z = z;
-                    bb.max.x = ((i == scale[0] - 1)? bbox.max.x:x + step.x);
-                    bb.max.y = ((j == scale[1] - 1)? bbox.max.y:y + step.y);
-                    bb.max.z = ((k == scale[2] - 1)? bbox.max.z:z + step.z);
-                    printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
+                    bb.min.x = x - 0.1f;
+                    bb.min.y = y - 0.1f;
+                    bb.min.z = z - 0.1f;
+                    bb.max.x = ((i == scale[0] - 1)? bbox.max.x:x + step.x) + 0.1f;
+                    bb.max.y = ((j == scale[1] - 1)? bbox.max.y:y + step.y) + 0.1f;
+                    bb.max.z = ((k == scale[2] - 1)? bbox.max.z:z + step.z) + 0.1f;
+                  //  printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
                     list.push_back(bb);  //emplace_back
                 }
             }
@@ -104,7 +104,7 @@ struct ImageDecomposition {
     float3 project_point_to_image(float3 p) {
         float3 d = normalize(p - eye); 
         float3 res(dot(d, right) / w, dot(d, up) / h, length(p - eye)/*-dot(d, dir)*/); 
-        printf("d %f %f %f p %f %f %f p2 %f %f %f\n", d.x, d.y, d.z, p.x, p.y, p.z, res.x, res.y, res.z); 
+       // printf("d %f %f %f p %f %f %f p2 %f %f %f\n", d.x, d.y, d.z, p.x, p.y, p.z, res.x, res.y, res.z); 
         return res ;
     }
   
@@ -153,7 +153,7 @@ struct ImageDecomposition {
                 }
             }
         }
-        printf("project min %f %f %f max %f %f %f\n", p_min.x, p_min.y, p_min.z, p_max.x, p_max.y, p_max.z); 
+       // printf("project min %f %f %f max %f %f %f\n", p_min.x, p_min.y, p_min.z, p_max.x, p_max.y, p_max.z); 
         //左上 0 0 
         int pid[4]; 
         pid[0] = (p_min.x + 1) * width / 2;
@@ -193,7 +193,7 @@ struct ImageDecomposition {
                 unloaded = i;
             }
         }
-        printf("get most unloaded %d %d %d %d chunk %d\n", region[0], region[1], region[2], region[3], c);
+      //  printf("get most unloaded %d %d %d %d chunk %d\n", region[0], region[1], region[2], region[3], c);
         c = c==-1 ? unloaded : c;
         return c;
     }
@@ -214,7 +214,7 @@ struct ImageDecomposition {
             project_cube_to_image(chunks.list[i], i);
         }
         
-        printf("decomposition splat %f %f\n", scale[0], scale[1]); 
+      //  printf("decomposition splat %f %f\n", scale[0], scale[1]); 
         
         int step_width = width / scale[0];
         int step_height = height / scale[1];   
@@ -235,14 +235,24 @@ struct ImageDecomposition {
                 chunk_map[chunk] = i;
 
             if(i == proc_rank) {
-                local_chunk = chunk;
+                local_chunk = chunk == -1 ? 0 : chunk;
                 for(int k = 0; k < 4; k++)
                     render_region[k] = region[k]; 
             }
         }
-        printf("renderregion %d %d %d %d\n", render_region[0], render_region[1], render_region[2], render_region[3]);
+       // printf("renderregion %d %d %d %d\n", render_region[0], render_region[1], render_region[2], render_region[3]);
         write_project_result(); 
-    } 
+    }
+    
+    void get_camera_info(int* region, int* chunk_map, int &local_chunk, int &proc_spp, bool imageDecompose) {
+        region[0] = 0;     region[1] = 0;
+        region[2] = width; region[3] = height;
+        if(imageDecompose) {
+            image_domain_decomposition(region, chunk_map, local_chunk); 
+        } else {
+            proc_spp = proc_spp / proc_size;
+        }
+    }
     
     ImageDecomposition(float3 e, float3 d, float3 u, float fov, int width, int height, int mpi_rank, int mpi_size)
             : width(width), height(height), proc_rank(mpi_rank), proc_size(mpi_size) 
@@ -261,17 +271,6 @@ struct ImageDecomposition {
         depth.resize(width * height);    
     }
 
-
-    void get_camera_info(int* region, int* chunk_map, int &local_chunk, int &proc_spp, bool imageDecompose) {
-        region[0] = 0;     region[1] = 0;
-        region[2] = width; region[3] = height;
-        if(imageDecompose) {
-            image_domain_decomposition(region, chunk_map, local_chunk); 
-        } else {
-            proc_spp = proc_spp / proc_size;
-        }
-    }
-    
     void rotate(float yaw, float pitch) {
         dir = ::rotate(dir, right,  -pitch);
         dir = ::rotate(dir, up,     -yaw);

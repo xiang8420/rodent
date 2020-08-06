@@ -1,7 +1,7 @@
 #include <cstring>
-#include "raylist.h"
+#include "RayList.h"
 #include "communicator.h"
-#include "buffer.h"
+#include "../driver/buffer.h"
 
 Communicator::Communicator() {
     MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, NULL);
@@ -23,6 +23,7 @@ Communicator::Communicator() {
 }
     
 Communicator::~Communicator() {
+    printf("delete communicator\n");
     std::cout<<"msg send "<< send_msg_count<<"recv "<<recv_msg_count
       <<"ray send "<< send_ray_count<<"recv "<<recv_ray_count<<"\n";
     MPI_Finalize();
@@ -189,39 +190,9 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     return k;
 }
 
-void Communicator::collective(ProcStatus *rs) {
+void Communicator::collective(ProcStatus *rs) { }
 
-//    rs->lock();
-//
-//    int global_counts[3]; // [4] -> [3] camera active is not necessary
-//	int local_counts[] = {rs->all_thread_waiting() ? 0 : 1, rs->get_sent_ray_count(), rs->get_recv_ray_count()};
-//
-//    MPI_Allreduce(local_counts, global_counts, 3, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-//
-//    os << "mthread all end collective: local " << local_counts[0] << "sent " << local_counts[1] <<"recv "<< local_counts[2]<< std::endl;
-//    os << "mthread all end collective: global " << global_counts[0] << "sent " << global_counts[1] <<"recv "<< global_counts[2]<< std::endl;
-//	// If no raylists exist anywhere, and the number of received pixels matches the number of sent pixels,
-//	// and there are no camera rays currently being generated, this rendering is done.
-//
-////    rs->unlock();
-////    return true;
-//     
-//    if (global_counts[0] == 0 && global_counts[1] <= global_counts[2]) {
-//        //all process done, no local rays, global sent rays == recv rays 
-//        rs->set_exit();
-//        rs->unlock();
-//    } else {
-//        if (global_counts[0] != 0)
-//             std::cerr << "thread havent finish"<<global_counts[0]<<" "<<global_counts[1]<<"\n";
-//        else if (global_counts[1] != global_counts[2])
-//             std::cerr << "rays havent recv"<<global_counts[0]<<"\n";
-//        os<<"set proc busy\n"; 
-//        rs->set_proc_busy(rank);
-//        rs->unlock();
-//    }
-}
-
-bool Communicator::recv_message(RayList** List, ProcStatus *ps) {
+bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStatus *ps) {
     int recv_ready;
     MPI_Status status;
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_ready, &status);
@@ -230,7 +201,8 @@ bool Communicator::recv_message(RayList** List, ProcStatus *ps) {
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
         os<<"mthread recv msg "<<count<<"\n ";
-        Message *recv_msg = new RecvMsg(List, status, MPI_COMM_WORLD); 
+        printf("%d before recv rays\n", rank);
+        Message *recv_msg = new RecvMsg(List, inList, ps->get_local_chunk(), status, MPI_COMM_WORLD); 
         os<<"mthread recv rays from "<<recv_msg->get_sender()<<" size "<<recv_msg->get_ray_size() 
             <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
         
@@ -269,6 +241,7 @@ bool Communicator::recv_message(RayList** List, ProcStatus *ps) {
                     if(isMaster()) 
                         printf("master recv ray\n");
                     os << "mthread| ray recv \n";
+                    
                     ps->accumulate_recv(recv_msg->get_ray_size());
                     //set itself busy
                     ps->set_proc_busy(rank);

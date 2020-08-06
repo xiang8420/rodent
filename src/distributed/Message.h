@@ -1,6 +1,6 @@
 #include <vector>
 #include <mutex>
-#include "raylist.h"
+#include "RayList.h"
 #include <condition_variable>
 #include "mpi.h"
 
@@ -131,7 +131,7 @@ class RecvMsg : public Message {
 public:
     RecvMsg(MPI_Status &status, MPI_Comm comm);
     
-    RecvMsg(RayList** List, MPI_Status &status, MPI_Comm comm); 
+    RecvMsg(RayList** List, RayStreamList* inList, int local_chunk, MPI_Status &status, MPI_Comm comm); 
 };
 
 class QuitMsg : public Message {

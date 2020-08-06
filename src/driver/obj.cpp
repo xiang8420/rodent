@@ -7,7 +7,7 @@
 
 #include "common.h"
 #include "obj.h"
-#include "decomposition.h"
+#include "../distributed/decomposition.h"
 namespace obj {
 
 struct TriIdx {

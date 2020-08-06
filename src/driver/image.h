@@ -1,7 +1,7 @@
 #ifndef IMAGE_H
 #define IMAGE_H
 
-#include "file_path.h"
+#include "FilePath.h"
 
 struct ImageRgba32 {
     std::unique_ptr<uint8_t[]> pixels;
