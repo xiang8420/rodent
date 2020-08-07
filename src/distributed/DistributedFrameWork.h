@@ -14,7 +14,6 @@
 
 #include "Node.h"
 //#include "P2PNode.h"
-//#include "MasterWorker1.h"
 #include "MasterWorker2.h"
 
 #define PRIMARY_WIDTH 21
@@ -29,12 +28,7 @@ struct DistributedFrameWork {
          :type(type) 
     {
         if(type == "P2PNode") {
-    //        node = new P2PNode(comm, ps);
-    //    } else if (type == "MasterWorker") {
-    //        if(comm->rank == comm->size - 1)
-    //            node = new Master(comm, ps);
-    //        else    
-    //            node = new Worker(comm, ps);
+  //          node = new P2PNode(comm, ps);
         } else if(type == "MWNode") {
                 node = new MWNode(comm, ps);
         } else {
@@ -81,6 +75,6 @@ void master_save_ray_batches(float *rays, size_t size, size_t capacity, size_t t
 //    dfw->worker->save_ray_batches(rays, size, capacity, thread_id);
 }
 
-int32_t worker_buffer_size() {
+int32_t thread_buffer_size() {
     return dfw->node->proc_status()->get_buffer_size();
 }

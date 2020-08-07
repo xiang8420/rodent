@@ -586,7 +586,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
     
     let spp = scene.camera.tile.spp;
-    let capacity = rodent_worker_buffer_size(); 
+    let capacity = rodent_thread_buffer_size(); 
     let mut primary;
     let mut other_primary;
     let mut buffer1;
@@ -730,7 +730,7 @@ fn @gpu_streaming_trace( dev_id: i32
                        ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
 
-    let capacity = rodent_worker_buffer_size(); 
+    let capacity = rodent_thread_buffer_size(); 
     let mut primary;
     let mut other_primary;
     let mut secondary;
@@ -904,7 +904,7 @@ fn @gpu_ray_batching( dev_id: i32
                      ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
 
-    let capacity = rodent_worker_buffer_size(); 
+    let capacity = rodent_thread_buffer_size(); 
     let mut primary;
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     

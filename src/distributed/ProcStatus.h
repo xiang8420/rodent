@@ -81,7 +81,7 @@ public:
     }
   
     void thread_reset() {
-        cpu_thread_num = 8;//std::thread::hardware_concurrency();
+        cpu_thread_num = 16;//std::thread::hardware_concurrency();
         printf("\ncpu thread num %d\n", cpu_thread_num);
         thread_idle.resize(cpu_thread_num);
         for(int i = 0; i < cpu_thread_num; i++) 
@@ -226,7 +226,7 @@ public:
             printf(" %d", chunk_map[i]);
         }
         //
-        buffer_size = 512 * 512;//1048576;
+        buffer_size = 1024 * 1024 / cpu_thread_num;
         buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         
         global_rays.resize(size * size);

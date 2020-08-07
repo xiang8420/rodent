@@ -78,7 +78,7 @@ void MWNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capac
     int width = primary?21:14; 
     int* ids = (int*)(retired_rays);
     for(int i = 0; i < 5; i ++) {
-        comm->os<<"| "<< ids[i] <<" "<< ids[i + ps->get_buffer_capacity() * 9] << " ";
+        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
     }
     comm->os<<"\n";
     RayList::read_from_device_buffer(rayList, retired_rays, size, capacity, primary, comm->rank);
@@ -120,12 +120,6 @@ void MWNode::send_message() {
 
         //proc idle
         int idle_proc = ps->get_idle_proc();
-    //    comm->os<<"mthread status idle proc ";
-    //    for(int i = 0; i< comm->size;i++){
-    //        comm->os<<" "<<ps->global_rays[i] <<" "<<ps->global_rays[i + comm->size]<<" ||"; 
-    //    }
-    //    comm->os<<"\n";
-            
         out_mutex.lock();
         if(idle_proc >= 0 && ps->all_rays_received()) {
             //find a unloaded chunk contents unprocessed rays

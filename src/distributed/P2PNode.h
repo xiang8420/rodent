@@ -38,20 +38,16 @@ P2PNode::P2PNode(struct Communicator *comm, struct ProcStatus *ps)
     for(int i = 0; i < chunk_size; i++) {
         rayList[i] = new RayList(ps->get_buffer_size() * 16, "out", false);
     }
-    inList = rayList[ps->get_local_chunk()];
-    inList->type = "in";
+    inList = new RayStreamList(ps->get_buffer_size());
     
     comm->os << "out list size"<<rayList[0]->size() << "capacity" << rayList[0]->get_primary()->get_capacity() << std::endl; 
     comm->os << "loaded chunk()"<<ps->get_local_chunk()<< std::endl; 
-    //when we need to load a new chunk updata inList pointer.
-    buffer  = new RayList(ps->get_buffer_size(), "buffer", false);
 }
 
 P2PNode::~P2PNode() {
     for(int i = 0; i < ps->get_chunk_size(); i++){
         delete rayList[i];
     }
-    delete buffer;
 }
 
 void P2PNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){

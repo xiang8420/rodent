@@ -79,14 +79,25 @@ int Rays::check_capacity(int num) {
 
 void Rays::read_device_buffer(float *rays, int src, int num, int rays_capacity, int rank) {
     check_capacity(num);
-    for(int i = 0, k = 0; i < logic_width; i++) {
-        if(mask[i]) {
-            for(int j = 0; j < num; j++) {
-                data[(size + j) * store_width + k]  = rays[src + j + i * rays_capacity];
+    int* iptr = (int *) data.data();
+    for(int i = 0; i < num; i++) {
+        for(int k = 0, j = 0; j < logic_width; j++) {
+            if(mask[j]) {
+                data[(size + i) * store_width + k]  = rays[(src + i) * logic_width + j];
+                k++; 
             }
-            k++;
         }
     }
+    
+
+//    for(int i = 0, k = 0; i < logic_width; i++) {
+//        if(mask[i]) {
+//            for(int j = 0; j < num; j++) {
+//                data[(size + j) * store_width + k]  = rays[src + j + i * rays_capacity];
+//            }
+//            k++;
+//        }
+//    }
     size += num;
 }
 
@@ -155,26 +166,26 @@ inline void swap(float **a, float **b) {
     *b = *tmp;
 }
 
-void RayList::read_from_device_buffer(RayList ** raylist, float *raybuffer,  size_t size, size_t capacity, bool primary, int rank) {
+void RayList::read_from_device_buffer(RayList ** raylist, float *out_buffer,  size_t size, size_t capacity, bool primary, int rank) {
     int width       = primary ? 21 : 14;
-    int* chunkIds   = (int*)(raybuffer + 9 * capacity);
+    int* chunkIds   = (int*)(out_buffer);
 
     int st = 0, num = 0; 
-    int tmp = chunkIds[0] >> 12;
+    int tmp = chunkIds[9] >> 12;
     for(int i = 0; i < size; i++) {
-        int chunk = chunkIds[i] >> 12;
+        int chunk = chunkIds[i * width + 9] >> 12;
         if(chunk == tmp) {
             num ++;
         } else {
             Rays *list = primary ? raylist[tmp]->primary : raylist[tmp]->secondary;
-            list->read_device_buffer(raybuffer, st, num, capacity, rank); 
+            list->read_device_buffer(out_buffer, st, num, capacity, rank); 
             tmp = chunk;
             st = i; 
             num = 1; 
         }
     }
     Rays *list = primary ? raylist[tmp]->primary : raylist[tmp]->secondary;
-    list->read_device_buffer(raybuffer, st, num, capacity, rank); 
+    list->read_device_buffer(out_buffer, st, num, capacity, rank); 
 }
 
 void RayList::write_to_device_buffer(RayList *buffer, int rank) {

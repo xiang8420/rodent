@@ -2,14 +2,10 @@
 
 extern "C" {
     fn rodent_get_film_data(i32, &mut &mut [f32], &mut i32, &mut i32, bool) -> ();
-    
     fn rodent_cpu_get_primary_stream(&mut PrimaryStream, i32) -> ();
-    fn rodent_cpu_get_primary_outcome_stream(&mut PrimaryStream, i32) -> ();
     fn rodent_cpu_get_primary_income_stream(&mut PrimaryStream, i32) -> ();
     fn rodent_cpu_get_secondary_stream(&mut SecondaryStream, i32) -> ();
-    fn rodent_cpu_get_secondary_outcome_stream(&mut SecondaryStream, i32) -> ();
     fn rodent_cpu_get_secondary_income_stream(&mut SecondaryStream, i32) -> ();
-    
     fn rodent_initial_gpu_host_data(i32) -> ();
     fn rodent_gpu_get_first_primary_stream(i32, &mut PrimaryStream, i32) -> ();
     fn rodent_gpu_get_second_primary_stream(i32, &mut PrimaryStream, i32) -> ();
@@ -32,7 +28,8 @@ extern "C" {
     fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
 
-    fn rodent_worker_buffer_size() ->i32;
+    fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
+    fn rodent_thread_buffer_size() ->i32;
     fn rodent_cpu_get_thread_num() -> i32; 
     fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
     fn rodent_worker_primary_send(i32, i32) -> ();    
@@ -83,11 +80,74 @@ struct SecondaryStream {
     size: i32
 }
 
+struct OutRayStream {
+    fptr: &mut [f32],
+    iptr: &mut [i32],
+    uiptr: &mut [RndState],
+    width: i32,
+    capacity: i32,
+    size: i32
+}
+
 struct PreprocessRecord {
     its:    &mut[i32],  //chunk * depth
     time:   &mut[f32],
     length: i32,
     chunk:  i32
+}
+
+fn @write_out_primary( primary: PrimaryStream
+                     , out_buffer: OutRayStream
+                     , src: i32
+                     , dst: i32
+                     , keep_hit: bool
+                     ) -> () {
+    let width = out_buffer.width;
+    out_buffer.iptr(dst * width)     = primary.rays.id(src);
+    out_buffer.fptr(dst * width + 1) = primary.rays.org_x(src);
+    out_buffer.fptr(dst * width + 2) = primary.rays.org_y(src);
+    out_buffer.fptr(dst * width + 3) = primary.rays.org_z(src);
+    out_buffer.fptr(dst * width + 4) = primary.rays.dir_x(src);
+    out_buffer.fptr(dst * width + 5) = primary.rays.dir_y(src);
+    out_buffer.fptr(dst * width + 6) = primary.rays.dir_z(src);
+    out_buffer.fptr(dst * width + 7) = primary.rays.tmin(src);
+    out_buffer.fptr(dst * width + 8) = primary.rays.tmax(src);
+    out_buffer.iptr(dst * width + 9) = primary.grid_id(src);
+    if keep_hit {
+        out_buffer.iptr(dst * width + 10) = primary.geom_id(src);
+        out_buffer.iptr(dst * width + 11) = primary.prim_id(src);
+        out_buffer.fptr(dst * width + 12) = primary.t(src);
+        out_buffer.fptr(dst * width + 13) = primary.u(src);
+        out_buffer.fptr(dst * width + 14) = primary.v(src);
+    }
+    out_buffer.uiptr(dst * width + 15) = primary.rnd(src);
+    out_buffer.fptr(dst * width + 16) = primary.mis(src);
+    out_buffer.fptr(dst * width + 17) = primary.contrib_r(src);
+    out_buffer.fptr(dst * width + 18) = primary.contrib_g(src);
+    out_buffer.fptr(dst * width + 19) = primary.contrib_b(src);
+    out_buffer.iptr(dst * width + 20) = primary.depth(src);
+}
+
+fn @write_out_secondary( secondary: SecondaryStream
+                       , out_buffer: OutRayStream
+                       , src: i32
+                       , dst: i32
+                       ) -> () {
+    let width = out_buffer.width;
+    out_buffer.iptr(dst * width)      = secondary.rays.id(src);
+    out_buffer.fptr(dst * width + 1)  = secondary.rays.org_x(src);
+    out_buffer.fptr(dst * width + 2)  = secondary.rays.org_y(src);
+    out_buffer.fptr(dst * width + 3)  = secondary.rays.org_z(src);
+    out_buffer.fptr(dst * width + 4)  = secondary.rays.dir_x(src);
+    out_buffer.fptr(dst * width + 5)  = secondary.rays.dir_y(src);
+    out_buffer.fptr(dst * width + 6)  = secondary.rays.dir_z(src);
+    out_buffer.fptr(dst * width + 7)  = secondary.rays.tmin(src);
+    out_buffer.fptr(dst * width + 8)  = secondary.rays.tmax(src);
+    out_buffer.iptr(dst * width + 9)  = secondary.grid_id(src);
+    out_buffer.iptr(dst * width + 10) = secondary.prim_id(src);
+    out_buffer.fptr(dst * width + 11) = secondary.color_r(src);
+    out_buffer.fptr(dst * width + 12) = secondary.color_g(src);
+    out_buffer.fptr(dst * width + 13) = secondary.color_b(src);
 }
 
 fn @copy_primary_ray( primary: PrimaryStream

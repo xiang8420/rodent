@@ -100,8 +100,6 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     }
     
     comm->os<<"rthread after wait\n";
-    if((inList->primary_size() == 0 && primary) || (inList->secondary_size() == 0 && !primary))  
-        return rays_size;
     struct Rays *queue = primary ? inList->get_primary() : inList->get_secondary();
     lock.unlock();
 
@@ -123,6 +121,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
         delete queue;
         return copy_size + rays_size;
     }
+    return rays_size;
 }
 
 void Node::work_thread(void* tmp, float *process_time, int devId, int devNum, bool preRendering, bool generate_rays) {
