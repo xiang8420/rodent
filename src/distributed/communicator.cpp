@@ -41,7 +41,7 @@ void Communicator::Isend_rays(struct Rays* buffer, int size, int dst, int tag) {
 }
 
 void Communicator::mpi_wait(int tag){
-     MPI_Wait(&req[tag],sta);
+    MPI_Wait(&req[tag],sta);
 }
 
 void Communicator::send_noray(int dst) {

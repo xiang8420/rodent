@@ -160,15 +160,14 @@ int Node::get_sent_list() {
     int n = ps->get_chunk_size();
     int t = -1; 
     int max = 0; 
-    printf("rank %d\n", comm->rank);
     for(int i = 0; i < n; i++) {
-        printf(" get sent list %d %d  %d\n", i, rayList[i] -> size(), ps->get_proc(i));
+        comm->os<<" get sent list "<< i<<" raylist size "<<rayList[i] -> size()<<" "<< ps->get_proc(i)<<"\n";
         if(rayList[i] -> size() > max && ps->get_proc(i) != -1 && i != ps->get_local_chunk()) {
             max = rayList[i] -> size();
             t = i;
         }
     }
-    printf("rthread rank %d t %d max %d\n", comm->rank, t, max);
+    comm->os<<"mthread rank " <<comm->rank<<" list "<< t<<" max "<< max<<"\n";
     if(max <= 0 || t < 0) 
         return -1;
     

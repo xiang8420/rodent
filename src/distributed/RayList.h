@@ -53,10 +53,10 @@ struct RayList {
     std::string type;
     std::mutex mutex;
 
-    RayList(int n, std::string type, bool compact):logic_capacity(n), type(type) {
+    RayList(int n, std::string type):logic_capacity(n), type(type) {
         store_capacity = (n & ~((1 << 5) - 1)) + 32; // round to 32
-        primary   = new struct Rays(store_capacity, 21, compact);
-        secondary = new struct Rays(store_capacity, 14, compact);
+        primary   = new struct Rays(store_capacity, 21, RAY_COMPACT);
+        secondary = new struct Rays(store_capacity, 14, RAY_COMPACT);
     }
     
     ~RayList() {

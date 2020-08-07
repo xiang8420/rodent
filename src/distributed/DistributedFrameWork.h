@@ -13,7 +13,7 @@
 #include "ProcStatus.h"
 
 #include "Node.h"
-//#include "P2PNode.h"
+#include "P2PNode.h"
 #include "MasterWorker2.h"
 
 #define PRIMARY_WIDTH 21
@@ -28,7 +28,7 @@ struct DistributedFrameWork {
          :type(type) 
     {
         if(type == "P2PNode") {
-  //          node = new P2PNode(comm, ps);
+            node = new P2PNode(comm, ps);
         } else if(type == "MWNode") {
                 node = new MWNode(comm, ps);
         } else {

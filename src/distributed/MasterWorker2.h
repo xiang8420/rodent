@@ -52,7 +52,7 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
     comm->os<<"master set up\n";
     rayList       = new RayList *[chunk_size];
     for(int i = 0; i < chunk_size; i++) {
-        rayList[i] = new RayList(4 * ps->get_buffer_size(), "out", true);
+        rayList[i] = new RayList(4 * ps->get_buffer_size(), "out");
     }
     inList = new RayStreamList(ps->get_buffer_size());
 
@@ -208,7 +208,6 @@ void MWNode::send_message() {
                 ray_msg = new RayMsg(rayList[cId], comm->rank, dst_proc, cId, false); 
                 comm->send_message(ray_msg, ps);
             } else {
-                
                 for(int i = 0; i < ps->get_chunk_size(); i++) {
                     if(rayList[i] -> size() > 0 && rayList[i]->type == "out") {
                         ray_msg = new RayMsg(rayList[i], comm->rank, comm->master, i, false); 
