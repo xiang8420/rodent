@@ -23,11 +23,11 @@ public:
 
     int load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait);
     
-    static void work_thread(void* tmp, float* processTime, int devId, int devNum, bool preprocess, bool shoot_rays);
+    static void work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preprocess, bool shoot_rays);
    
     virtual void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary) = 0;
 
-    virtual void run(float* rProcessTime) = 0;
+    virtual void run(ImageDecomposition * camera) = 0;
 
     int get_sent_list(); 
     
@@ -122,21 +122,20 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     return rays_size;
 }
 
-void Node::work_thread(void* tmp, float *process_time, int devId, int devNum, bool preRendering, bool generate_rays) {
+void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preRendering, bool generate_rays) {
     printf("work threadstart\n");
 
     Node * wk = (Node*)tmp;
     Communicator * comm = wk->comm; 
     ProcStatus *ps = wk->ps;
     
-    int region[4]; 
-    int sppProc = ps->get_tile_info(&region[0], process_time); 
+    int* region = camera->get_region();
+    int sppProc = camera->get_spp(); 
     int sppDev = sppProc / devNum;
-    int seed = comm->rank * devNum + devId;
-    printf("width %d height%d spp %d dev id %d local chunk %d\n", ps->width, ps->height, sppDev, devId, ps->get_local_chunk() );
+    
+    printf("width %d height%d spp %d dev id %d local chunk %d\n", camera->width, camera->height, sppDev, devId, ps->get_local_chunk() );
     printf("work thread region %d %d %d %d\n", region[0], region[1], region[2], region[3]);
     
-    ImageDecomposition * camera = ps->get_camera();
     Settings settings {
         Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
         Vec3 { camera->dir.x, camera->dir.y, camera->dir.z },
@@ -149,8 +148,10 @@ void Node::work_thread(void* tmp, float *process_time, int devId, int devNum, bo
     if(preRendering) {
         prerender(&settings);
     } else {
-        render(&settings, seed, devId, ps->get_local_chunk(), generate_rays);
+        int rnd = comm->rank * devNum + devId;
+        render(&settings, rnd, devId, ps->get_local_chunk(), generate_rays);
     }
+    printf("work thread end\n");
 }
 
 // get chunk retun chunk id

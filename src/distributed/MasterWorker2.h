@@ -26,7 +26,7 @@ struct MWNode : public Node{
 
     static void message_thread(void* tmp);
     
-    void run(float* rProcessTime); 
+    void run(ImageDecomposition * camera);
     
     void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
 
@@ -281,7 +281,7 @@ void MWNode::message_thread(void* tmp) {
     return;
 } 
 
-void MWNode::run(float * frame_time) {
+void MWNode::run(ImageDecomposition * camera) {
     comm->os <<" start run message thread \n";
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
@@ -289,7 +289,7 @@ void MWNode::run(float * frame_time) {
     if(comm->size == 1) {
         printf("only one worker %d  ", comm->rank);
         for(int i = 0; i < deviceNum; i++) 
-            workThread.emplace_back(std::thread(work_thread, this, frame_time, i, deviceNum, false, true));
+            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
         
         for( auto &thread: workThread) 
             thread.join();
@@ -315,7 +315,7 @@ void MWNode::run(float * frame_time) {
 
                 printf("%d before set render start \n", comm->rank);
                 for(int i = 0; i < deviceNum; i++) 
-                    workThread.emplace_back(std::thread(work_thread, this, frame_time, i, deviceNum, false, iter == 0));
+                    workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0));
                  
                 //set chunk loaded
                 printf("%d set render start \n", comm->rank);

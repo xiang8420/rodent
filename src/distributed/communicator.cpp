@@ -13,8 +13,8 @@ Communicator::Communicator() {
     
     int group = rank == master ? 1 : 0;
     MPI_Comm_split(MPI_COMM_WORLD, group, rank, &Client_Comm);
-    MPI_Comm_size(Client_Comm, &group_size);
-    MPI_Comm_rank(Client_Comm, &group_rank);
+    MPI_Comm_size(Client_Comm, &worker_size);
+    MPI_Comm_rank(Client_Comm, &worker_rank);
     
     printf("comm rank %d \n", rank);
     os = std::ofstream("out/proc_" + std::to_string(rank));
@@ -27,6 +27,10 @@ Communicator::~Communicator() {
     std::cout<<"msg send "<< send_msg_count<<"recv "<<recv_msg_count
       <<"ray send "<< send_ray_count<<"recv "<<recv_ray_count<<"\n";
     MPI_Finalize();
+}
+
+void Communicator::all_gather_float(float *a, float *res, int size) {
+    MPI_Allgather(a, 1, MPI_FLOAT, res, 1, MPI_FLOAT, MPI_COMM_WORLD);
 }
 
 void Communicator::Isend_rays(struct Rays* buffer, int size, int dst, int tag) {

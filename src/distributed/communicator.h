@@ -21,7 +21,7 @@ struct Communicator {
 
     MPI_Comm Client_Comm;
     int rank, size, master;
-    int group_rank, group_size;
+    int worker_rank, worker_size;
     bool pure_master;
     std::ofstream os;
    
@@ -33,7 +33,7 @@ struct Communicator {
     Communicator();
     ~Communicator(); 
    
-    int work_node(){return master;} 
+    int get_worker_size(){return worker_size;} 
     int isMaster(){return rank == master;} 
 
     void reduce_image(float* film, float *reduce_buffer, int pixel_num);
@@ -47,6 +47,7 @@ struct Communicator {
     void send_request(bool has_work, int dst, int request_size, bool primary);
     void send_noray(int dst);
     void send_end(int dst);
+    void all_gather_float(float *a, float *res, int size); 
 
     void send_msg(int dst, int* msg);
     void recv_msg(int dst, int *msg);

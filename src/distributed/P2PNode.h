@@ -19,11 +19,11 @@ public:
     // send primary and secondary
     void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
   
-    void count_rays();
+    void count_rays(int, int);
 
     static void message_thread(void* tmp);
     
-    void run(float* processTime);
+    void run(ImageDecomposition * camera);
 
 }; 
 
@@ -157,9 +157,9 @@ void P2PNode::message_thread(void* tmp) {
     return;
 } 
 
-void P2PNode::count_rays() {
-    int width = ps->width; 
-    int height = ps->height;
+void P2PNode::count_rays(int width, int height) 
+{
+
     int chunk_size = ps->get_chunk_size();
     int *data = get_prerender_result();
     int pixel_size = width * height;
@@ -180,21 +180,20 @@ void P2PNode::count_rays() {
         printf("\n");
     }
 }
-void P2PNode::run(float* frame_time) {
+
+void P2PNode::run(ImageDecomposition * camera) {
     int deviceNum = ps->get_dev_num();
     bool PreRendering = false;
     if(PreRendering && comm->rank == 0) {
-        work_thread(this, frame_time, 0, 1, true, true);
-        count_rays(); 
+        work_thread(this, camera, 0, 1, true, true);
+        count_rays(camera->width, camera->height); 
     }
-    // set domain and image distribution
-    //set_distributed_buffer();
     
     std::vector<std::thread> workThread;
     if(comm->size == 1) {
         printf("only one worker %d  ", comm->rank);
         for(int i = 0; i < deviceNum; i++) 
-            workThread.emplace_back(std::thread(work_thread, this, frame_time, i, deviceNum, false, true));
+            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
         
         for( auto &thread: workThread) 
             thread.join();
@@ -206,7 +205,7 @@ void P2PNode::run(float* frame_time) {
         while(!ps->Exit()) {
             int chunk = ps->get_local_chunk(); 
             for(int i = 0; i < deviceNum; i++) 
-                workThread.emplace_back(std::thread(work_thread, this, frame_time, i, deviceNum, false, true));
+                workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
             
             for( auto &thread: workThread) 
                 thread.join();

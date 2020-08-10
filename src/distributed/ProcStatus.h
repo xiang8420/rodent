@@ -27,8 +27,6 @@ private:
 public:    
     // camera setting 
     bool image_decompose;
-    int region[4]; 
-    int width, height, spp;
     
     std::vector<int>  global_rays;
 
@@ -199,15 +197,13 @@ public:
         printf("procstatus delete\n");
     }
 
-    ProcStatus(const float3 e, const float3 d, const float3 u, float fov, int width, int height,
-            int spp_global, int comm_rank, int comm_size, int cSize, int dev, bool master) 
-        : width(width), height(height), rank(comm_rank), chunk_size(cSize), dev_num(dev), master(master) 
+    ProcStatus(int comm_rank, int comm_size, int cSize, int dev, bool master) 
+        : rank(comm_rank), chunk_size(cSize), dev_num(dev), master(master) 
     {
         
         size = master ? comm_size - 1 : comm_size;
         printf("before tile scheduler\n");
         
-        camera  = new ImageDecomposition(e, d, u, fov, width, height, rank, size);
         
         printf("after tile scheduler\n");
         thread_reset(); 
@@ -219,11 +215,7 @@ public:
         //inital chunk map  
         chunk_map.resize(chunk_size);
         // 
-        spp = spp_global;
-        camera->get_camera_info(&region[0], chunk_map.data(), local_chunk, spp, true); 
-        load_new_chunk = true;
         
-        printf("proc status region %d %d %d %d \n chunk map ", region[0], region[1], region[2], region[3]);
         for(int i = 0; i < chunk_size; i++) {
             printf(" %d", chunk_map[i]);
         }
@@ -234,22 +226,17 @@ public:
         global_rays.resize(size * size);
     }
 
-    int get_tile_info(int* res, float* processTime) {
+    void updata_local_chunk() {
         
-        printf("proc status get tile info region %d %d %d %d \n chunk map ", region[0], region[1], region[2], region[3]);
-        for(int i = 0; i < 4; i++)
-            res[i] = region[i];
-        printf("proc status get tile info region %d %d %d %d \n chunk map ", res[0], res[1], res[2], res[3]);
-        return spp; 
-    }
-    
-    void camera_rotate(float yaw, float pitch) {
-        camera->rotate(yaw, pitch);
+        local_chunk = 0; 
+        for(int i = 0; i < chunk_size; i++) {
+            if(chunk_map[i] == rank) {
+                local_chunk = i; break; 
+            }
+        }
+        load_new_chunk = true;
     }
 
-    void camera_move(float x, float y, float z) {
-        camera->move(x, y, z);
-    }
 };
 
 

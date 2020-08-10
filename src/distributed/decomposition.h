@@ -12,12 +12,14 @@
 #define PI 3.14159265359f
 #endif
 
+
 inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
     
     int axit = d - 1;
     int cur_n = n;
+    //choose longest axit splat
     while(cur_n != 1){
         grid[axit] *= 2;
         axit = ++axit % d;
@@ -94,10 +96,9 @@ struct MeshChunk{
 // Grid hierarchy for scheduling
 struct ImageDecomposition {
     float2 scale;
-    int count;
-    int proc_rank, proc_size;
-    int width, height, dep;
     
+    int width, height, spp, proc_spp;
+    int region[4]; 
     float3 eye, dir, right, up; 
     float w, h;
     std::vector<int>   domain;
@@ -202,7 +203,7 @@ struct ImageDecomposition {
         return c;
     }
     
-    void image_domain_decomposition(int* render_region, int* chunk_map, int& local_chunk) {
+    void image_domain_decomposition(int* render_region, int* chunk_map, int proc_rank, int proc_size) {
 
         MeshChunk chunks;
         for(int i = 0; i < width * height; i++)
@@ -239,7 +240,6 @@ struct ImageDecomposition {
                 chunk_map[chunk] = i;
 
             if(i == proc_rank) {
-                local_chunk = chunk == -1 ? 0 : chunk;
                 for(int k = 0; k < 4; k++)
                     render_region[k] = region[k]; 
             }
@@ -248,18 +248,20 @@ struct ImageDecomposition {
         write_project_result(); 
     }
     
-    void get_camera_info(int* region, int* chunk_map, int &local_chunk, int &proc_spp, bool imageDecompose) {
+    void decomposition(int* chunk_map, bool imageDecompose, int rank, int size) {
         region[0] = 0;     region[1] = 0;
         region[2] = width; region[3] = height;
         if(imageDecompose) {
-            image_domain_decomposition(region, chunk_map, local_chunk); 
+            image_domain_decomposition(region, chunk_map, rank, size); 
         } else {
-            proc_spp = proc_spp / proc_size;
+            spp = spp / size;
         }
     }
-    
-    ImageDecomposition(float3 e, float3 d, float3 u, float fov, int width, int height, int mpi_rank, int mpi_size)
-            : width(width), height(height), proc_rank(mpi_rank), proc_size(mpi_size) 
+   
+
+
+    ImageDecomposition(float3 e, float3 d, float3 u, float fov, int width, int height, int spp)
+            : width(width), height(height), spp(spp) 
     {
         float ratio = (float) width / (float)height;
         eye = e;
@@ -274,6 +276,10 @@ struct ImageDecomposition {
         std::fill(domain.begin(), domain.end(), -1);
         depth.resize(width * height);    
     }
+    
+    int* get_region() { return &region[0]; }
+
+    int get_spp() { return spp; }
 
     void rotate(float yaw, float pitch) {
         dir = ::rotate(dir, right,  -pitch);
