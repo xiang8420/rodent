@@ -161,7 +161,6 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     if (m->has_content())
         memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_size());
      
-    os<<"mthread comm after copy content\n";
     if (m->is_broadcast()) {
         os<<"mthread broadcast\n";
         int l = (2 * d) + 1;
@@ -171,14 +170,14 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 
 		if ((l + 1) < size)
 		{
-		    os<<"mthread send to l + 1 "<<l + 1<<"\n";	
+		    os<<"mthread export to l + 1 "<<l + 1<<"\n";	
             destination = (root + l + 1) % size;
 		    MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->rrq);
 			k++;
 		}
         send_msg_count+=k;	
     } else {
-        os<< "mthread send msg " << m->get_ray_size() <<"to "<<m->get_destination()<< std::endl;
+        os<< "mthread export msg " << m->get_ray_size() <<"to "<<m->get_destination()<< std::endl;
         MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, m->get_destination(), tag, MPI_COMM_WORLD, &msb->lrq);
         k++;
 	    send_ray_count++;
@@ -291,19 +290,20 @@ bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStat
     } 
 }
 
-void Communicator::send_message(Message *outgoing_message, ProcStatus *rs) {
+void Communicator::send_message(Message *message, ProcStatus *rs) {
 
     //outList lock
     //serialize
     
     //current process is not destination or broadcast, send to destination 
-    os << "mthread| send message"<<outgoing_message->get_destination() <<"\n";
-    if (outgoing_message->is_broadcast() || (outgoing_message->get_destination() != rank))
-        Export(outgoing_message, rs);
+    os <<"mthread| send message"<<message->get_destination() <<"\n";
+    os<< "mthread send message: size "<<message->get_size()<<" broadcast "<<message->is_broadcast()<<std::endl;
+    if (message->is_broadcast() || (message->get_destination() != rank))
+        Export(message, rs);
 
     os << "mthread| after send message\n";    
-    if (outgoing_message->is_broadcast()) {
-        if (outgoing_message->is_collective()) {
+    if (message->is_broadcast()) {
+        if (message->is_collective()) {
             rs->set_exit();
             os << "set exit\n";    
         } else {

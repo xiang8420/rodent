@@ -16,14 +16,17 @@ inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
     
-    int axit = 0;
+    int axit = d - 1;
     int cur_n = n;
     while(cur_n != 1){
         grid[axit] *= 2;
-        ++axit % d;
+        axit = ++axit % d;
         cur_n /= 2;
     }
-  //  printf("grid %f %f %f\n", grid[0], grid[1], grid[2]);
+    printf("grid n %d :", n);
+    for(int i = 0; i < d; i++)
+        printf("%f ", grid[i]);
+    printf("\n");
 }
 
 //Splitting bounding box for distributed computing
@@ -37,6 +40,7 @@ struct MeshChunk{
 
     MeshChunk(BBox bbox, int grid_num):bbox(bbox) {
         splat(grid_num, &scale[0], 3);
+        printf("mesh chunk scale %f %f %f\n", scale[0], scale[1], scale[2]);
         chunk_division();
         size = scale[0] * scale[1] * scale[2];
     }
@@ -206,6 +210,7 @@ struct ImageDecomposition {
         int chunk_size = chunks.size; 
         
         splat(proc_size, &scale[0], 2);
+        printf("image scale %f %f\n", scale[0], scale[1]);
         
         for(int i = 0; i < chunk_size; i++) 
             chunk_map[i] = -1;
@@ -214,10 +219,9 @@ struct ImageDecomposition {
             project_cube_to_image(chunks.list[i], i);
         }
         
-      //  printf("decomposition splat %f %f\n", scale[0], scale[1]); 
-        
         int step_width = width / scale[0];
         int step_height = height / scale[1];   
+        printf("step width %d height %d\n", step_width, step_height); 
 
         for(int i = 0; i < proc_size; i++) {
             int region[4];
@@ -240,7 +244,7 @@ struct ImageDecomposition {
                     render_region[k] = region[k]; 
             }
         }
-       // printf("renderregion %d %d %d %d\n", render_region[0], render_region[1], render_region[2], render_region[3]);
+        printf("renderregion %d %d %d %d\n", render_region[0], render_region[1], render_region[2], render_region[3]);
         write_project_result(); 
     }
     

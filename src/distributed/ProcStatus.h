@@ -195,7 +195,9 @@ public:
         return true;
     }
     
-    ~ProcStatus(){printf("procstatus delete\n");}
+    ~ProcStatus(){
+        printf("procstatus delete\n");
+    }
 
     ProcStatus(const float3 e, const float3 d, const float3 u, float fov, int width, int height,
             int spp_global, int comm_rank, int comm_size, int cSize, int dev, bool master) 

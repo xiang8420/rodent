@@ -473,26 +473,18 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             }
         }
     } 
-    print_string("rodent before write out primary\n");
-    print_i32(buffer_size);
-    print_string("\n");
     for i in range(0, primary.size) {
         let cid = get_chunk_id(grid_ids(i));
         if cid == scene_id {
             copy_primary_ray(primary, primary, i, primary_size++, false);
         } else if cid != -1 {
             if buffer_size >= buffer.capacity {
-                print_string("rodent before primary send\n");
                 rodent_worker_primary_send(-1, buffer_size);
                 buffer_size = 0;
-                print_string("rodent after primary send\n");
             }
             write_out_primary(primary, buffer, i, buffer_size++, false);
         }
     }
-    print_string("rodent after write out primary\n");
-    print_i32(buffer_size);
-    print_string("\n");
     (primary_size, buffer_size)    
 }
 
@@ -538,6 +530,12 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
             copy_secondary_ray(secondary, secondary, i, secondary_size++);
         } else if cid != -1 {
             if buffer_size >= buffer.capacity {
+                print_i32(scene.chunk);
+                print_string(" save out going buffer size");
+                print_i32(buffer_size);
+                print_string(" buffer.capacity ");
+                print_i32(buffer.capacity);
+                print_string("\n");
                 rodent_worker_secondary_send(-1, buffer_size);
                 buffer_size = 0;
             }
@@ -647,6 +645,9 @@ fn @cpu_dis_trace( scene: Scene
             let mut out_secondary   : OutRayStream;
             rodent_cpu_get_out_ray_stream(&mut out_primary,   num_rays / 2, true);
             rodent_cpu_get_out_ray_stream(&mut out_secondary, num_rays / 2, false);
+            print_string("out secondary capacity: ");
+            print_i32(out_secondary.capacity);
+            print_string("\n");
             let mut id = 0;
             if !valid_camera { id = num_rays; }
             
@@ -661,12 +662,12 @@ fn @cpu_dis_trace( scene: Scene
                     primary.size = cpu_generate_rays(primary, capacity, path_tracer.on_emit, &mut id, xmin, ymin, xmax, ymax, 
                                                 film_width, film_height, tid, spp_thread, vector_width);
                 }
-                print_string("after generate\n");
+              //  print_string("after generate\n");
                 with cpu_profile(&mut transfer_counter) {
                     let (primary_size, out_primary_size) = cpu_primary_transfer(primary, out_primary, min_max, vector_width, id == num_rays, scene);
                     primary.size = primary_size; 
                     out_primary.size = out_primary_size; 
-                    print_string("after transfer\n");
+              //      print_string("after transfer\n");
                     
                     if primary.size == 0  && secondary.size ==0 && id == num_rays  {
                         idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
@@ -675,9 +676,9 @@ fn @cpu_dis_trace( scene: Scene
                             out_primary.size = 0;
                         }
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, idle); 
-                        rodent_first_primary_check(-1, primary.size, 1, true);                
+             //           rodent_first_primary_check(-1, primary.size, 1, true);                
                     }    
-                    print_string("after send and recv\n");
+              //      print_string("after send and recv\n");
                     if(primary.size < 0) {
                         print_string("end rendering"); print_i32(primary.size); 
                         print_string(" "); print_i32(out_primary.size);
@@ -710,7 +711,7 @@ fn @cpu_dis_trace( scene: Scene
                 // Filter terminated rays
                 primary.size   = ray_ends(scene.num_geometries);
                 primary.size   = cpu_compact_primary(primary, vector_width, false /*vector_compact*/);
-    //            check_secondary_grid_id(secondary, scene.chunk, 1);
+            //    check_secondary_grid_id(secondary, scene.chunk, 1);
                 // only when secondary size == 0 need recv, it should be compacted? no compact 
                 secondary.size = ray_ends(scene.num_geometries - 1);
                 secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
@@ -718,6 +719,16 @@ fn @cpu_dis_trace( scene: Scene
                 with cpu_profile(&mut transfer_counter) {
                     if primary.size ==0 && secondary.size == 0 && id == num_rays {
                         idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
+                        print_i32(scene.chunk);
+                        print_string(" save out going buffer");
+                        print_i32(out_secondary.size);
+                        print_string(" secondary ");
+                        print_i32(secondary.size);
+                        print_string(" primary ");
+                        print_i32(primary.size);
+                        print_string(" id ");
+                        print_i32(id);
+                        print_string("\n");
                         if out_secondary.size > 0 {
                             rodent_worker_secondary_send(-1, out_secondary.size);
                             out_secondary.size = 0;
@@ -757,7 +768,7 @@ fn @cpu_dis_trace( scene: Scene
                 }
                 with cpu_profile(&mut transfer_counter) {
                     let (secondary_size, out_secondary_size) = cpu_secondary_transfer(secondary, out_secondary, min_max, vector_width, id == num_rays, scene);
-                    check_secondary_grid_id(secondary, scene.chunk, 3);
+       //             check_secondary_grid_id(secondary, scene.chunk, 3);
                     secondary.size = secondary_size; 
                     out_secondary.size = out_secondary_size;
                 } 

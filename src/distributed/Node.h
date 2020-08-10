@@ -43,8 +43,6 @@ Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) { }
 
 Node::~Node() {
     printf("%d delete Node\n", comm->rank);
-    delete ps;
-    delete comm;
 }
 
 bool Node::outList_empty() {  

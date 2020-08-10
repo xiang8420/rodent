@@ -856,7 +856,9 @@ void rodent_worker_primary_send(int32_t dev, int buffer_size) {
     } else {
         int capacity = interface->save_buffer_primary(dev) / 21;
         auto& array  = interface->host_buffer_primary;
+        printf("interface before send secondary\n");
         send_rays(array.data(), buffer_size, capacity, true);
+        printf("interface after send secondary\n");
     }
 }
 

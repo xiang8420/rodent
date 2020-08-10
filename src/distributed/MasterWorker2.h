@@ -73,9 +73,9 @@ MWNode::~MWNode() {
 }
 
 void MWNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
-    comm->os<<"rthread save outgoing buffer "<< size <<"\n"; 
     out_mutex.lock(); 
     int width = primary?21:14; 
+    comm->os<<"rthread save outgoing buffer "<< size <<" width "<<width<<"\n"; 
     int* ids = (int*)(retired_rays);
     for(int i = 0; i < 5; i ++) {
         comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
@@ -147,6 +147,7 @@ void MWNode::send_message() {
             }
         }
         if(!outList_empty()) {
+
             int cId = get_sent_list();
             if(cId >= 0 ) {
                 int dst_proc = ps->get_proc(cId);
@@ -174,6 +175,9 @@ void MWNode::send_message() {
         if (ps->all_thread_waiting() && inList->empty()) {
             if(rayList_empty()) {
                 comm->os<< "mthread send status msg\n";
+                int * tmp = ps->get_status();
+                comm->os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
+                
                 ps->set_proc_idle(comm->rank);
                 //send to master I am idle
                 comm->os<<"mthread local chunk"<<ps->get_local_chunk()<<"\n";

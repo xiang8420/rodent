@@ -38,7 +38,7 @@ struct DistributedFrameWork {
 
     ~DistributedFrameWork() {
         printf("delete distributed frame work\n");
-    //    delete node;
+        delete node;
     }
     
     void run(float* time) {
@@ -62,9 +62,7 @@ void dfw_run(float* processTime) {
 }
 
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
-    printf("worker send\n");
     dfw->node->save_outgoing_buffer(rays, size, capacity, isPrimary);
-    printf("worker send success\n");
 }
 
 int recv_rays(float **rays, size_t size, bool isPrimary, int thread_id, bool thread_wait){
