@@ -41,7 +41,6 @@ P2PNode::P2PNode(struct Communicator *comm, struct ProcStatus *ps)
     inList = new RayStreamList(ps->get_buffer_size());
     
     comm->os << "out list size"<<rayList[0]->size() << "capacity" << rayList[0]->get_primary()->get_capacity() << std::endl; 
-    comm->os << "loaded chunk()"<<ps->get_local_chunk()<< std::endl; 
 }
 
 P2PNode::~P2PNode() {
@@ -200,6 +199,7 @@ void P2PNode::run(ImageDecomposition * camera) {
     	
     } else {
         std::thread mthread(message_thread, this);
+        comm->os << "loaded chunk()"<<ps->get_local_chunk()<< std::endl; 
         ps->chunk_loaded();
         //    //all proc start proc 0 send schedule? 
         while(!ps->Exit()) {

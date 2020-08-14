@@ -101,6 +101,7 @@ inline bool read_index(char** ptr, obj::Index& idx) {
 
     return true;
 }
+
 static bool parse_obj(std::istream& stream, obj::File& file) {
     // Add an empty object to the scene
     int cur_object = 0;
@@ -434,7 +435,8 @@ void write_obj(TriMesh * tri_mesh, int c) {
 void compute_face_normals(const std::vector<uint32_t>& indices,
                                  const std::vector<float3>& vertices,
                                  std::vector<float3>& face_normals,
-                                 size_t first_index) {
+                                 size_t first_index) 
+{
     for (auto i = first_index, k = indices.size(); i < k; i += 4) {
         const float3& v0 = vertices[indices[i + 0]];
         const float3& v1 = vertices[indices[i + 1]];
@@ -446,7 +448,8 @@ void compute_face_normals(const std::vector<uint32_t>& indices,
 void compute_vertex_normals(const std::vector<uint32_t>& indices,
                                    const std::vector<float3>& face_normals,
                                    std::vector<float3>& normals,
-                                   size_t first_index) {
+                                   size_t first_index) 
+{
     for (auto i = first_index, k = indices.size(); i < k; i += 4) {
         float3& n0 = normals[indices[i + 0]];
         float3& n1 = normals[indices[i + 1]];
@@ -494,7 +497,7 @@ void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
     tri_mesh.texcoords.resize(vtx_offset + 4);                                                        
     tri_mesh.normals.resize(vtx_offset + 4);                                                          
    
-//    printf("face %f %f %f %f %f\n", bbox.max.x, bbox.min.y, bbox.min.z, bbox.max.y, bbox.max.z);
+    printf("face %f %f %f %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
     //Add 2 triangles
     size_t idx[] = {0 + vtx_offset, 1 + vtx_offset, 2 + vtx_offset, mtl_size, 0 + vtx_offset, 2 + vtx_offset, 3 + vtx_offset, mtl_size};
     for(int i = 0; i < 8; i++) {
@@ -584,11 +587,12 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
                 for (size_t i = 1; i < face.indices.size() - 1; i++) {
                     auto next = mapping[face.indices[i + 1]];
                     const float3& pi = obj_file.vertices[face.indices[i + 1].v];
-                    if(in_chunk
-                        || bbox.is_inside(pi)
+                    if(in_chunk || bbox.is_inside(pi)
                         || bbox.line_intersect(p0, pi) 
-                        || bbox.line_intersect(p1, pi)){
+                        || bbox.line_intersect(p1, pi))
+                    {
                         triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
+          //              printf("M %d %d ", face.material, face.material + mtl_offset);
                     }
                     prev = next;
                 }
@@ -604,13 +608,17 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
         tri_mesh.texcoords.resize(vtx_offset + mapping.size());
         tri_mesh.normals.resize(vtx_offset + mapping.size());
 
+        printf("triangles size %d idx offset %d\n", triangles.size(), idx_offset);
         for (size_t i = 0, n = triangles.size(); i < n; i++) {
             auto& t = triangles[i];
             tri_mesh.indices[idx_offset + i * 4 + 0] = t.v0 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 1] = t.v1 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 2] = t.v2 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 3] = t.m;
+         //   printf("tri mesh %d %d %d %d", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
         }
+        printf("\n");
+        printf("tri mesh size %d over \n", tri_mesh.indices.size());
 
         for (auto& p : mapping) {
             tri_mesh.vertices[vtx_offset + p.second] = obj_file.vertices[p.first.v];

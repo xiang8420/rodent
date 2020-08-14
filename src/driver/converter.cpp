@@ -648,7 +648,8 @@ void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export
 }
 
 static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, 
-                        bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, size_t grid_num) {
+                        bool fusion, size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, size_t grid_num) 
+{
     info("Converting OBJ file '", file_name, "'");
     obj::File obj_file;
     obj::MaterialLib mtl_lib;
@@ -658,6 +659,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         error("Invalid OBJ file '", file_name, "'");
         return false;
     }
+
     for (auto lib_name : obj_file.mtl_libs) {
         auto mtl_name = scene_path.base_name() + "/" + lib_name;
         if (!obj::load_mtl(mtl_name, mtl_lib)) {
@@ -788,6 +790,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
      
     for(int c = 0, n = chunk.size; c < n; c++) {
         auto tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunk.list.at(c), false);
+        printf("tri mesh num %ld \n", tri_mesh.indices.size() / 4);
         //if chunk is empty ??
 		
 		if(PreRendering) {
@@ -795,7 +798,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             auto sub_mesh = Simplify::simplify_TriMesh(&tri_mesh, target_count, 7, true);
             obj::mesh_add(simple_mesh, sub_mesh);
       //      obj::write_obj(&simple_mesh, c);
-            printf("tri mesh num %ld \n", tri_mesh.indices.size() / 4);
         }
 		std::string chunk_path = (c > 9 ? "data/0" : "data/00") + std::to_string(c) + "/";
         create_directory(chunk_path.c_str());
@@ -845,30 +847,35 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
             light_ids[i / 4] = 0;
+            if(tri_mesh.indices[i + 3] >= obj_file.materials.size())
+               continue; 
 
             auto& mtl_name = obj_file.materials[tri_mesh.indices[i + 3]];
             if (mtl_name == "")
                 continue;
-//            printf("search mtl %d %s\n", tri_mesh.indices[i + 3], mtl_name.c_str());
+//            printf("mesh indices %d %d %d %d %d search mtl %s\n", i / 4, tri_mesh.indices[i], tri_mesh.indices[i+1], tri_mesh.indices[i+2], tri_mesh.indices[i+3], mtl_name.c_str());
+
             auto& mat = mtl_lib.find(mtl_name)->second;
             if (mat.ke == rgb(0.0f) && mat.map_ke == "")
                 continue;
+            printf("after check emission\n");
 
             auto& v0 = tri_mesh.vertices[tri_mesh.indices[i + 0]];
             auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
             auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
 
- //           int find_light = 0;
- //           for(find_light; find_light < num_lights; find_light++){
- //               int vert_id = find_light * 3;
- //               if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
- //                   break;
- //           } 
- //           light_ids[i / 4] = find_light;
- //           if(find_light != num_lights)
- //               continue;
- //           num_lights++;
-            light_ids[i / 4] = num_lights++;
+            int find_light = 0;
+            for(find_light; find_light < num_lights; find_light++){
+                int vert_id = find_light * 3;
+            //    printf("vert id %d ", vert_id); 
+                if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
+                    break;
+            } 
+            printf("after find\n");
+            light_ids[i / 4] = find_light;
+            if(find_light != num_lights)
+                continue;
+            num_lights++;
 
             if (has_map_ke){
                 os << "    let light" << i << " = make_triangle_light(\n"
@@ -911,6 +918,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         for (size_t i = 0; i < simple_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
             light_ids[i / 4] = 0;
+            if(simple_mesh.indices[i + 3] >= obj_file.materials.size())
+               continue; 
             auto& mtl_name = obj_file.materials[simple_mesh.indices[i + 3]];
             if (mtl_name == "")
                 continue;
