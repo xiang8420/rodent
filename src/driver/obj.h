@@ -53,13 +53,15 @@ struct File {
     std::vector<float3>      vertices;
     std::vector<float3>      normals;
     std::vector<float2>      texcoords;
-    std::vector<std::string> materials;
-    std::vector<std::string> mtl_libs;
+    std::vector<std::string> mtl_libs; //mtl files
     
     BBox bbox;
 };
 
-typedef std::unordered_map<std::string, Material> MaterialLib;
+struct MaterialLib {
+    std::unordered_map<std::string, Material> map;
+    std::vector<std::string> list;
+};
 
 struct TriMesh {
     std::vector<float3>   vertices;
@@ -69,11 +71,13 @@ struct TriMesh {
     std::vector<float2>   texcoords;
 };
 
-bool load_obj(const FilePath&, File&);
+bool load_obj(const std::string, File&, MaterialLib&);
 bool load_mtl(const FilePath&, MaterialLib&);
-void write_obj(TriMesh *, int);
+void write_obj(const TriMesh&, const MaterialLib&, int);
 void mesh_add(TriMesh&, TriMesh&);
 TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&, bool);
+void read_obj_paths(std::string, std::vector<std::string> &); 
+
 bool chunk_division(File& file);
 
 void compute_vertex_normals(const std::vector<uint32_t>& ,const std::vector<float3>&, std::vector<float3>&, size_t);

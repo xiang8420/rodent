@@ -66,6 +66,17 @@ inline char* strip_spaces(char* ptr) {
     return ptr;
 }
 
+inline int find(char * ptr, char t) {
+    int i = 0;
+    printf("find :");
+    while(ptr[i] != t && ptr[i] != ' ' && ptr[i] != '\0') {
+        i++;
+        printf("%c ", ptr[i]);
+    }
+    printf("end find\n");
+    return i;
+}
+
 inline bool read_index(char** ptr, obj::Index& idx) {
     char* base = *ptr;
 
@@ -102,7 +113,7 @@ inline bool read_index(char** ptr, obj::Index& idx) {
     return true;
 }
 
-static bool parse_obj(std::istream& stream, obj::File& file) {
+static bool parse_obj(std::istream& stream, obj::File& file, obj::MaterialLib& mtl_lib) {
     // Add an empty object to the scene
     int cur_object = 0;
     file.objects.emplace_back();
@@ -111,10 +122,9 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
     int cur_group = 0;
     file.objects[0].groups.emplace_back();
 
-    // Add an empty material to the scene
+    // 
     int cur_mtl = 0;
-    file.materials.emplace_back("");
-
+    
     // Add dummy vertex, normal, and texcoord
     file.vertices.emplace_back();
     file.normals.emplace_back();
@@ -150,7 +160,7 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
                         v.y = std::strtof(ptr, &ptr);
                         v.z = std::strtof(ptr, &ptr);
                         file.vertices.push_back(v);
-                        file.bbox.extend(v);            
+                        file.bbox.extend(v);
                     }
                     break;
                 case 'n':
@@ -195,7 +205,9 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
             } else {
                 // Convert relative indices to absolute
                 for (size_t i = 0; i < f.indices.size(); i++) {
+                    printf("face v idx %d ", f.indices[i].v);
                     f.indices[i].v = (f.indices[i].v < 0) ? file.vertices.size()  + f.indices[i].v : f.indices[i].v;
+                    printf(" %d \n", f.indices[i].v);
                     f.indices[i].t = (f.indices[i].t < 0) ? file.texcoords.size() + f.indices[i].t : f.indices[i].t;
                     f.indices[i].n = (f.indices[i].n < 0) ? file.normals.size()   + f.indices[i].n : f.indices[i].n;
                 }
@@ -233,10 +245,11 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
             ptr = strip_text(ptr);
 
             const std::string mtl_name(base, ptr);
-
-            cur_mtl = std::find(file.materials.begin(), file.materials.end(), mtl_name) - file.materials.begin();
-            if (cur_mtl == (int)file.materials.size()) {
-                file.materials.push_back(mtl_name);
+            cur_mtl = std::find(mtl_lib.list.begin(), mtl_lib.list.end(), mtl_name) - mtl_lib.list.begin();
+            
+            if (cur_mtl == (int)mtl_lib.list.size()) {
+                warn("Load Unknown material'", mtl_name, " set to dummy ' (line ", cur_line, ").");
+                cur_mtl = std::find(mtl_lib.list.begin(), mtl_lib.list.end(), "") - mtl_lib.list.begin();
             }
         } else if (!std::strncmp(ptr, "mtllib", 6) && std::isspace(ptr[6])) {
             ptr += 6;
@@ -255,7 +268,8 @@ static bool parse_obj(std::istream& stream, obj::File& file) {
             err_count++;
         }
     }
-
+    file.bbox.extend(0.1); 
+    
     return (err_count == 0);
 }
 
@@ -266,7 +280,7 @@ static bool parse_mtl(std::istream& stream, obj::MaterialLib& mtl_lib) {
 
     std::string mtl_name;
     auto current_material = [&] () -> obj::Material& {
-        return mtl_lib[mtl_name];
+        return mtl_lib.map[mtl_name];
     };
 
     while (stream.getline(line, max_line)) {
@@ -287,9 +301,9 @@ static bool parse_mtl(std::istream& stream, obj::MaterialLib& mtl_lib) {
             ptr = strip_text(ptr);
 
             mtl_name = std::string(base, ptr);
-            if (mtl_lib.find(mtl_name) != mtl_lib.end()) {
-                error("Material redefinition for '", mtl_name, "' (line ", cur_line, ").");
-                err_count++;
+            if (mtl_lib.map.find(mtl_name) != mtl_lib.map.end()) {
+                warn("Material redefinition for '", mtl_name, "' (line ", cur_line, ").");
+                continue;
             }
         } else if (ptr[0] == 'K') {
             if (ptr[1] == 'a' && std::isspace(ptr[2])) {
@@ -372,13 +386,14 @@ static bool parse_mtl(std::istream& stream, obj::MaterialLib& mtl_lib) {
         }
     }
 
+
     return (err_count == 0);
 }
 
-bool load_obj(const FilePath& path, obj::File& obj_file) {
+bool load_obj(const std::string path, obj::File& obj_file, obj::MaterialLib& mtl_lib) {
     // Parse the OBJ file
     std::ifstream stream(path);
-    bool res = stream && parse_obj(stream, obj_file);
+    bool res = stream && parse_obj(stream, obj_file, mtl_lib);
     return res;
 }
 
@@ -388,18 +403,18 @@ bool load_mtl(const FilePath& path, obj::MaterialLib& mtl_lib) {
     return stream && parse_mtl(stream, mtl_lib);
 }
 
-void write_obj(TriMesh * tri_mesh, int c) {
+void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 	std::ofstream outfile;
 	outfile.open("simplemodel_" + std::to_string(c) + ".obj");	
 
-	int trx_size = tri_mesh->indices.size() / 4;
-	int vtx_size = tri_mesh->vertices.size();
+	int trx_size = tri_mesh.indices.size() / 4;
+	int vtx_size = tri_mesh.vertices.size();
 	printf("vtx_size %d\n", vtx_size);
 	for(int i = 0; i < vtx_size; i++) {
 		outfile << "v " <<std::fixed<<std::setprecision(4) 
-						<< tri_mesh->vertices[i].x << " " 
-						<< tri_mesh->vertices[i].y << " " 
-						<< tri_mesh->vertices[i].z<<std::endl; 
+						<< tri_mesh.vertices[i].x << " " 
+						<< tri_mesh.vertices[i].y << " " 
+						<< tri_mesh.vertices[i].z<<std::endl; 
 	}
 
 //	for(int i = 0; i < vtx_size; i++) {
@@ -423,9 +438,11 @@ void write_obj(TriMesh * tri_mesh, int c) {
 //		}
 //		else
 //		{
-			outfile << "f " << tri_mesh->indices[i * 4] + 1 <<" "
-					        << tri_mesh->indices[i * 4 + 1] + 1 <<" "
-							<< tri_mesh->indices[i * 4 + 2] + 1<<std::endl;
+			outfile << "f " << tri_mesh.indices[i * 4] + 1 <<" "
+					        << tri_mesh.indices[i * 4 + 1] + 1 <<" "
+							<< tri_mesh.indices[i * 4 + 2] + 1<<std::endl;
+            
+			outfile << "mtl " << mtl_lib.list[tri_mesh.indices[i * 4 + 3]] <<"\n";
 //		}
 		//fprintf(file, "f %d// %d// %d//\n", triangles[i].v[0]+1, triangles[i].v[1]+1, triangles[i].v[2]+1); //more compact: remove trailing zeros
 	}
@@ -474,12 +491,15 @@ void mesh_add(TriMesh &tri_mesh, TriMesh &sub_mesh) {
     tri_mesh.face_normals.resize(idx_offset + idx_increment);
 
     memcpy(&tri_mesh.indices[idx_offset * 4], sub_mesh.indices.data(), 4 * idx_increment * sizeof(uint32_t)); 
-    int idx_size = 4 * (idx_offset + idx_increment - 1);
+    int idx_size = 4 * (idx_offset + idx_increment);
     printf("vtx offset %ld idx_offset%ld idx increment%ld vtx increment %ld %ld\n", vtx_offset, idx_offset, idx_increment, vtx_increment, tri_mesh.indices[idx_offset * 4] + vtx_offset);
     for(int i = idx_offset * 4; i < idx_size; i += 4) {
+        std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
         tri_mesh.indices[i]     += vtx_offset; 
         tri_mesh.indices[i + 1] += vtx_offset; 
         tri_mesh.indices[i + 2] += vtx_offset;
+        tri_mesh.indices[i + 3] = 8; //mat_offset;
+        std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
     }
 //    printf("normals %ld, texcoords %ld, face normals %ld \n", sub_mesh.normals.size(), sub_mesh.texcoords.size(), sub_mesh.face_normals.size());
     memcpy(&tri_mesh.vertices[vtx_offset], sub_mesh.vertices.data(), vtx_increment * sizeof(float3)); 
@@ -519,7 +539,7 @@ void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
         tri_mesh.vertices[vtx_offset + 1] = float3(bbox.min.x, bbox.max.y, bbox.max.z);                   
         tri_mesh.vertices[vtx_offset + 2] = float3(bbox.min.x, bbox.min.y, bbox.max.z);                   
         tri_mesh.vertices[vtx_offset + 3] = float3(bbox.max.x, bbox.min.y, bbox.max.z);                   
-    }                                                                                
+    }
     std::fill(tri_mesh.texcoords.begin() + vtx_offset, tri_mesh.texcoords.end(), float2(0.0f));       
 //    printf("before face normal\n");    
     auto face_offset = tri_mesh.face_normals.size();
@@ -543,22 +563,22 @@ void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
 }
 
 void compute_virtual_portal(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox_local, BBox& bbox_global) {
-     for(int i = 0; i < 3; i++) {
-        if(bbox_local.min[i] > bbox_global.min[i]) {
-            printf("min %d \n", i);
-            BBox tmp = bbox_local;
-            tmp.max[i] = tmp.min[i];
-            virtual_face(tri_mesh, mtl_size, tmp, i); 
-        }
-        if(bbox_local.max[i] < bbox_global.max[i]) {
-            printf("max %d \n", i);
-            BBox tmp = bbox_local;
-            virtual_face(tri_mesh, mtl_size, tmp, i); 
-        }
-     } 
+    for(int i = 0; i < 3; i++) {
+       if(bbox_local.min[i] > bbox_global.min[i]) {
+           printf("min %d \n", i);
+           BBox tmp = bbox_local;
+           tmp.max[i] = tmp.min[i];
+           virtual_face(tri_mesh, mtl_size, tmp, i); 
+       }
+       if(bbox_local.max[i] < bbox_global.max[i]) {
+           printf("max %d \n", i);
+           BBox tmp = bbox_local;
+           virtual_face(tri_mesh, mtl_size, tmp, i); 
+       }
+    }
 }
 
-TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, size_t mtl_offset, BBox& bbox, bool virtual_portal) {
+TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_t mtl_offset, BBox& bbox, bool virtual_portal) {
     TriMesh tri_mesh;
     for (auto& obj: obj_file.objects) {
         // Convert the faces to triangles & build the new list of indices
@@ -608,17 +628,17 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
         tri_mesh.texcoords.resize(vtx_offset + mapping.size());
         tri_mesh.normals.resize(vtx_offset + mapping.size());
 
-        printf("triangles size %d idx offset %d\n", triangles.size(), idx_offset);
+        printf("triangles size %ld idx offset %ld\n", triangles.size(), idx_offset);
         for (size_t i = 0, n = triangles.size(); i < n; i++) {
             auto& t = triangles[i];
             tri_mesh.indices[idx_offset + i * 4 + 0] = t.v0 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 1] = t.v1 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 2] = t.v2 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 3] = t.m;
-         //   printf("tri mesh %d %d %d %d", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
+            printf("tri mesh %d %d %d %d \n", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
         }
         printf("\n");
-        printf("tri mesh size %d over \n", tri_mesh.indices.size());
+        printf("tri mesh size %ld over \n", tri_mesh.indices.size());
 
         for (auto& p : mapping) {
             tri_mesh.vertices[vtx_offset + p.second] = obj_file.vertices[p.first.v];
@@ -650,11 +670,10 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
             compute_vertex_normals(tri_mesh.indices, tri_mesh.face_normals, tri_mesh.normals, idx_offset);
         }
     }
-//    BBox big_bbox(float3(-5, 0.3, -4), float3(3, 0.5, 1));
-    BBox global = obj_file.bbox;
-//    if(bbox.max.x > 0){
-        compute_virtual_portal(tri_mesh, obj_file.materials.size(), bbox, global);
-//    }
+    if(virtual_portal) {
+        BBox global = obj_file.bbox;
+        compute_virtual_portal(tri_mesh, mtl_lib.list.size(), bbox, global);
+    }
     // Re-normalize all the values in the OBJ file to handle invalid meshes
     bool fixed_normals = false;
     for (auto& n : tri_mesh.normals) {
@@ -671,4 +690,51 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& /*mtl_lib*/, s
 
     return tri_mesh;
 }
+
+void read_obj_paths(std::string path, std::vector<std::string> &obj_files) {
+    std::string suffix = path.substr(path.size() - 3, path.size());
+    if(suffix == "obj") {
+        obj_files.emplace_back(path.substr(0, path.size() - 4));
+        std::cout<<" "<<path.substr(0, path.size() - 4)<<"\n";
+    } else {
+        std::ifstream stream;
+        stream.open(path, std::ios::in);
+     
+        std::vector<std::string> tmp;
+        char line[4096];
+        while (stream.getline(line, 4096)) {
+            char* ptr = strip_spaces(line);
+            printf("read obj path get line %s\n", ptr);
+            if(ptr[0] == '<') {
+                ptr = strip_spaces(ptr);
+                int ed = find(ptr, '>');
+                if(ptr[1] == '/') {
+                    std::string s(ptr + 2, ptr + ed);
+                    if(s == "scene") {
+                        break;
+                    } else if (s == "mesh") {
+                        obj_files.push_back(tmp.back());
+                        std::cout<<s<<" "<<tmp.back()<<"\n";
+                    } else {
+                        std::cout<<"error tag "<<s<<"\n";
+                    }
+                    tmp.pop_back();
+                    tmp.pop_back();
+                } else {
+                    std::string s(ptr + 1, ptr + ed);
+                    std::cout<<"s "<<s<<"\n";
+                    tmp.emplace_back(s);
+                }
+            } else {
+                ptr = strip_spaces(ptr);
+                int ed = find(ptr, '<');
+                std::string s(ptr, ptr + ed);
+                std::cout<<"s "<<s<<"\n";
+                tmp.emplace_back(s);
+            }
+        }
+        std::cout<<" "<<obj_files[0]<<"\n";
+    }
+}
+
 } // namespace obj

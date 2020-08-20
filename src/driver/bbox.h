@@ -22,6 +22,12 @@ struct BBox {
         max = ::max(max, bb.max);
         return *this;
     }
+    
+    void extend(float n) {
+        min.x -= n; min.y -= n; min.z -= n;
+        max.x += n; max.y += n; max.z += n;
+    }
+    
     void ToFloat(float *value){
         value[0] = min.x; value[1] = min.y; value[2] = min.z;
         value[3] = max.x; value[4] = max.y; value[5] = max.z;

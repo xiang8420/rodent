@@ -17,7 +17,7 @@ inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
     
-    int axit = d - 1;
+    int axit = 0;
     int cur_n = n;
     //choose longest axit splat
     while(cur_n != 1){
@@ -25,7 +25,7 @@ inline void splat(size_t n, float* grid, int d) {
         axit = ++axit % d;
         cur_n /= 2;
     }
-    printf("grid n %d :", n);
+    printf("grid n %ld :", n);
     for(int i = 0; i < d; i++)
         printf("%f ", grid[i]);
     printf("\n");
@@ -78,12 +78,12 @@ struct MeshChunk{
                 for(int k = 0; k < scale[2]; k++){
                     float z = bbox.min.z + k * step.z;
                     struct BBox bb;
-                    bb.min.x = x - 0.1f;
-                    bb.min.y = y - 0.1f;
-                    bb.min.z = z - 0.1f;
-                    bb.max.x = ((i == scale[0] - 1)? bbox.max.x:x + step.x) + 0.1f;
-                    bb.max.y = ((j == scale[1] - 1)? bbox.max.y:y + step.y) + 0.1f;
-                    bb.max.z = ((k == scale[2] - 1)? bbox.max.z:z + step.z) + 0.1f;
+                    bb.min.x = x - 0.001f;
+                    bb.min.y = y - 0.001f;
+                    bb.min.z = z - 0.001f;
+                    bb.max.x = std::max(bbox.max.x, x + step.x) + 0.001f;
+                    bb.max.y = std::max(bbox.max.y, y + step.y) + 0.001f;
+                    bb.max.z = std::max(bbox.max.z, z + step.z) + 0.001f;
                   //  printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
                     list.push_back(bb);  //emplace_back
                 }
@@ -118,7 +118,7 @@ struct ImageDecomposition {
         img.width = width;
         img.height = height;
         img.pixels.reset(new uint8_t[width * height * 4]);
-        float3 color[] = { float3(60, 0, 0), float3(120, 0, 0), float3(180, 0, 0),
+        float3 color[] = { float3(0, 60, 0), float3(120, 0, 0), float3(180, 0, 0),
                            float3(0, 60, 0), float3(0, 120, 0), float3(0, 180, 0),
                            float3(0, 0, 60), float3(0, 0, 120), float3(0, 0, 180)};
 

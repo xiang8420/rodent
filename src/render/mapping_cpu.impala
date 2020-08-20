@@ -677,7 +677,7 @@ fn @cpu_dis_trace( scene: Scene
                         }
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, idle); 
              //           rodent_first_primary_check(-1, primary.size, 1, true);                
-                    }    
+                    }
               //      print_string("after send and recv\n");
                     if(primary.size < 0) {
                         print_string("end rendering"); print_i32(primary.size); 
