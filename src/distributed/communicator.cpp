@@ -9,12 +9,9 @@ Communicator::Communicator() {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     master = size - 1;
     
-    pure_master = (size > 1 && size % 2 == 1); // if master join rendering 
-    
-    int group = rank == master ? 1 : 0;
-    MPI_Comm_split(MPI_COMM_WORLD, group, rank, &Client_Comm);
-    MPI_Comm_size(Client_Comm, &worker_size);
-    MPI_Comm_rank(Client_Comm, &worker_rank);
+    if(size % 2 == 1 && size != 1) {
+        error("Can't use odd number nodes.");
+    }
     
     printf("comm rank %d \n", rank);
     os = std::ofstream("out/proc_" + std::to_string(rank));
@@ -33,78 +30,8 @@ void Communicator::all_gather_float(float *a, float *res, int size) {
     MPI_Allgather(a, 1, MPI_FLOAT, res, 1, MPI_FLOAT, MPI_COMM_WORLD);
 }
 
-void Communicator::Isend_rays(struct Rays* buffer, int size, int dst, int tag) {
-    int buffer_size = buffer->get_size();
-    int width = buffer->store_width;
-    float *data = buffer->get_data();
-    int send_size = buffer_size > size ? size : buffer_size;
- //   printf("send ray send size %d buffer_size%d size %d\n", send_size, buffer_size, size);    
-    MPI_Isend(&data[(buffer_size - send_size) * width], send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD, &req[tag]);
-    buffer->size -= send_size;
-    send_ray_count ++;
-}
-
-void Communicator::mpi_wait(int tag){
-    MPI_Wait(&req[tag],sta);
-}
-
-void Communicator::send_noray(int dst) {
-//    printf("send norays %d %d\n", rank, dst);
-    int msg[MSG_SIZE];
-    msg[0] = 0;
-    MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
-    send_msg_count++;
-}
-
-void Communicator::send_end(int dst) {
-    int msg[MSG_SIZE];
-    msg[0] = -1;
-    MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
-    send_msg_count++;
-}
-
 void Communicator::reduce_image(float* film, float *reduce_buffer, int pixel_num){
-    if(pure_master){
-        MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, Client_Comm); 
-    } else {
-        MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
-    }
-}
-
-void Communicator::send_msg(int dst, int* msg){
-    MPI_Send(&msg[0], MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD);
-    send_msg_count++;
-}
-
-void Communicator::recv_msg(int dst, int *msg) {
-    MPI_Recv(msg, MSG_SIZE, MPI_INT, dst, 1, MPI_COMM_WORLD, sta);
-    recv_msg_count++;
-}
-
-void Communicator::recv_rays(int src, int recv_size, struct Rays* raylist) {
-    if(recv_size == 0) return;
-    int width = raylist->store_width;
-    os<< rank << " <- " << src << "|recv" <<  recv_size <<" "<<width<<std::endl;
-    float *rays = &raylist->get_data()[raylist->get_size() * width];
-    raylist->size += recv_size;
-
-    MPI_Recv(rays, recv_size * width, MPI_FLOAT, src, 1, MPI_COMM_WORLD, sta); 
-
-    recv_ray_count++;
-//    for(int i = 0; i < 10; i ++) {
-//        printf("|r %d %d %d", ids[i * width], ids[i * width + 9], ids[i * width + 15]);
-//    }
-//    printf("\n");
-}
-
-void Communicator::send_rays(int dst, int send_size, struct Rays* buffer) {
-    if(send_size == 0) return;
-    int width = buffer->store_width;
-    float *rays = &buffer->get_data()[(buffer->get_size() - send_size) * width];
-    buffer->size -= send_size;
-    os << rank << "-> " <<  dst << "|send " << send_size << width << std::endl;
-    MPI_Send(rays, send_size * width, MPI_FLOAT, dst, 1, MPI_COMM_WORLD);
-    send_ray_count++;
+    MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
 }
 
 void Communicator::purge_completed_mpi_buffers() {
@@ -192,8 +119,6 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     
     return k;
 }
-
-void Communicator::collective(ProcStatus *rs) { }
 
 bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStatus *ps) {
     int recv_ready;

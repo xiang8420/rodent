@@ -925,9 +925,6 @@ fn @make_cpu_device(  use_embree: bool
         }
     }
 }
-fn @make_prerender_avx2_device() -> Device {
-    make_cpu_device(false, true, true, true, make_cpu_int_min_max(), 8, 128)
-}
 
 fn @make_prerender_avx_device() -> Device {
     make_cpu_device(false, true, true, true, make_default_min_max(), 8, 128)

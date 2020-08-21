@@ -54,7 +54,7 @@ struct DistributedFrameWork {
     DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
     {
         comm = new Communicator();
-        ps = new ProcStatus(comm->rank, comm->size, chunk, dev, comm->pure_master);
+        ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
         // mpi
         if(type == "P2PNode") {
             node = new P2PNode(comm, ps);
@@ -74,7 +74,7 @@ struct DistributedFrameWork {
     
     void run(ImageDecomposition *camera) {
         printf("dis frame worker run\n");
-        int worker_size = comm->get_worker_size();
+        int worker_size = comm->get_comm_size();
         printf("before all gather %d\n", comm->rank);
         
         camera->decomposition(ps->get_chunk_map(), true, comm->rank, comm->size); 
@@ -89,11 +89,11 @@ struct DistributedFrameWork {
         printf("dfw reduce %d %d %d %d\n", comm->rank, comm->master, width, height); 
         int pixel_num = width * height * 3;
         float *reduce_buffer = new float[pixel_num];
-        if(comm->rank != comm->master || !comm->pure_master) {
-            printf("%d before reduce\n", comm->rank);
-            comm->reduce_image(film, reduce_buffer, pixel_num);
-        }
-        std::string out = out_file + "f" + std::to_string(frame) + "w" + std::to_string(comm->get_worker_size()) + "g" + std::to_string(ps->get_chunk_size());
+        printf("%d before reduce\n", comm->rank);
+        
+        comm->reduce_image(film, reduce_buffer, pixel_num);
+        
+        std::string out = out_file + "f" + std::to_string(frame) + "w" + std::to_string(comm->get_comm_size()) + "g" + std::to_string(ps->get_chunk_size());
         out += ".png";
         if (comm->rank == 0 && out_file != "") {
             save_image(reduce_buffer, out, width, height, 1 /* iter*/ );

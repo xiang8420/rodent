@@ -478,7 +478,9 @@ static void write_bvh_buffer(std::vector<Node>& nodes, std::vector<Tri>& tris, s
     size_t tri_size  = sizeof(Tri);
     of.write((char*)&node_size, sizeof(uint32_t));
     of.write((char*)&tri_size,  sizeof(uint32_t));
+    printf("write nvh nodes %ld\n", nodes.size());
     write_buffer(of, nodes);
+    printf("write nvh tri %ld\n", tris.size());
     write_buffer(of, tris );
     info("BVH with ", nodes.size(), " node(s), ", tris.size(), " tri(s)");
 }
@@ -684,7 +686,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     //create data directory 
     create_directory("data/");
     std::string data_path  = "data/"; 
+    float elapsed_ms = 1;
     for(int i = 0; i < chunk_size; i++) {
+        int chunk = rank + size;
+
+        auto ticks = std::chrono::high_resolution_clock::now();
+        
         std::string chunk_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/";
         create_directory(chunk_path.c_str());
         
@@ -738,19 +745,18 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             // Do not leave this array undefined, even if this triangle is not a light
             light_ids[i / 4] = 0;
             //if virtual portal continue
-            std::cout<<"tri idx "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<< "mtl idx "<<tri_mesh.indices[i + 3]<<"\n";
+      //      std::cout<<"tri idx "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<< "mtl idx "<<tri_mesh.indices[i + 3]<<"\n";
             if(tri_mesh.indices[i + 3] >= num_mats)
                continue; 
             
             auto& mtl_name = mtl_lib.list[tri_mesh.indices[i + 3]];
-            std::cout<<"mtl "<<mtl_name<<"\n";
+       //     std::cout<<"mtl "<<mtl_name<<"\n";
             if (mtl_name == "")
                 continue;
 
             auto& mat = mtl_lib.map.find(mtl_name)->second;
             if (mat.ke == rgb(0.0f) && mat.map_ke == "")
                 continue;
-            printf("after check emission\n");
 
             auto& v0 = tri_mesh.vertices[tri_mesh.indices[i + 0]];
             auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
@@ -793,12 +799,11 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light_areas.emplace_back(inv_area);
                 light_colors.emplace_back(mat.ke);
             }
-
         }
-        printf("light over\n"); 
         write_buffer(chunk_path + "ligt_ids.bin", light_ids);
-        printf("chunk over\n"); 
-        printf("light over\n"); 
+        
+        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+        printf("chunk %d process time %f\n", i, elapsed_ms);
     }
    
 
@@ -821,8 +826,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "extern fn get_chunk_num() -> i32{ "<< chunk_size << " }\n";
     os << "\nfn @make_scene(device: Device, settings: &Settings, file: File_path, chunk: i32, generateRays: bool)-> Scene {\n";
     os << "    let math     = device.intrinsics;\n"
-       << "    let spp      = settings.spp;\n";
-    os << "    // Camera\n"
+       << "    // Camera\n"
        << "    let camera = make_perspective_camera(\n"
        << "        math,\n"
        << "        settings.eye,\n"
@@ -830,7 +834,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        settings.width,\n"
        << "        settings.height,\n"
        << "        settings.image_region,\n"
-       << "        spp,\n"
+       << "        settings.spp,\n"
        << "        generateRays\n"
        << "    );\n";
 	
@@ -1065,7 +1069,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     if(preprocess) {
         os << "extern fn prerender(settings: &Settings) -> () {\n"   
            << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, 1 /*spp*/); \n"
-           << "    let device = make_prerender_avx2_device(); \n"
+           << "    let device   = make_avx2_device(false); \n"
            << "    let scene    = make_scene(device, settings, make_file_path(1, 999), 0, true);\n"
            << "    renderer(scene, device, 0);\n"
            << "}\n";

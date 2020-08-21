@@ -358,10 +358,14 @@ struct Interface {
     }
 
     const Bvh8Tri4& load_bvh8_tri4(int32_t dev, const std::string& filename) {
+        printf("before bvh device\n");
         auto& bvh8_tri4 = devices[dev].bvh8_tri4;
+        printf("after bvh device\n");
         auto it = bvh8_tri4.find(filename);
+        printf("after bvh find file\n");
         if (it != bvh8_tri4.end())
             return it->second;
+        printf("before bvh std::move\n");
         return bvh8_tri4[filename] = std::move(load_bvh<Node8, Tri4>(dev, filename));
     }
 
@@ -395,8 +399,11 @@ struct Interface {
                 info("Loaded BVH file '", filename, "'");
                 std::vector<Node> nodes;
                 std::vector<Tri>  tris;
+                printf("before read nodes\n");
                 read_buffer(is, nodes);
+                printf("before read tris\n");
                 read_buffer(is, tris);
+                printf("before move copy to device\n");
                 return Bvh<Node, Tri> { std::move(copy_to_device(dev, nodes)), std::move(copy_to_device(dev, tris)) };
             }
             skip_buffer(is);
@@ -707,6 +714,7 @@ void rodent_load_bvh4_tri4(int32_t dev, const char* file, Node4** nodes, Tri4** 
 
 void rodent_load_bvh8_tri4(int32_t dev, const char* file, Node8** nodes, Tri4** tris) {
     auto& bvh = interface->load_bvh8_tri4(dev, file);
+    printf("load bvh 8 4\n");
     *nodes = const_cast<Node8*>(bvh.nodes.data());
     *tris  = const_cast<Tri4*>(bvh.tris.data());
 }

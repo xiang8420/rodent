@@ -205,9 +205,7 @@ static bool parse_obj(std::istream& stream, obj::File& file, obj::MaterialLib& m
             } else {
                 // Convert relative indices to absolute
                 for (size_t i = 0; i < f.indices.size(); i++) {
-                    printf("face v idx %d ", f.indices[i].v);
                     f.indices[i].v = (f.indices[i].v < 0) ? file.vertices.size()  + f.indices[i].v : f.indices[i].v;
-                    printf(" %d \n", f.indices[i].v);
                     f.indices[i].t = (f.indices[i].t < 0) ? file.texcoords.size() + f.indices[i].t : f.indices[i].t;
                     f.indices[i].n = (f.indices[i].n < 0) ? file.normals.size()   + f.indices[i].n : f.indices[i].n;
                 }
@@ -494,12 +492,12 @@ void mesh_add(TriMesh &tri_mesh, TriMesh &sub_mesh) {
     int idx_size = 4 * (idx_offset + idx_increment);
     printf("vtx offset %ld idx_offset%ld idx increment%ld vtx increment %ld %ld\n", vtx_offset, idx_offset, idx_increment, vtx_increment, tri_mesh.indices[idx_offset * 4] + vtx_offset);
     for(int i = idx_offset * 4; i < idx_size; i += 4) {
-        std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
+       // std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
         tri_mesh.indices[i]     += vtx_offset; 
         tri_mesh.indices[i + 1] += vtx_offset; 
         tri_mesh.indices[i + 2] += vtx_offset;
         tri_mesh.indices[i + 3] = 8; //mat_offset;
-        std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
+       // std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
     }
 //    printf("normals %ld, texcoords %ld, face normals %ld \n", sub_mesh.normals.size(), sub_mesh.texcoords.size(), sub_mesh.face_normals.size());
     memcpy(&tri_mesh.vertices[vtx_offset], sub_mesh.vertices.data(), vtx_increment * sizeof(float3)); 
@@ -635,7 +633,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
             tri_mesh.indices[idx_offset + i * 4 + 1] = t.v1 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 2] = t.v2 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 3] = t.m;
-            printf("tri mesh %d %d %d %d \n", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
+          //  printf("tri mesh %d %d %d %d \n", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
         }
         printf("\n");
         printf("tri mesh size %ld over \n", tri_mesh.indices.size());

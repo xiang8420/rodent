@@ -21,7 +21,7 @@ private:
     std::mutex mutex;
    
     int buffer_size, buffer_capacity; 
-    bool master, exit, load_new_chunk;
+    bool exit, load_new_chunk;
     int size, rank;
     std::vector<bool> proc_idle;
 public:    
@@ -197,11 +197,10 @@ public:
         printf("procstatus delete\n");
     }
 
-    ProcStatus(int comm_rank, int comm_size, int cSize, int dev, bool master) 
-        : rank(comm_rank), chunk_size(cSize), dev_num(dev), master(master) 
+    ProcStatus(int comm_rank, int comm_size, int cSize, int dev) 
+        : rank(comm_rank), size(comm_size), chunk_size(cSize), dev_num(dev)
     {
         
-        size = master ? comm_size - 1 : comm_size;
         printf("before tile scheduler\n");
         
         
