@@ -44,6 +44,7 @@ static void save_image(float *result, const std::string& out_file, size_t width,
         error("Failed to save PNG file '", out_file, "'");
 }
 //
+
 struct DistributedFrameWork {
     Node *node;
     Communicator *comm;  
@@ -100,7 +101,6 @@ struct DistributedFrameWork {
         }
         printf("%d end\n", comm->rank);  
     }
-        
 };
 
 static std::unique_ptr<DistributedFrameWork> dfw;

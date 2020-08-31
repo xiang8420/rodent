@@ -183,9 +183,11 @@ static void jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes) {
 }
 
 bool load_jpg(const FilePath& path, ImageRgba32& image) {
+    printf("image load jpg\n");
     std::ifstream file(path, std::ifstream::binary);
     if (!file)
         return false;
+    printf("image load jpg 1\n");
     enhanced_jpeg_decompress_struct cinfo;
     cinfo.is = &file;
     jpeg_error_mgr jerr;
@@ -193,7 +195,9 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
     cinfo.err           = jpeg_std_error(&jerr);
     jerr.error_exit     = jpeg_error_exit;
     jerr.output_message = jpeg_output_message;
+    printf("image load jpg 2\n");
     jpeg_create_decompress(&cinfo);
+    printf("image load jpg 2.5\n");
     if (setjmp(cinfo.jmp)) {
         jpeg_abort_decompress(&cinfo);
         jpeg_destroy_decompress(&cinfo);
@@ -229,5 +233,6 @@ bool load_jpg(const FilePath& path, ImageRgba32& image) {
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     gamma_correct(image);
+    printf("image load jpg 5\n");
     return true;
 }

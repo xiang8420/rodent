@@ -189,7 +189,6 @@ static bool parse_obj(std::istream& stream, obj::File& file, obj::MaterialLib& m
             obj::Face f;
 
             f.material = cur_mtl;
-
             bool valid = true;
             ptr += 2;
             while (valid) {
@@ -243,8 +242,8 @@ static bool parse_obj(std::istream& stream, obj::File& file, obj::MaterialLib& m
             ptr = strip_text(ptr);
 
             const std::string mtl_name(base, ptr);
-            cur_mtl = std::find(mtl_lib.list.begin(), mtl_lib.list.end(), mtl_name) - mtl_lib.list.begin();
-            
+            cur_mtl = mtl_lib.ids.find(mtl_name)->second;// std::find(mtl_lib.list.begin(), mtl_lib.list.end(), mtl_name) - mtl_lib.list.begin();
+           // std::cout<<"cur mtl "<<mtl_name<<" "<<cur_mtl<<"\n";
             if (cur_mtl == (int)mtl_lib.list.size()) {
                 warn("Load Unknown material'", mtl_name, " set to dummy ' (line ", cur_line, ").");
                 cur_mtl = std::find(mtl_lib.list.begin(), mtl_lib.list.end(), "") - mtl_lib.list.begin();
@@ -440,8 +439,45 @@ void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 					        << tri_mesh.indices[i * 4 + 1] + 1 <<" "
 							<< tri_mesh.indices[i * 4 + 2] + 1<<std::endl;
             
-			outfile << "mtl " << mtl_lib.list[tri_mesh.indices[i * 4 + 3]] <<"\n";
+			outfile << "mtl " <<tri_mesh.indices[i * 4 + 3]<<" "<< mtl_lib.list[tri_mesh.indices[i * 4 + 3]] <<"\n";
 //		}
+		//fprintf(file, "f %d// %d// %d//\n", triangles[i].v[0]+1, triangles[i].v[1]+1, triangles[i].v[2]+1); //more compact: remove trailing zeros
+	}
+	outfile.close();
+}
+
+void write_light_obj(std::vector<float3> verts) {
+	std::ofstream outfile;
+	outfile.open("light.obj");	
+
+	int vtx_size = verts.size();
+    int tri_size = verts.size() / 3;
+	printf("vtx_size %d\n", vtx_size);
+	for(int i = 0; i < vtx_size; i++) {
+		outfile << "v " <<std::fixed<<std::setprecision(4) 
+						<< verts[i].x << " " 
+						<< verts[i].y << " " 
+						<< verts[i].z<<std::endl; 
+	}
+
+//	for(int i = 0; i < vtx_size; i++) {
+//		outfile << "vn " <<std::fixed<<std::setprecision(4) 
+//						<< tri_mesh->normals[i].x << " " 
+//						<< tri_mesh->normals[i].y << " " 
+//						<< tri_mesh->normals[i].z<<std::endl; 
+//	}
+//	for(int i = 0; i < size * 3; i++) {
+//		outfile << "vt " <<std::fixed<<std::setprecision(4) 
+//						<< tri_mesh->texcoords[i].x << " " 
+//						<< tri_mesh->texcoords[i].y << " "
+//						<< 0.0 << std::endl; 
+//	}
+	
+	for(int i = 0; i < tri_size; i++){
+        outfile << "f " << i * 3 + 1 <<" "
+                        << i * 3 + 2 <<" "
+                        << i * 3 + 3<<std::endl;
+            
 		//fprintf(file, "f %d// %d// %d//\n", triangles[i].v[0]+1, triangles[i].v[1]+1, triangles[i].v[2]+1); //more compact: remove trailing zeros
 	}
 	outfile.close();
@@ -496,7 +532,6 @@ void mesh_add(TriMesh &tri_mesh, TriMesh &sub_mesh) {
         tri_mesh.indices[i]     += vtx_offset; 
         tri_mesh.indices[i + 1] += vtx_offset; 
         tri_mesh.indices[i + 2] += vtx_offset;
-        tri_mesh.indices[i + 3] = 8; //mat_offset;
        // std::cout<<"sub mesh tri "<<i / 4<<" "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<<" "<<tri_mesh.indices[i + 3] <<"\n";
     }
 //    printf("normals %ld, texcoords %ld, face normals %ld \n", sub_mesh.normals.size(), sub_mesh.texcoords.size(), sub_mesh.face_normals.size());
@@ -561,18 +596,20 @@ void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
 }
 
 void compute_virtual_portal(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox_local, BBox& bbox_global) {
+    printf("virtural portal %f %f %f | %f %f %f\n", bbox_local.min[0], bbox_local.min[1], bbox_local.min[2], bbox_local.max[0], bbox_local.max[1], bbox_local.max[2]);
+    printf("                %f %f %f | %f %f %f\n", bbox_global.min[0], bbox_global.min[1], bbox_global.min[2], bbox_global.max[0], bbox_global.max[1], bbox_global.max[2]);
     for(int i = 0; i < 3; i++) {
-       if(bbox_local.min[i] > bbox_global.min[i]) {
-           printf("min %d \n", i);
-           BBox tmp = bbox_local;
-           tmp.max[i] = tmp.min[i];
-           virtual_face(tri_mesh, mtl_size, tmp, i); 
-       }
-       if(bbox_local.max[i] < bbox_global.max[i]) {
-           printf("max %d \n", i);
-           BBox tmp = bbox_local;
-           virtual_face(tri_mesh, mtl_size, tmp, i); 
-       }
+        if(bbox_local.min[i] > bbox_global.min[i]) {
+            printf("min %d \n", i);
+            BBox tmp = bbox_local;
+            tmp.max[i] = tmp.min[i];
+            virtual_face(tri_mesh, mtl_size, tmp, i); 
+        }
+        if(bbox_local.max[i] < bbox_global.max[i]) {
+            printf("max %d \n", i);
+            BBox tmp = bbox_local;
+            virtual_face(tri_mesh, mtl_size, tmp, i); 
+        }
     }
 }
 
@@ -610,7 +647,6 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
                         || bbox.line_intersect(p1, pi))
                     {
                         triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
-          //              printf("M %d %d ", face.material, face.material + mtl_offset);
                     }
                     prev = next;
                 }
@@ -626,17 +662,16 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
         tri_mesh.texcoords.resize(vtx_offset + mapping.size());
         tri_mesh.normals.resize(vtx_offset + mapping.size());
 
-        printf("triangles size %ld idx offset %ld\n", triangles.size(), idx_offset);
+//        printf("triangles size %ld idx offset %ld\n", triangles.size(), idx_offset);
         for (size_t i = 0, n = triangles.size(); i < n; i++) {
             auto& t = triangles[i];
             tri_mesh.indices[idx_offset + i * 4 + 0] = t.v0 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 1] = t.v1 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 2] = t.v2 + vtx_offset;
             tri_mesh.indices[idx_offset + i * 4 + 3] = t.m;
-          //  printf("tri mesh %d %d %d %d \n", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
+//            printf("tri mesh %d %d %d %d \n", t.v0 + vtx_offset, t.v1 + vtx_offset, t.v2 + vtx_offset, t.m);
         }
-        printf("\n");
-        printf("tri mesh size %ld over \n", tri_mesh.indices.size());
+//        printf("tri mesh size %ld over \n", tri_mesh.indices.size());
 
         for (auto& p : mapping) {
             tri_mesh.vertices[vtx_offset + p.second] = obj_file.vertices[p.first.v];

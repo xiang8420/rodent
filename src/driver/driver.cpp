@@ -130,7 +130,7 @@ int main(int argc, char** argv) {
     std::vector<double> samples_sec;
     float elapsed_ms = 1;  //avoid div 0
    
-    int frame = 0; 
+    int frame = 0;
     while(frame < 1) {
         clear_pixels();
         

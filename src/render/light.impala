@@ -145,6 +145,13 @@ fn @make_triangle_light(math: Intrinsics, v0: Vec3, v1: Vec3, v2: Vec3, color: C
 }
 
 fn @make_precomputed_triangle_light(math: Intrinsics, v0: Vec3, v1: Vec3, v2: Vec3, n: Vec3, inv_area: f32, color: Color) -> Light {
+//    print_string("precomputed triangle light : v0 ");
+//    print_f32(v0.x); print_string(" "); print_f32(v0.y); print_string(" "); print_f32(v0.z); print_string(" v1 ");
+//    print_f32(v1.x); print_string(" "); print_f32(v1.y); print_string(" "); print_f32(v1.z); print_string(" v2 ");
+//    print_f32(v2.x); print_string(" "); print_f32(v2.y); print_string(" "); print_f32(v2.z); print_string(" \n normal ");
+//    print_f32(n.x); print_string(" "); print_f32(n.y); print_string(" "); print_f32(n.z); print_string(" \n ");
+
+
     let emitter = AreaEmitter {
         sample: @ |uv| (sample_triangle(uv.x, uv.y, v0, v1, v2), n, inv_area),
         normal: @ |_| n,

@@ -413,6 +413,7 @@ struct Interface {
     }
 
     const anydsl::Array<uint8_t>& load_buffer(int32_t dev, const std::string& filename) {
+        info("Prepare Load buffer '", filename, "'");
         auto& buffers = devices[dev].buffers;
         auto it = buffers.find(filename);
         if (it != buffers.end())
@@ -423,7 +424,9 @@ struct Interface {
         std::vector<uint8_t> vector;
         read_buffer(is, vector);
         info("Loaded buffer '", filename, "'");
-        return buffers[filename] = std::move(copy_to_device(dev, vector));
+        buffers[filename] = std::move(copy_to_device(dev, vector));
+        info("after buffer copy'", filename, "'");
+        return buffers[filename];
     }
 
     anydsl::Array<float>& load_gpu_primary_stream(int dev, int32_t size, const std::string& filename) {
@@ -451,11 +454,15 @@ struct Interface {
     }
 
     const DeviceImage& load_jpg(int32_t dev, const std::string& filename) {
+        printf("before load jpg\n");
         auto& images = devices[dev].images;
+        printf("image \n");
         auto it = images.find(filename);
+        printf("it \n");
         if (it != images.end())
             return it->second;
         ImageRgba32 img;
+        printf("img \n");
         if (!::load_jpg(filename, img))
             error("Cannot load JPG file '", filename, "'");
         info("Loaded JPG file '", filename, "'");
@@ -745,7 +752,7 @@ void rodent_cpu_get_secondary_outgoing_stream(SecondaryStream* buffer, int32_t s
 }
 
 int32_t rodent_cpu_get_thread_num() {
-    return 1;//std::thread::hardware_concurrency(); 
+    return 16;//std::thread::hardware_concurrency(); 
 }
 //gpu
 //

@@ -472,7 +472,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
                 write_grid(src_id, 0, coordinate_compress(c, grid_scale, bbox.max, cpu_intrinsics));
             }
         }
-    } 
+    }
     for i in range(0, primary.size) {
         let cid = get_chunk_id(grid_ids(i));
         if cid == scene_id {

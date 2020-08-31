@@ -60,6 +60,7 @@ struct File {
 
 struct MaterialLib {
     std::unordered_map<std::string, Material> map;
+    std::unordered_map<std::string, int> ids;
     std::vector<std::string> list;
 };
 
@@ -77,6 +78,7 @@ void write_obj(const TriMesh&, const MaterialLib&, int);
 void mesh_add(TriMesh&, TriMesh&);
 TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&, bool);
 void read_obj_paths(std::string, std::vector<std::string> &); 
+void write_light_obj(std::vector<float3> verts); 
 
 bool chunk_division(File& file);
 

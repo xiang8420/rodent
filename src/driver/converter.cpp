@@ -532,27 +532,53 @@ static size_t cleanup_mtl(obj::MaterialLib& mtl_lib) {
     dummy_mat.map_bump = "";
     dummy_mat.map_d = "";
 
-    //set mtl_lib.list
+    //set mtl_lib.list 
     std::cout<<"mtl_lib list"<<"\n ";
     std::unordered_map<std::string, obj::Material>::iterator iter ;   
     for(iter = mtl_lib.map.begin(); iter != mtl_lib.map.end(); iter++) {
-        std::cout << iter->first << " : " << std::endl;
         mtl_lib.list.emplace_back(iter->first);
     }
     std::cout<<mtl_lib.list.size()<<"\n";
 
+    
     // Put simple materials at the end
     std::vector<std::string> new_materials = mtl_lib.list;
     size_t num_complex = mtl_lib.list.size();
     num_complex = std::partition(new_materials.begin(), new_materials.end(), [&] (auto& mtl_name) {
         return !is_simple(mtl_lib.map[mtl_name]);
     }) - new_materials.begin();
-    info("total ", new_materials.size(), "material(s)");
-    
     std::swap(mtl_lib.list, new_materials);
+    
+    info("total ", new_materials.size(), "material(s)");
+   
+
+    //Delete duplicate
+    new_materials.clear();
+    for(int i = 0; i < mtl_lib.list.size(); i++) { 
+        auto& mtl1_name = mtl_lib.list[i];
+        auto& mtl1 = mtl_lib.map[mtl1_name]; 
+        
+        int find = 0;
+        for (find = 0; find < new_materials.size(); find++) {
+            auto& mtl2_name = new_materials[find];
+            auto& mtl2 = mtl_lib.map[mtl2_name];
+            if (mtl1 == mtl2) 
+                break;
+        }
+        mtl_lib.ids.insert(std::make_pair(mtl1_name, find));
+        if(find == new_materials.size()) 
+            new_materials.emplace_back(mtl1_name);
+    }
+    std::swap(mtl_lib.list, new_materials);
+
+
     for (size_t i = 0; i < mtl_lib.list.size(); ++i) {
         auto& mtl1_name = mtl_lib.list[i];
-        std::cout<<" "<<i<<" "<<mtl1_name<<" "<<"\n";
+        std::cout<<"mtl1 name "<<i<<" "<<mtl1_name<<" "<<"\n";
+    }
+    std::unordered_map<std::string, int>::iterator iter2 ;   
+    for(iter2 = mtl_lib.ids.begin(); iter2 != mtl_lib.ids.end(); iter2++) {
+        std::cout<<"mtl lib id "<<iter2->first<<" "<<iter2->second<<"\n";
     }
 
     return mtl_lib.list.size();
@@ -602,6 +628,205 @@ void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export
         }
     }
 }
+template <typename T>
+void mpi_gather(std::vector<T> &data, int *out_counts, int in_size, int global_size, int proc_rank, int proc_size) {
+    
+    printf("%d mpi gather global size %d\n", proc_rank, global_size);
+    std::vector<T> recv_buffer(data.size());
+    
+    std::vector<int> rcounts(proc_size);
+    std::vector<int> displs(proc_size);
+   
+    if(proc_rank == 0) { 
+        recv_buffer.resize(global_size * in_size);
+        for(int i = 0; i < proc_size; i++) {
+            rcounts[i] = out_counts[i] * in_size; 
+            printf("rcounts %d out counts %d", rcounts[i], out_counts[i]);
+        }
+        displs[0] = 0;
+        for(int i = 1; i < proc_size; i++) {
+            displs[i] = displs[i - 1] + rcounts[i - 1];
+            printf("displs %d ", displs[i]);
+        }
+    }
+    printf("%d before gather %d \n", proc_rank, out_counts[proc_rank]);
+    MPI_Gatherv((float*)data.data(), out_counts[proc_rank] * in_size, MPI_FLOAT, (float*)recv_buffer.data(), rcounts.data(), displs.data(), MPI_FLOAT, 0, MPI_COMM_WORLD);
+    if(proc_rank == 0) {
+        for(int i = 0; i < recv_buffer.size();i++)
+            printf(" | %d| ", recv_buffer[i]);
+        printf("\n");
+        std::swap(recv_buffer, data);
+        int * d = (int*) recv_buffer.data();
+        for(int i = 0; i < recv_buffer.size();i++)
+            printf(" | %d| ", recv_buffer[i]);
+    }
+}
+
+void mpi_gather_simple_mesh(obj::TriMesh &tri_mesh, int proc_rank, int proc_size) 
+{
+    //Gather light data
+    if(proc_rank == 0) {
+        for(int src = 1; src < proc_size; src++) {
+            obj::TriMesh sub_mesh;
+            //recv size
+            MPI_Status status;
+            int size[5];
+            MPI_Recv(&size[0], 5, MPI_INT, src, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            
+            sub_mesh.vertices.resize(size[0]) ;
+            sub_mesh.indices.resize(size[1]) ;
+            sub_mesh.normals.resize(size[2]) ;
+            sub_mesh.face_normals.resize(size[3]) ;
+            sub_mesh.texcoords.resize(size[4]) ;
+
+            MPI_Recv((float*) sub_mesh.vertices.data(), size[0] * 3, MPI_FLOAT, src, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv((float*) sub_mesh.indices.data(), size[1], MPI_UNSIGNED, src, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv((float*) sub_mesh.normals.data(), size[2] * 3, MPI_FLOAT, src, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv((float*) sub_mesh.face_normals.data(), size[3] * 3, MPI_FLOAT, src, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv((float*) sub_mesh.texcoords.data(), size[4] * 2, MPI_FLOAT, src, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            
+            obj::mesh_add(tri_mesh, sub_mesh);
+        }
+    } else {
+        int size[5];
+        size[0] = tri_mesh.vertices.size();
+        size[1] = tri_mesh.indices.size();
+        size[2] = tri_mesh.normals.size();
+        size[3] = tri_mesh.face_normals.size();
+        size[4] = tri_mesh.texcoords.size();
+        MPI_Send(&size[0], 5, MPI_INT, 0, 1, MPI_COMM_WORLD);
+        
+        MPI_Send((float*) tri_mesh.vertices.data(), size[0] * 3, MPI_FLOAT, 0, 1,  MPI_COMM_WORLD);
+        MPI_Send((float*) tri_mesh.indices.data(), size[1], MPI_UNSIGNED, 0, 1,  MPI_COMM_WORLD);
+        MPI_Send((float*) tri_mesh.normals.data(), size[2] * 3, MPI_FLOAT, 0, 1,  MPI_COMM_WORLD);
+        MPI_Send((float*) tri_mesh.face_normals.data(), size[3] * 3, MPI_FLOAT, 0, 1,  MPI_COMM_WORLD);
+        MPI_Send((float*) tri_mesh.texcoords.data(), size[4] * 2, MPI_FLOAT, 0, 1,  MPI_COMM_WORLD);
+    }
+}
+
+void mpi_gather_light( std::vector<int>   &light_ids
+                    , std::vector<int>    &num_lights
+                    , std::vector<int>    &num_tris
+                    , std::vector<float3> &light_verts
+                    , std::vector<float3> &light_norms
+                    , std::vector<float>  &light_areas
+                    , std::vector<rgb>    &light_colors
+                    , int proc_rank
+                    , int proc_size)
+{
+    if(proc_size > 1) {
+        std::vector<int> reduce_num_lights(proc_size);
+        MPI_Reduce(num_lights.data(), reduce_num_lights.data(), proc_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
+        
+        std::vector<int> reduce_num_tris(proc_size);
+        MPI_Reduce(num_tris.data(), reduce_num_tris.data(), proc_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
+        
+        if(proc_rank == 0) {
+            std::swap(reduce_num_lights, num_lights);
+            std::swap(reduce_num_tris, num_tris);
+        }
+
+    }
+    
+    int global_light_size = 0;
+    //Gather light data
+    if(proc_rank == 0) { 
+        printf("%d proc reduce light %d %d %d %d\n", proc_rank, num_lights[0], num_lights[1], num_lights[2], num_lights[3]);
+        printf("%d proc reduce tri %d %d %d %d\n", proc_rank, num_tris[0], num_tris[1], num_tris[2], num_tris[3]);
+        for(int i = 0; i < num_lights.size(); i++) {
+            printf("check light ids chunk %d tris %d lights %d\n\n", i, num_tris[i], num_lights[i]);
+        }
+        printf("light sizes :");
+        for(int i = 0; i < num_lights.size(); i++) {
+            printf(" %d ", num_lights[i]); 
+            global_light_size += num_lights[i];
+        }
+        printf("global light size %d\n", global_light_size);
+    }
+    
+    if(proc_size > 1) {
+        mpi_gather(light_ids, num_lights.data(), 1, global_light_size, proc_rank, proc_size); 
+        mpi_gather(light_verts, num_lights.data(), 9, global_light_size, proc_rank, proc_size); 
+        mpi_gather(light_norms, num_lights.data(), 3, global_light_size, proc_rank, proc_size); 
+        mpi_gather(light_colors, num_lights.data(), 3, global_light_size, proc_rank, proc_size); 
+        mpi_gather(light_areas, num_lights.data(), 1, global_light_size, proc_rank, proc_size); 
+        
+        if(proc_rank != 0) return ;
+        
+        for(int i = 0 ; i < light_ids.size(); i ++) 
+            printf(" after light ids %d\n", light_ids[i]);
+
+    }
+
+    std::vector<float3> new_light_verts;
+    std::vector<float3> new_light_norms;
+    std::vector<rgb>    new_light_colors;
+    std::vector<float>  new_light_areas;
+
+    printf("end gather %d ooo \n", global_light_size);
+    std::vector<int> light_ids_map(global_light_size * 2);
+    for(int i = 0 /*light_verts.size() / 3*/; i < global_light_size; i++) {
+        auto& v0 = light_verts[i * 3 + 0];
+        auto& v1 = light_verts[i * 3 + 1];
+        auto& v2 = light_verts[i * 3 + 2];
+        int find_light = 0;
+        for(find_light; find_light < new_light_areas.size(); find_light++) {
+            int vert_id = find_light * 3;
+            if(v0 == new_light_verts[vert_id] && 
+               v1 == new_light_verts[vert_id + 1] && 
+               v2 == new_light_verts[vert_id + 2])
+                break;
+        } 
+        printf("%d %d $$ ", light_ids[i], find_light);
+        light_ids_map[i * 2] = light_ids[i];
+        light_ids_map[i * 2 + 1] = find_light;
+        printf("%d %d", light_ids_map[i * 2], light_ids_map[i * 2 + 1]);
+        if(find_light != new_light_areas.size()) {
+            continue;
+        }
+
+        new_light_verts.emplace_back(v0);
+        printf("v0 %f %f %f ", v0.x, v0.y, v0.z);
+        new_light_verts.emplace_back(v1);
+        printf("v1 %f %f %f ", v1.x, v1.y, v1.z);
+        new_light_verts.emplace_back(v2);
+        printf("v2 %f %f %f ", v2.x, v2.y, v2.z);
+        new_light_norms.emplace_back(light_norms[i]);
+        printf("normal %f %f %f ", light_norms[i].x, light_norms[i].y, light_norms[i].z);
+        new_light_areas.emplace_back(light_areas[i]);
+        printf("area %f ", light_areas[i]);
+        new_light_colors.emplace_back(light_colors[i]);
+        printf("color %f %f %f ", light_colors[i].x, light_colors[i].y, light_colors[i].z);
+        printf("nn\n");
+    }
+    std::swap(new_light_verts,  light_verts);
+    std::swap(new_light_norms,  light_norms);
+    std::swap(new_light_colors, light_colors);
+    std::swap(new_light_areas,  light_areas);
+    printf("light areas size %d\n", light_areas.size());
+
+    int n = 0;
+    printf("num lights %d\n", num_lights.size());
+    for(int i = 0; i < num_lights.size(); i++) {
+        std::string light_ids_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/ligt_ids.bin";
+        printf("light ids chunk %d tris %d lights %d\n\n", i, num_tris[i], num_lights[i]);
+        std::vector<int> tri_light_ids(num_tris[i]);
+
+        //set all light id 0
+        for(int j = 0; j < num_lights[i]; j++) {
+            int dst = (n + j) * 2;
+            printf("light ids map dst %d %d %d", dst, light_ids_map[dst], light_ids_map[dst + 1]);
+            tri_light_ids[light_ids_map[dst]] = light_ids_map[dst + 1];
+        }
+        n += num_lights[i];
+        
+        write_buffer(light_ids_path, tri_light_ids);
+        printf("end light ids chunk %d %d\n", i, tri_light_ids.size());
+    }
+
+    printf("%d %d %d %d\n", light_verts.size(), light_norms.size(), light_colors.size(), light_areas.size());
+    printf("end mpi light gather\n");
+}
 
 static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, 
                         size_t max_path_len, size_t spp, bool embree_bvh, std::ostream& os, size_t chunk_size) 
@@ -618,7 +843,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         if (target == Target::NVVM_STREAMING   ||
             target == Target::NVVM_MEGAKERNEL  ||
             target == Target::AMDGPU_STREAMING ||
-            target == Target::AMDGPU_MEGAKERNEL){
+            target == Target::AMDGPU_MEGAKERNEL) {
             gpu_num++; 
         }
     }
@@ -665,42 +890,55 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         image_names[pair.second] = pair.first;
    
     //set simple mesh 
-    bool PreRendering = true; 
+    bool PreRendering = false;//true; 
     obj::TriMesh simple_mesh; 
 
     // Lights global data
-    size_t num_lights = 0;
     std::vector<rgb>    light_colors;
     std::vector<float3> light_verts;
     std::vector<float3> light_norms;
     std::vector<float>  light_areas;
     std::vector<obj::Material> light_mats;
+     
+    std::vector<int> num_lights(chunk_size);
+    std::fill(num_lights.begin(), num_lights.end(), 0);
+
+    std::vector<int> num_tris(chunk_size);
+    std::fill(num_tris.begin(), num_tris.end(), 0);
     
-    MeshChunk *chunks;
-    
-    int size = -1, rank = -1; 
-    MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, NULL);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    
+    std::vector<int> tri_lights;
+
+    // Record if triangles in a chunk is light, 
+
     //create data directory 
     create_directory("data/");
     std::string data_path  = "data/"; 
     float elapsed_ms = 1;
-    for(int i = 0; i < chunk_size; i++) {
-        int chunk = rank + size;
+    
+    auto ticks = std::chrono::high_resolution_clock::now();
+    
+    int proc_rank = -1, proc_size = -1;
+    MPI_Init(NULL, NULL);
+    MPI_Comm_size(MPI_COMM_WORLD, &proc_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
+   
+    MeshChunk *chunks;
+    if(proc_size != chunk_size && proc_size != 1) 
+        error("chunk size must equals to proc size\n");
 
-        auto ticks = std::chrono::high_resolution_clock::now();
+
+    obj::TriMesh tri_mesh;
+    for(int i = proc_rank; i < chunk_size; i+=proc_size) {
+        int &chunk_num_lights = num_lights[i]; 
+        int &chunk_num_tris = num_tris[i]; 
         
         std::string chunk_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/";
         create_directory(chunk_path.c_str());
         
-        obj::TriMesh tri_mesh;
-        
         for(int j = 0; j < obj_file_paths.size(); j ++) {
             obj::File obj_file;
-            
-            if (!obj::load_obj(obj_file_paths[j] + ".obj", obj_file, mtl_lib)) {
+            std::string file_name =  obj_file_paths[j] + ".obj";
+            if (!obj::load_obj(file_name, obj_file, mtl_lib)) {
                 error("Invalid OBJ file '", file_name, "'");
                 return false;
             }
@@ -712,18 +950,15 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 auto sub_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunks->list[i], false);
                 obj::mesh_add(tri_mesh, sub_mesh);
             }
-             
             printf(" chunk %d obj %d tri mesh num %ld \n", i, j, tri_mesh.indices.size() / 4);
             //if chunk is empty ??
         }
         
-//        write_obj(tri_mesh, mtl_lib, 0);
-        
-      //  if(PreRendering) {
-      //      int target_count = round((tri_mesh.indices.size() / 4) * 0.2);
-      //      auto sub_mesh = Simplify::simplify_TriMesh(&tri_mesh, target_count, 7, true);
-      //      obj::mesh_add(simple_mesh, sub_mesh);
-      //  }
+        if(PreRendering) {
+            int target_count = round((tri_mesh.indices.size() / 4) * 0.2);
+            obj::TriMesh sub_mesh = Simplify::simplify_TriMesh(&tri_mesh, target_count, 7, true);
+            obj::mesh_add(simple_mesh, sub_mesh);
+        }
 
         write_tri_mesh(chunk_path, tri_mesh, padding_flag);
         
@@ -739,16 +974,19 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         printf("light\n"); 
         
         //Local chunk Light data, light id
-        std::vector<int> light_ids(tri_mesh.indices.size() / 4, 0);
+        
         printf("tri mesh size %ld\n", tri_mesh.indices.size() / 4);
+        
+        std::ofstream outfile;
+        outfile.open("light_id" + std::to_string(i));	
+
         for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
-            light_ids[i / 4] = 0;
             //if virtual portal continue
       //      std::cout<<"tri idx "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<< "mtl idx "<<tri_mesh.indices[i + 3]<<"\n";
             if(tri_mesh.indices[i + 3] >= num_mats)
                continue; 
-            
+           
             auto& mtl_name = mtl_lib.list[tri_mesh.indices[i + 3]];
        //     std::cout<<"mtl "<<mtl_name<<"\n";
             if (mtl_name == "")
@@ -761,22 +999,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             auto& v0 = tri_mesh.vertices[tri_mesh.indices[i + 0]];
             auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
             auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
+           
+            printf("%d find %d is light\n", proc_rank, i / 4); 
+            tri_lights.emplace_back(i / 4);
+            chunk_num_lights++;
 
-            int find_light = 0;
-            for(find_light; find_light < num_lights; find_light++){
-                int vert_id = find_light * 3;
-                if(v0 == light_verts[vert_id] && 
-                   v1 == light_verts[vert_id + 1] && 
-                   v2 == light_verts[vert_id + 2])
-                    break;
-            } 
-            light_ids[i / 4] = find_light;
-            if(find_light != num_lights)
-                continue;
-            
-            num_lights++;
-
-            if (has_map_ke){
+            if (has_map_ke) {
                 os << "    let light" << i << " = make_triangle_light(\n"
                    << "        math,\n"
                    << "        make_vec3(" << light_verts[i * 3].x << "f, " << light_verts[i * 3].y << "f, " << light_verts[i * 3].z << "f),\n"
@@ -800,12 +1028,76 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light_colors.emplace_back(mat.ke);
             }
         }
-        write_buffer(chunk_path + "ligt_ids.bin", light_ids);
+        outfile.close();
         
-        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
-        printf("chunk %d process time %f\n", i, elapsed_ms);
+        obj::write_obj(tri_mesh, mtl_lib, i);
+        
+        chunk_num_tris = tri_mesh.indices.size() / 4;
     }
-   
+    mpi_gather_light(tri_lights, num_lights, num_tris, light_verts, light_norms, light_areas, light_colors, proc_rank, proc_size);
+    printf("%d after mpi gather %d\n", proc_rank, light_areas.size());
+    
+    int global_num_lights = light_areas.size();
+    ///write simple mesh
+	if(PreRendering) {
+        if(proc_size > 1)
+            mpi_gather_simple_mesh(simple_mesh, proc_rank, proc_size); 
+
+        std::string simple_mesh_path = "data/999/";
+        create_directory(simple_mesh_path.c_str());
+        unsigned short t = 0; 
+        write_tri_mesh(simple_mesh_path, simple_mesh, padding_flag);
+        write_bvh(simple_mesh, Target::AVX2, t, data_path, simple_mesh_path);
+        std::vector<int> light_ids(simple_mesh.indices.size() / 4, 0);
+        for (size_t i = 0; i < simple_mesh.indices.size(); i += 4) {
+            // Do not leave this array undefined, even if this triangle is not a light
+            light_ids[i / 4] = 0;
+            auto& mtl_name = mtl_lib.list[simple_mesh.indices[i + 3]];
+            if (mtl_name == "")
+                continue;
+            auto& mat = mtl_lib.map.find(mtl_name)->second;
+            if (mat.ke == rgb(0.0f) && mat.map_ke == "")
+                continue;
+
+            auto& v0 = simple_mesh.vertices[simple_mesh.indices[i + 0]];
+            auto& v1 = simple_mesh.vertices[simple_mesh.indices[i + 1]];
+            auto& v2 = simple_mesh.vertices[simple_mesh.indices[i + 2]];
+
+            int find_light = 0;
+            for(find_light; find_light < global_num_lights; find_light++){
+                int vert_id = find_light * 3;
+                if(v0 == light_verts[vert_id] && v1 == light_verts[vert_id + 1] && v2 == light_verts[vert_id + 2])
+                    break;
+            }
+            light_ids[i / 4] = find_light;
+        }
+        write_buffer(simple_mesh_path + "ligt_ids.bin", light_ids);
+    }
+
+    elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+    // only proc 0 process the left part
+    printf("proc rank %d process time %f\n", proc_rank, elapsed_ms);
+    if(proc_rank != 0) 
+        return true;
+
+    float* verts_data = (float*)light_verts.data();
+    float* norms_data = (float*)light_norms.data();
+    float* areas_data = (float*)light_areas.data();
+    float* colors_data = (float*)light_colors.data();
+    obj::write_light_obj(light_verts);
+    
+    printf("recv lisght verts %d :\n", light_areas.size()); 
+    for(int j = 0; j < light_areas.size(); j++) {
+        for(int k = 0; k < 3; k ++) {
+          //  printf("%d %f %f %f | ", j, verts_data[j * 9 + k * 3 + 0], verts_data[j * 9 + k * 3 + 1], verts_data[j * 9 + k * 3 + 2]); 
+            printf("%f %f %f \n | normal %f | color %f| \n", 
+                    verts_data[j * 9 + k * 3 + 0], verts_data[j * 9 + k * 3 + 1], verts_data[j * 9 + k * 3 + 2], 
+                    norms_data[j * 3 + k], colors_data[j * 3 + k]);
+        }
+        printf("| area %f |\n", areas_data[j]); 
+    }
+    printf("\n");
+
 
     os << "//------------------------------------------------------------------------------------\n"
        << "// Generated from '" << file_name << "' with the scene conversion tool\n"
@@ -864,16 +1156,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
    
 
 
-
-
-
-
     os << "\n    // Lights\n";
-    if (has_map_ke || num_lights == 0){
-        if (num_lights != 0) {
+    if (has_map_ke || global_num_lights == 0){
+        if (global_num_lights != 0) {
             os << "       let lights = @ |i| match i {\n";
-            for (size_t i = 0; i < num_lights; ++i) {
-                if (i == num_lights - 1)
+            for (size_t i = 0; i < global_num_lights; ++i) {
+                if (i == global_num_lights - 1)
                     os << "                _ => light" << i << "\n";
                 else
                     os << "                " << i << " => light" << i << ",\n";
@@ -1009,7 +1297,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     os << "\n       // Scene\n"
        << "    Scene {\n"
        << "        num_geometries: " << num_mats << ",\n"
-       << "        num_lights:     " << num_lights << ",\n"
+       << "        num_lights:     " << global_num_lights << ",\n"
        << "        geometries:     @ |i| geometries(i),\n"
        << "        lights:         @ |i| lights(i),\n"
        << "        camera:         camera,\n"
@@ -1081,12 +1369,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     os << "extern fn get_grid() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";
 
     info("Scene was converted successfully");
-    return true;
-    
-    
-    
-    
-    
     return true;
 }
 
@@ -1216,5 +1498,4 @@ int main(int argc, char** argv) {
     if (!convert_obj(obj_file, dev_num, target, dev, max_path_len, spp, embree_bvh, of, grid))
         return 1;
     return 0;
-    MPI_Finalize();
 }
