@@ -55,7 +55,7 @@ struct MeshChunk{
     }
     
     bool chunk_division() {
-        printf("min %f %f %f max %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
+        printf("mesh div min %f %f %f max %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
         
         // shortest axis and cut it
         float3 length = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
@@ -81,10 +81,10 @@ struct MeshChunk{
                     bb.min.x = x - 0.001f;
                     bb.min.y = y - 0.001f;
                     bb.min.z = z - 0.001f;
-                    bb.max.x = std::max(bbox.max.x, x + step.x) + 0.001f;
-                    bb.max.y = std::max(bbox.max.y, y + step.y) + 0.001f;
-                    bb.max.z = std::max(bbox.max.z, z + step.z) + 0.001f;
-                  //  printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
+                    bb.max.x = std::min(bbox.max.x, x + step.x) + 0.001f;
+                    bb.max.y = std::min(bbox.max.y, y + step.y) + 0.001f;
+                    bb.max.z = std::min(bbox.max.z, z + step.z) + 0.001f;
+                    printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
                     list.push_back(bb);  //emplace_back
                 }
             }
