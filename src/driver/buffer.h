@@ -23,11 +23,16 @@ template <typename Array>
 static void read_buffer(std::istream& is, Array& array) {
     size_t in_size = 0, out_size = 0;
     is.read((char*)&in_size,  sizeof(uint32_t));
+    printf("in read %ld\n", in_size);
     is.read((char*)&out_size, sizeof(uint32_t));
+    printf("out read %ld\n", out_size);
     std::vector<char> in(out_size);
     is.read(in.data(), in.size());
+    printf("is read \n");
     array = std::move(Array(in_size / sizeof(array[0])));
+    printf("before decompress \n");
     decompress(in, array);
+    printf("end decompress \n");
 }
 
 template <typename Array>
@@ -53,7 +58,9 @@ static void compress(const Array& in, size_t size, std::vector<char>& out) {
 template <typename Array>
 static void write_buffer(std::ostream& os, const Array& array) {
     std::vector<char> out;
+    printf("before compress %ld %ld", array.size(), out.size());
     compress(array, out);
+    printf("compress %ld %ld", array.size(), out.size());
     size_t in_size  = sizeof(array[0]) * array.size();
     size_t out_size = out.size();
     os.write((char*)&in_size,  sizeof(uint32_t));

@@ -977,9 +977,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         
         printf("tri mesh size %ld\n", tri_mesh.indices.size() / 4);
         
-        std::ofstream outfile;
-        outfile.open("light_id" + std::to_string(i));	
-
         for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
             //if virtual portal continue
@@ -1028,10 +1025,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light_colors.emplace_back(mat.ke);
             }
         }
-        outfile.close();
-        
         obj::write_obj(tri_mesh, mtl_lib, i);
-        
         chunk_num_tris = tri_mesh.indices.size() / 4;
     }
     mpi_gather_light(tri_lights, num_lights, num_tris, light_verts, light_norms, light_areas, light_colors, proc_rank, proc_size);
@@ -1084,7 +1078,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     float* norms_data = (float*)light_norms.data();
     float* areas_data = (float*)light_areas.data();
     float* colors_data = (float*)light_colors.data();
-    obj::write_light_obj(light_verts);
     
     printf("recv lisght verts %d :\n", light_areas.size()); 
     for(int j = 0; j < light_areas.size(); j++) {

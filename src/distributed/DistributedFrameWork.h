@@ -14,7 +14,7 @@
 
 #include "Node.h"
 #include "P2PNode.h"
-#include "MasterWorker2.h"
+#include "MasterWorker.h"
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
