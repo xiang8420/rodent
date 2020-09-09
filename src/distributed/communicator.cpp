@@ -101,14 +101,14 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 
 		if ((l + 1) < size)
 		{
-		    os<<"mthread export to l + 1 "<<l + 1<<"\n";	
+		    os<<"mthread export to l + 1 "<<l + 1<<" tag "<<tag<<"\n";	
             destination = (root + l + 1) % size;
 		    MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->rrq);
 			k++;
 		}
         send_msg_count+=k;	
     } else {
-        os<< "mthread export msg " << m->get_ray_size() <<"to "<<m->get_destination()<< std::endl;
+        os<< "mthread send msg " << m->get_ray_size() <<"to "<<m->get_destination()<<" tag "<<tag<< std::endl;
         MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, m->get_destination(), tag, MPI_COMM_WORLD, &msb->lrq);
         k++;
 	    send_ray_count++;

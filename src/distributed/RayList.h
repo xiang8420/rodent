@@ -37,6 +37,7 @@ struct Rays {
 
     int clear() {
         int s = size;
+        data.clear();
         size = 0;
         return s;
     }

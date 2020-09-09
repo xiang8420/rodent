@@ -78,7 +78,7 @@ struct DistributedFrameWork {
         int worker_size = comm->get_comm_size();
         printf("before all gather %d\n", comm->rank);
         
-        camera->decomposition(ps->get_chunk_map(), true, comm->rank, comm->size); 
+        camera->decomposition(ps->get_chunk_map(), true/*false*/, comm->rank, comm->size); 
         ps->updata_local_chunk();
 
         node->run(camera);
@@ -95,11 +95,13 @@ struct DistributedFrameWork {
         comm->reduce_image(film, reduce_buffer, pixel_num);
         
         std::string out = out_file + "f" + std::to_string(frame) + "w" + std::to_string(comm->get_comm_size()) + "g" + std::to_string(ps->get_chunk_size());
-        out += ".png";
-        if (comm->rank == 0 && out_file != "") {
-            save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
-        }
+
+        save_image(film, out + std::to_string(comm->rank) + ".png", width, height, 1 /* iter*/ );
         printf("%d end\n", comm->rank);  
+
+        if (comm->rank == 0 && out_file != "") {
+            save_image(reduce_buffer, out + ".png", width, height, 1 /* iter*/ );
+        }
     }
 };
 

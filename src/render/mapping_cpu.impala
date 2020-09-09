@@ -485,7 +485,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             write_out_primary(primary, buffer, i, buffer_size++, false);
         }
     }
-    (primary_size, buffer_size)    
+    (primary_size, buffer_size)
 }
 
 fn @cpu_secondary_transfer( secondary: SecondaryStream
@@ -680,9 +680,9 @@ fn @cpu_dis_trace( scene: Scene
                     }
               //      print_string("after send and recv\n");
                     if(primary.size < 0) {
-                        print_string("end rendering"); print_i32(primary.size); 
+                        print_string("end rendering"); print_i32(primary.size);
                         print_string(" "); print_i32(out_primary.size);
-                        print_string(" "); print_i32(secondary.size); 
+                        print_string(" "); print_i32(secondary.size);
                         print_string(" "); print_i32(out_secondary.size);
                         break()
                     }
@@ -755,7 +755,7 @@ fn @cpu_dis_trace( scene: Scene
                 }
                 // Add the contribution for secondary rays to the frame buffer
                 for i in range(0, secondary.size) {
-                    if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries */{
+                    if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries*/ {
                         let j = secondary.rays.id(i);
                         accumulate(j,
                             make_color(

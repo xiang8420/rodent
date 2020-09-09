@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
     while(frame < 1) {
         clear_pixels();
         
-       // camera.rotate(0.3f, 0.0f);
+        //camera.rotate(0.3f, 0.0f);
         auto ticks = std::chrono::high_resolution_clock::now();
         
         dfw_run(&camera);

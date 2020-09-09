@@ -402,7 +402,8 @@ bool load_mtl(const FilePath& path, obj::MaterialLib& mtl_lib) {
 
 void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 	std::ofstream outfile;
-	outfile.open("simplemodel_" + std::to_string(c) + ".obj");	
+    printf("write obj %d \n", c);
+	outfile.open("simple_models/chunk_" + std::to_string(c) + ".obj");	
 
 	int trx_size = tri_mesh.indices.size() / 4;
 	int vtx_size = tri_mesh.vertices.size();
@@ -632,23 +633,21 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
                         mapping.insert(std::make_pair(face.indices[i], mapping.size()));
                     }
                 }
-                
-                const float3& p0 = obj_file.vertices[face.indices[0].v];
-                const float3& p1 = obj_file.vertices[face.indices[1].v];
-                bool in_chunk = bbox.line_intersect(p0, p1) || bbox.is_inside(p0) || bbox.is_inside(p1);
 
-                auto v0 = mapping[face.indices[0]];
-                auto prev = mapping[face.indices[1]];
-                for (size_t i = 1; i < face.indices.size() - 1; i++) {
-                    auto next = mapping[face.indices[i + 1]];
-                    const float3& pi = obj_file.vertices[face.indices[i + 1].v];
-                    if(in_chunk || bbox.is_inside(pi)
-                        || bbox.line_intersect(p0, pi) 
-                        || bbox.line_intersect(p1, pi))
-                    {
-                        triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
+                for(int i = 0; i < face.indices.size() - 2; i++) {
+                    auto p0 = obj_file.vertices[face.indices[i].v];
+                    bool in = bbox.is_inside(p0);
+                    for(int j = i + 1; j < face.indices.size() - 1; j++) {
+                        auto p1 = obj_file.vertices[face.indices[j].v];
+                        in = in || bbox.is_inside(p1) || bbox.line_intersect(p0, p1);
+                        for(int k = j + 1; k <  face.indices.size(); k++) { 
+                            auto p2 = obj_file.vertices[face.indices[k].v];
+                            if(in || bbox.is_inside(p2) || bbox.line_intersect(p0, p2) || bbox.line_intersect(p1, p2))
+                            {
+                                triangles.emplace_back(mapping[face.indices[i]], mapping[face.indices[j]], mapping[face.indices[k]], face.material + mtl_offset);
+                            }
+                        }
                     }
-                    prev = next;
                 }
             }
         }
@@ -707,6 +706,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
         BBox global = obj_file.bbox;
         compute_virtual_portal(tri_mesh, mtl_lib.list.size(), bbox, global);
     }
+
     // Re-normalize all the values in the OBJ file to handle invalid meshes
     bool fixed_normals = false;
     for (auto& n : tri_mesh.normals) {

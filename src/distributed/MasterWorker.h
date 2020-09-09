@@ -34,8 +34,8 @@ struct MWNode : public Node{
         int chunk_size = ps->get_chunk_size();
         for(int i = 0; i < chunk_size; i++) {
             if(rayList[i]->type == "out" ) {
-                rayList[i]->primary->size = 0;
-                rayList[i]->secondary->size = 0;
+                rayList[i]->primary->clear();
+                rayList[i]->secondary->clear();
             }
         }
     }
@@ -96,6 +96,8 @@ int MWNode::get_unloaded_chunk(){
 }
 
 void MWNode::send_message() {
+    
+    //clear_outlist();
     if(comm->isMaster()) {
         //master idle
      //   printf("master all status all thread wait %d inlist %d %d %d %d\n", 

@@ -301,19 +301,17 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
         Rays * rays   = new struct Rays(ptr, store_capacity, 21, copy_size);
         
 
-
         int * ids = (int*)ptr;
         os<<"primary copy size "<<copy_size<<"\n"<<" ptr ray";
-        for(int i = 0; i < 5; i ++) {
+        for(int i = 0; i < std::min(copy_size, 5); i ++) {
             os<<"| "<< ids[i * 16] <<" "<< ids[i * 16 + 9] << " ";
         } os<<"\n ";
 
         ids = (int*)(rays->get_data());
         os<<"rays ray ";
-        for(int i = 0; i < 5; i ++) {
+        for(int i = 0; i < std::min(copy_size, 5); i ++) {
             os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
         } os<<"\n";
-
 
 
         msg_primary_size -= copy_size; 
@@ -332,18 +330,16 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
 
         int * ids = (int*)ptr;
         os<<"secondary copy size "<<copy_size<<"\n"<<" ptr ray";
-        for(int i = 0; i < 5; i ++) {
+        for(int i = 0; i < std::min(copy_size, 5); i ++) {
             os<<"| "<< ids[i * 14] <<" "<< ids[i * 14 + 9] << " ";
         } os<<"\n ";
 
         ids = (int*)(rays->get_data());
         os<<"rays ray ";
-        for(int i = 0; i < 5; i ++) {
+        for(int i = 0; i < std::min(copy_size, 5); i ++) {
             os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
         } os<<"\n";
  
-
-
 
         msg_secondary_size -= copy_size; 
         int width = 14; 

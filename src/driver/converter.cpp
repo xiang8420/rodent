@@ -962,7 +962,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
 
         write_tri_mesh(chunk_path, tri_mesh, padding_flag);
         
-        printf("after write tri mesh\n");
+        printf("after  write tri mesh\n");
         
         //build and write bvh
         unsigned short bvh_export = 0;
@@ -1025,6 +1025,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light_colors.emplace_back(mat.ke);
             }
         }
+        create_directory("simple_models");
         obj::write_obj(tri_mesh, mtl_lib, i);
         chunk_num_tris = tri_mesh.indices.size() / 4;
     }

@@ -17,7 +17,7 @@ inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
     
-    int axit = 0;
+    int axit = d - 1;
     int cur_n = n;
     //choose longest axit splat
     while(cur_n != 1){
@@ -254,7 +254,10 @@ struct ImageDecomposition {
         if(imageDecompose) {
             image_domain_decomposition(region, chunk_map, rank, size); 
         } else {
+            MeshChunk chunks;
             spp = spp / size;
+            for(int i = 0; i < chunks.size; i++) 
+                chunk_map[i] = i;
         }
     }
    

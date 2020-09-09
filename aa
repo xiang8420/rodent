@@ -1,0 +1,333 @@
+diff --git a/src/distributed/DistributedFrameWork.h b/src/distributed/DistributedFrameWork.h
+index 04d1065..11c9017 100644
+--- a/src/distributed/DistributedFrameWork.h
++++ b/src/distributed/DistributedFrameWork.h
+@@ -78,7 +78,7 @@ struct DistributedFrameWork {
+         int worker_size = comm->get_comm_size();
+         printf("before all gather %d\n", comm->rank);
+         
+-        camera->decomposition(ps->get_chunk_map(), true, comm->rank, comm->size); 
++        camera->decomposition(ps->get_chunk_map(), true/*false*/, comm->rank, comm->size); 
+         ps->updata_local_chunk();
+ 
+         node->run(camera);
+@@ -95,11 +95,13 @@ struct DistributedFrameWork {
+         comm->reduce_image(film, reduce_buffer, pixel_num);
+         
+         std::string out = out_file + "f" + std::to_string(frame) + "w" + std::to_string(comm->get_comm_size()) + "g" + std::to_string(ps->get_chunk_size());
+-        out += ".png";
++
++        save_image(film, out + std::to_string(comm->rank) + ".png", width, height, 1 /* iter*/ );
++        printf("%d end\n", comm->rank);  
++
+         if (comm->rank == 0 && out_file != "") {
+-            save_image(reduce_buffer, out, width, height, 1 /* iter*/ );
++            save_image(reduce_buffer, out + ".png", width, height, 1 /* iter*/ );
+         }
+-        printf("%d end\n", comm->rank);  
+     }
+ };
+ 
+diff --git a/src/distributed/MasterWorker.h b/src/distributed/MasterWorker.h
+index 7d83c95..5f0276c 100644
+--- a/src/distributed/MasterWorker.h
++++ b/src/distributed/MasterWorker.h
+@@ -34,8 +34,8 @@ struct MWNode : public Node{
+         int chunk_size = ps->get_chunk_size();
+         for(int i = 0; i < chunk_size; i++) {
+             if(rayList[i]->type == "out" ) {
+-                rayList[i]->primary->size = 0;
+-                rayList[i]->secondary->size = 0;
++                rayList[i]->primary->clear();
++                rayList[i]->secondary->clear();
+             }
+         }
+     }
+@@ -96,6 +96,8 @@ int MWNode::get_unloaded_chunk(){
+ }
+ 
+ void MWNode::send_message() {
++    
++    //clear_outlist();
+     if(comm->isMaster()) {
+         //master idle
+      //   printf("master all status all thread wait %d inlist %d %d %d %d\n", 
+diff --git a/src/distributed/ProcStatus.h b/src/distributed/ProcStatus.h
+index afa5be4..f01cb57 100644
+--- a/src/distributed/ProcStatus.h
++++ b/src/distributed/ProcStatus.h
+@@ -25,9 +25,6 @@ private:
+     int size, rank;
+     std::vector<bool> proc_idle;
+ public:    
+-    // camera setting 
+-    bool image_decompose;
+-    
+     std::vector<int>  global_rays;
+ 
+ public:
+@@ -79,7 +76,7 @@ public:
+     }
+   
+     void thread_reset() {
+-        cpu_thread_num = 16;//std::thread::hardware_concurrency();
++        cpu_thread_num = 1;//std::thread::hardware_concurrency();
+         printf("\ncpu thread num %d\n", cpu_thread_num);
+         thread_idle.resize(cpu_thread_num);
+         for(int i = 0; i < cpu_thread_num; i++) 
+@@ -97,6 +94,7 @@ public:
+ 
+     bool all_proc_idle(){
+         for(int i = 0; i < size; i++){
++            std::cout<<proc_idle[i]<<" ";
+             if(!proc_idle[i]) 
+                 return false;
+         } 
+diff --git a/src/distributed/RayList.cpp b/src/distributed/RayList.cpp
+index 8adc2cb..ff1c832 100644
+--- a/src/distributed/RayList.cpp
++++ b/src/distributed/RayList.cpp
+@@ -301,21 +301,19 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
+         Rays * rays   = new struct Rays(ptr, store_capacity, 21, copy_size);
+         
+ 
+-
+         int * ids = (int*)ptr;
+         os<<"primary copy size "<<copy_size<<"\n"<<" ptr ray";
+-        for(int i = 0; i < 5; i ++) {
++        for(int i = 0; i < std::min(copy_size, 5); i ++) {
+             os<<"| "<< ids[i * 16] <<" "<< ids[i * 16 + 9] << " ";
+         } os<<"\n ";
+ 
+         ids = (int*)(rays->get_data());
+         os<<"rays ray ";
+-        for(int i = 0; i < 5; i ++) {
++        for(int i = 0; i < std::min(copy_size, 5); i ++) {
+             os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
+         } os<<"\n";
+ 
+ 
+-
+         msg_primary_size -= copy_size; 
+         int width = RAY_COMPACT ? 16 : 21; 
+         ptr += copy_size * width; 
+@@ -332,19 +330,17 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
+ 
+         int * ids = (int*)ptr;
+         os<<"secondary copy size "<<copy_size<<"\n"<<" ptr ray";
+-        for(int i = 0; i < 5; i ++) {
++        for(int i = 0; i < std::min(copy_size, 5); i ++) {
+             os<<"| "<< ids[i * 14] <<" "<< ids[i * 14 + 9] << " ";
+         } os<<"\n ";
+ 
+         ids = (int*)(rays->get_data());
+         os<<"rays ray ";
+-        for(int i = 0; i < 5; i ++) {
++        for(int i = 0; i < std::min(copy_size, 5); i ++) {
+             os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
+         } os<<"\n";
+  
+ 
+-
+-
+         msg_secondary_size -= copy_size; 
+         int width = 14; 
+         ptr += copy_size * width; 
+diff --git a/src/distributed/RayList.h b/src/distributed/RayList.h
+index de83d20..feba141 100644
+--- a/src/distributed/RayList.h
++++ b/src/distributed/RayList.h
+@@ -37,6 +37,7 @@ struct Rays {
+ 
+     int clear() {
+         int s = size;
++        data.clear();
+         size = 0;
+         return s;
+     }
+diff --git a/src/distributed/communicator.cpp b/src/distributed/communicator.cpp
+index 9aea2f7..c279630 100644
+--- a/src/distributed/communicator.cpp
++++ b/src/distributed/communicator.cpp
+@@ -101,14 +101,14 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
+ 
+ 		if ((l + 1) < size)
+ 		{
+-		    os<<"mthread export to l + 1 "<<l + 1<<"\n";	
++		    os<<"mthread export to l + 1 "<<l + 1<<" tag "<<tag<<"\n";	
+             destination = (root + l + 1) % size;
+ 		    MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->rrq);
+ 			k++;
+ 		}
+         send_msg_count+=k;	
+     } else {
+-        os<< "mthread export msg " << m->get_ray_size() <<"to "<<m->get_destination()<< std::endl;
++        os<< "mthread send msg " << m->get_ray_size() <<"to "<<m->get_destination()<<" tag "<<tag<< std::endl;
+         MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, m->get_destination(), tag, MPI_COMM_WORLD, &msb->lrq);
+         k++;
+ 	    send_ray_count++;
+diff --git a/src/distributed/decomposition.h b/src/distributed/decomposition.h
+index 4f5595d..bd4b65a 100644
+--- a/src/distributed/decomposition.h
++++ b/src/distributed/decomposition.h
+@@ -17,7 +17,7 @@ inline void splat(size_t n, float* grid, int d) {
+     for(int i = 0; i < d; i++) 
+         grid[i] = 1; 
+     
+-    int axit = 0;
++    int axit = d - 1;
+     int cur_n = n;
+     //choose longest axit splat
+     while(cur_n != 1){
+@@ -254,7 +254,10 @@ struct ImageDecomposition {
+         if(imageDecompose) {
+             image_domain_decomposition(region, chunk_map, rank, size); 
+         } else {
++            MeshChunk chunks;
+             spp = spp / size;
++            for(int i = 0; i < chunks.size; i++) 
++                chunk_map[i] = i;
+         }
+     }
+    
+diff --git a/src/driver/converter.cpp b/src/driver/converter.cpp
+index f32fc60..1110703 100644
+--- a/src/driver/converter.cpp
++++ b/src/driver/converter.cpp
+@@ -962,7 +962,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
+ 
+         write_tri_mesh(chunk_path, tri_mesh, padding_flag);
+         
+-        printf("after write tri mesh\n");
++        printf("after  write tri mesh\n");
+         
+         //build and write bvh
+         unsigned short bvh_export = 0;
+@@ -1025,6 +1025,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
+                 light_colors.emplace_back(mat.ke);
+             }
+         }
++        create_directory("simple_models");
+         obj::write_obj(tri_mesh, mtl_lib, i);
+         chunk_num_tris = tri_mesh.indices.size() / 4;
+     }
+diff --git a/src/driver/driver.cpp b/src/driver/driver.cpp
+index 750e520..0ce8213 100644
+--- a/src/driver/driver.cpp
++++ b/src/driver/driver.cpp
+@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
+     while(frame < 1) {
+         clear_pixels();
+         
+-       // camera.rotate(0.3f, 0.0f);
++        //camera.rotate(0.3f, 0.0f);
+         auto ticks = std::chrono::high_resolution_clock::now();
+         
+         dfw_run(&camera);
+diff --git a/src/driver/interface.cpp b/src/driver/interface.cpp
+index 204913d..1943832 100644
+--- a/src/driver/interface.cpp
++++ b/src/driver/interface.cpp
+@@ -752,7 +752,7 @@ void rodent_cpu_get_secondary_outgoing_stream(SecondaryStream* buffer, int32_t s
+ }
+ 
+ int32_t rodent_cpu_get_thread_num() {
+-    return 16;//std::thread::hardware_concurrency(); 
++    return 1;//std::thread::hardware_concurrency(); 
+ }
+ //gpu
+ //
+diff --git a/src/driver/obj.cpp b/src/driver/obj.cpp
+index c2897a2..30e932b 100644
+--- a/src/driver/obj.cpp
++++ b/src/driver/obj.cpp
+@@ -402,7 +402,8 @@ bool load_mtl(const FilePath& path, obj::MaterialLib& mtl_lib) {
+ 
+ void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
+ 	std::ofstream outfile;
+-	outfile.open("simplemodel_" + std::to_string(c) + ".obj");	
++    printf("write obj %d \n", c);
++	outfile.open("simple_models/chunk_" + std::to_string(c) + ".obj");	
+ 
+ 	int trx_size = tri_mesh.indices.size() / 4;
+ 	int vtx_size = tri_mesh.vertices.size();
+@@ -632,23 +633,21 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
+                         mapping.insert(std::make_pair(face.indices[i], mapping.size()));
+                     }
+                 }
+-                
+-                const float3& p0 = obj_file.vertices[face.indices[0].v];
+-                const float3& p1 = obj_file.vertices[face.indices[1].v];
+-                bool in_chunk = bbox.line_intersect(p0, p1) || bbox.is_inside(p0) || bbox.is_inside(p1);
+-
+-                auto v0 = mapping[face.indices[0]];
+-                auto prev = mapping[face.indices[1]];
+-                for (size_t i = 1; i < face.indices.size() - 1; i++) {
+-                    auto next = mapping[face.indices[i + 1]];
+-                    const float3& pi = obj_file.vertices[face.indices[i + 1].v];
+-                    if(in_chunk || bbox.is_inside(pi)
+-                        || bbox.line_intersect(p0, pi) 
+-                        || bbox.line_intersect(p1, pi))
+-                    {
+-                        triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
++
++                for(int i = 0; i < face.indices.size() - 2; i++) {
++                    auto p0 = obj_file.vertices[face.indices[i].v];
++                    bool in = bbox.is_inside(p0);
++                    for(int j = i + 1; j < face.indices.size() - 1; j++) {
++                        auto p1 = obj_file.vertices[face.indices[j].v];
++                        in = in || bbox.is_inside(p1) || bbox.line_intersect(p0, p1);
++                        for(int k = j + 1; k <  face.indices.size(); k++) { 
++                            auto p2 = obj_file.vertices[face.indices[k].v];
++                            if(in || bbox.is_inside(p2) || bbox.line_intersect(p0, p2) || bbox.line_intersect(p1, p2))
++                            {
++                                triangles.emplace_back(mapping[face.indices[i]], mapping[face.indices[j]], mapping[face.indices[k]], face.material + mtl_offset);
++                            }
++                        }
+                     }
+-                    prev = next;
+                 }
+             }
+         }
+@@ -707,6 +706,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
+         BBox global = obj_file.bbox;
+         compute_virtual_portal(tri_mesh, mtl_lib.list.size(), bbox, global);
+     }
++
+     // Re-normalize all the values in the OBJ file to handle invalid meshes
+     bool fixed_normals = false;
+     for (auto& n : tri_mesh.normals) {
+diff --git a/src/render/mapping_cpu.impala b/src/render/mapping_cpu.impala
+index 7dcb91f..4ce3997 100644
+--- a/src/render/mapping_cpu.impala
++++ b/src/render/mapping_cpu.impala
+@@ -485,7 +485,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
+             write_out_primary(primary, buffer, i, buffer_size++, false);
+         }
+     }
+-    (primary_size, buffer_size)    
++    (primary_size, buffer_size)
+ }
+ 
+ fn @cpu_secondary_transfer( secondary: SecondaryStream
+@@ -680,9 +680,9 @@ fn @cpu_dis_trace( scene: Scene
+                     }
+               //      print_string("after send and recv\n");
+                     if(primary.size < 0) {
+-                        print_string("end rendering"); print_i32(primary.size); 
++                        print_string("end rendering"); print_i32(primary.size);
+                         print_string(" "); print_i32(out_primary.size);
+-                        print_string(" "); print_i32(secondary.size); 
++                        print_string(" "); print_i32(secondary.size);
+                         print_string(" "); print_i32(out_secondary.size);
+                         break()
+                     }
+@@ -755,7 +755,7 @@ fn @cpu_dis_trace( scene: Scene
+                 }
+                 // Add the contribution for secondary rays to the frame buffer
+                 for i in range(0, secondary.size) {
+-                    if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries */{
++                    if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries*/ {
+                         let j = secondary.rays.id(i);
+                         accumulate(j,
+                             make_color(
