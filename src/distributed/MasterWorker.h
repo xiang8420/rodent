@@ -48,15 +48,21 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
     printf("new MWNode\n");
     int chunk_size = ps->get_chunk_size();
     comm->os<< "master chunk size"<<chunk_size<<"\n";
-   
+  
+    size_t memory[4];
+    memory[0] = physical_memory_used_by_process();
+
     comm->os<<"master set up\n";
     rayList       = new RayList *[chunk_size];
     for(int i = 0; i < chunk_size; i++) {
-        rayList[i] = new RayList(4 * ps->get_buffer_size(), "out");
+        rayList[i] = new RayList(10, "out");
     }
+    memory[1] = physical_memory_used_by_process();
+
     inList = new RayStreamList(ps->get_buffer_size());
 
-    printf("wmnode rank %d\n", comm->rank); 
+    memory[2] = physical_memory_used_by_process();
+    printf("Memory %d kb out list %d in list %d\n", memory[0], memory[1] - memory[0], memory[2] - memory[1]);
     
     st = clock();
     recv_t = 0; wait_t = 0;
@@ -97,7 +103,7 @@ int MWNode::get_unloaded_chunk(){
 
 void MWNode::send_message() {
     
-    //clear_outlist();
+    clear_outlist();
     if(comm->isMaster()) {
         //master idle
      //   printf("master all status all thread wait %d inlist %d %d %d %d\n", 
@@ -206,7 +212,7 @@ void MWNode::send_message() {
             out_mutex.lock();
             int cId = get_sent_list();
             RayMsg* ray_msg;
-            if(cId >= 0 ) {
+            if(cId >= 0 && rayList[cId]->size() > 0.4 * ps->get_buffer_size()) {
                 int dst_proc = ps->get_proc(cId);
                 
                 comm->os<<"mthread new RayMsg "<<cId<<" dst proc "<<dst_proc<<" size "<<rayList[cId]->size()<<" local chunk "<<ps->get_local_chunk()<<"\n";
@@ -272,7 +278,7 @@ void MWNode::message_thread(void* tmp) {
         if(ps->Exit()) break;
         
         wk->send_message(); 
-
+        
         usleep(100);
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
@@ -284,7 +290,12 @@ void MWNode::message_thread(void* tmp) {
 } 
 
 void MWNode::run(ImageDecomposition * camera) {
+    
     comm->os <<" start run message thread \n";
+    
+    camera->decomposition(ps->get_chunk_map(), false, comm->rank, comm->size); 
+    ps->updata_local_chunk();
+
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
     std::vector<std::thread> workThread;

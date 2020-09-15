@@ -34,6 +34,7 @@ set(RODENT_SRCS
     render/geometry.impala
     render/light.impala
     render/material.impala
+    render/sdtree.impala
     render/renderer.impala
     render/scene.impala
     render/driver.impala

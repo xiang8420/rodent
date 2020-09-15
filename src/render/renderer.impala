@@ -58,9 +58,10 @@ fn @make_debug_renderer() -> Renderer {
         device.trace(scene, path_tracer, 1);
     }
 }
+
 fn @make_path_tracing_renderer(max_path_len: i32, spp: i32)-> Renderer {
     @ |scene, device, iter| {
-        let offset = 0.001f;
+        let offset = 0.000001f;
         let pdf_lightpick = 1.0f / (scene.num_lights as f32);
 
         let on_emit = make_camera_emitter(scene.camera, iter);
@@ -159,5 +160,26 @@ fn @make_path_tracing_renderer(max_path_len: i32, spp: i32)-> Renderer {
         };
 
         device.trace(scene, path_tracer, spp);
+    }
+}
+
+
+fn @make_guided_path_renderer() -> Renderer {
+    @ |scene, device, iter| {
+        let on_emit = make_camera_emitter(scene.camera, iter);
+        let on_shadow = @ |_, _, _, _, _, _| ();
+        let on_bounce = @ |_, _, _, _, _, _| ();
+        let on_hit = @ |ray, hit, state, surf, mat, accumulate| {
+            accumulate(color_mulf(white, -vec3_dot(ray.dir, surf.local.col(2))))
+        };
+
+        let path_tracer = PathTracer {
+            on_emit:   on_emit,
+            on_hit:    on_hit,
+            on_shadow: on_shadow,
+            on_bounce: on_bounce
+        };
+
+        device.trace(scene, path_tracer, 1);
     }
 }

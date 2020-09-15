@@ -16,6 +16,7 @@
 #include "common.h"
 #include "image.h"
 #include "../distributed/DistributedFrameWork.h"
+#include "sdtree.h"
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
 #include <x86intrin.h>
 #endif
@@ -134,7 +135,7 @@ int main(int argc, char** argv) {
     while(frame < 1) {
         clear_pixels();
         
-        //camera.rotate(0.3f, 0.0f);
+       // camera.rotate(0.3f, 0.0f);
         auto ticks = std::chrono::high_resolution_clock::now();
         
         dfw_run(&camera);

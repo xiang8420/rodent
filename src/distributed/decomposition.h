@@ -17,7 +17,7 @@ inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
     
-    int axit = d - 1;
+    int axit = 1;
     int cur_n = n;
     //choose longest axit splat
     while(cur_n != 1){
@@ -81,9 +81,9 @@ struct MeshChunk{
                     bb.min.x = x - 0.001f;
                     bb.min.y = y - 0.001f;
                     bb.min.z = z - 0.001f;
-                    bb.max.x = std::min(bbox.max.x, x + step.x) + 0.001f;
-                    bb.max.y = std::min(bbox.max.y, y + step.y) + 0.001f;
-                    bb.max.z = std::min(bbox.max.z, z + step.z) + 0.001f;
+                    bb.max.x = std::min(bbox.max.x, x + step.x + 0.001f);
+                    bb.max.y = std::min(bbox.max.y, y + step.y + 0.001f);
+                    bb.max.z = std::min(bbox.max.z, z + step.z + 0.001f);
                     printf("min %f %f %f max %f %f %f\n", bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
                     list.push_back(bb);  //emplace_back
                 }
@@ -261,8 +261,6 @@ struct ImageDecomposition {
         }
     }
    
-
-
     ImageDecomposition(float3 e, float3 d, float3 u, float fov, int width, int height, int spp)
             : width(width), height(height), spp(spp) 
     {

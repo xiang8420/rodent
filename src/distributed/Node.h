@@ -19,7 +19,9 @@ public:
 
     ~Node();
 
-    ProcStatus * proc_status(){return ps;}
+    ProcStatus * get_proc_status(){return ps;}
+
+    Communicator * get_communicator(){ return comm; }
 
     int load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait);
     

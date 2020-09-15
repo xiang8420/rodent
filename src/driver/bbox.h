@@ -32,11 +32,17 @@ struct BBox {
         value[0] = min.x; value[1] = min.y; value[2] = min.z;
         value[3] = max.x; value[4] = max.y; value[5] = max.z;
     }
+    
     BBox& extend(const float3& v) {
         min = ::min(min, v);
         max = ::max(max, v);
         return *this;
     }
+
+    float3 extents() {
+        return max - min;
+    }
+
     float half_area() const {
         const float3 len = max - min;
         const float kx = std::max(len.x, 0.0f);

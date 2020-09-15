@@ -47,15 +47,13 @@ static void save_image(float *result, const std::string& out_file, size_t width,
 
 struct DistributedFrameWork {
     Node *node;
-    Communicator *comm;  
-    ProcStatus *ps;
 
     std::string type;
     
     DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
     {
-        comm = new Communicator();
-        ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
+        Communicator * comm = new Communicator();
+        ProcStatus * ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
         // mpi
         if(type == "P2PNode") {
             node = new P2PNode(comm, ps);
@@ -68,24 +66,20 @@ struct DistributedFrameWork {
 
     ~DistributedFrameWork() {
         printf("delete distributed frame work\n");
-        delete node;
-        delete comm;
-        delete ps;
     }
     
     void run(ImageDecomposition *camera) {
         printf("dis frame worker run\n");
-        int worker_size = comm->get_comm_size();
-        printf("before all gather %d\n", comm->rank);
         
-        camera->decomposition(ps->get_chunk_map(), true/*false*/, comm->rank, comm->size); 
-        ps->updata_local_chunk();
-
         node->run(camera);
         
     }
 
     void gather_image(const std::string& out_file, float* film, int frame, int width, int height) {
+
+        Communicator * comm = node->get_communicator();
+        ProcStatus * ps = node->get_proc_status();
+        
         //film 
         printf("dfw reduce %d %d %d %d\n", comm->rank, comm->master, width, height); 
         int pixel_num = width * height * 3;
@@ -94,9 +88,9 @@ struct DistributedFrameWork {
         
         comm->reduce_image(film, reduce_buffer, pixel_num);
         
-        std::string out = out_file + "f" + std::to_string(frame) + "w" + std::to_string(comm->get_comm_size()) + "g" + std::to_string(ps->get_chunk_size());
+        std::string out = "picture/" + out_file + "_f_" + std::to_string(frame) + "_w_" + std::to_string(comm->get_comm_size()) + "_g_" + std::to_string(ps->get_chunk_size());
 
-        save_image(film, out + std::to_string(comm->rank) + ".png", width, height, 1 /* iter*/ );
+        save_image(film, out + "_rank_" + std::to_string(comm->rank) + ".png", width, height, 1 /* iter*/ );
         printf("%d end\n", comm->rank);  
 
         if (comm->rank == 0 && out_file != "") {
@@ -136,5 +130,5 @@ void master_save_ray_batches(float *rays, size_t size, size_t capacity, size_t t
 }
 
 int32_t thread_buffer_size() {
-    return dfw->node->proc_status()->get_buffer_size();
+    return dfw->node->get_proc_status()->get_buffer_size();
 }

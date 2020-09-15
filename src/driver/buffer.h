@@ -21,16 +21,14 @@ static void decompress(const std::vector<char>& in, Array& out) {
 
 template <typename Array>
 static void read_buffer(std::istream& is, Array& array) {
+    printf("before read buffer %d mb\n", physical_memory_used_by_process() / 1024);
     size_t in_size = 0, out_size = 0;
-    is.read((char*)&in_size,  sizeof(uint32_t));
-    printf("in read %ld\n", in_size);
-    is.read((char*)&out_size, sizeof(uint32_t));
-    printf("out read %ld\n", out_size);
+    is.read((char*)&in_size,  sizeof(size_t));
+    is.read((char*)&out_size, sizeof(size_t));
     std::vector<char> in(out_size);
     is.read(in.data(), in.size());
-    printf("is read \n");
     array = std::move(Array(in_size / sizeof(array[0])));
-    printf("before decompress \n");
+    printf("before decompress memory use %d mb array %ld insize %ld outsize %ld\n", physical_memory_used_by_process() / 1024, in_size / sizeof(array[0]), in_size, out_size);
     decompress(in, array);
     printf("end decompress \n");
 }
@@ -44,8 +42,13 @@ static void read_buffer(const std::string& file_name, Array& array) {
 template <typename Array>
 static void compress(const Array& in, std::vector<char>& out) {
     size_t in_size = sizeof(in[0]) * in.size();
-    out.resize(LZ4_compressBound(in_size));
-    out.resize(LZ4_compress_default((const char*)in.data(), out.data(), in_size, out.size()));
+    printf("in_size0 %ld\n", in_size);
+    size_t out_size = LZ4_compressBound(in_size);
+    printf("out size1 %ld\n", out_size);
+    out.resize(out_size);
+    out_size = LZ4_compress_default((const char*)in.data(), out.data(), in_size, out.size());
+    printf("out size2 %ld out %ld\n", out_size, out.size());
+    out.resize(out_size);
 }
 
 template <typename Array>
@@ -63,8 +66,9 @@ static void write_buffer(std::ostream& os, const Array& array) {
     printf("compress %ld %ld", array.size(), out.size());
     size_t in_size  = sizeof(array[0]) * array.size();
     size_t out_size = out.size();
-    os.write((char*)&in_size,  sizeof(uint32_t));
-    os.write((char*)&out_size, sizeof(uint32_t));
+    printf("before compress memory use %d mb array in %ld out %ld sizeof size_t %d\n", physical_memory_used_by_process() / 1024, in_size, out_size, sizeof(size_t));
+    os.write((char*)&in_size,  sizeof(size_t));
+    os.write((char*)&out_size, sizeof(size_t));
     os.write(out.data(), out.size());
 }
 

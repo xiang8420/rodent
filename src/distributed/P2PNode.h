@@ -181,6 +181,9 @@ void P2PNode::count_rays(int width, int height)
 }
 
 void P2PNode::run(ImageDecomposition * camera) {
+    camera->decomposition(ps->get_chunk_map(), true/*false*/, comm->rank, comm->size); 
+    ps->updata_local_chunk();
+
     int deviceNum = ps->get_dev_num();
     bool PreRendering = false;
     if(PreRendering && comm->rank == 0) {

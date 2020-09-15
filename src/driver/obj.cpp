@@ -552,6 +552,12 @@ void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
     tri_mesh.normals.resize(vtx_offset + 4);                                                          
    
     printf("face %f %f %f %f %f %f\n", bbox.min.x, bbox.min.y, bbox.min.z, bbox.max.x, bbox.max.y, bbox.max.z);
+
+//    for(int i = 0; i < 3; i++) {
+//        bbox.min[i] += 0.0001f;
+//        bbox.max[i] -= 0.0001f;
+//    } 
+
     //Add 2 triangles
     size_t idx[] = {0 + vtx_offset, 1 + vtx_offset, 2 + vtx_offset, mtl_size, 0 + vtx_offset, 2 + vtx_offset, 3 + vtx_offset, mtl_size};
     for(int i = 0; i < 8; i++) {

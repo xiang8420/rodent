@@ -84,10 +84,10 @@ public:
     }
     
     void proc_reset() {
+        printf("proc reset %d proc idle", size);
         proc_idle.resize(size);
         for(int i = 0; i < size; i++) 
             proc_idle[i] = false;
-        printf("proc reset %d proc idle", size);
     //    std::cout<< proc_idle[0] <<"  "<< proc_idle[1] <<std::endl;
     }
  
@@ -192,6 +192,11 @@ public:
     }
     
     ~ProcStatus(){
+        chunk_map.clear();
+        proc_idle.clear();
+        global_rays.clear();
+        thread_idle.clear();
+
         printf("procstatus delete\n");
     }
 

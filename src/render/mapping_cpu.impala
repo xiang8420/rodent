@@ -485,7 +485,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             write_out_primary(primary, buffer, i, buffer_size++, false);
         }
     }
-    (primary_size, buffer_size)
+    (primary_size, buffer_size)    
 }
 
 fn @cpu_secondary_transfer( secondary: SecondaryStream
@@ -680,9 +680,9 @@ fn @cpu_dis_trace( scene: Scene
                     }
               //      print_string("after send and recv\n");
                     if(primary.size < 0) {
-                        print_string("end rendering"); print_i32(primary.size);
+                        print_string("end rendering"); print_i32(primary.size); 
                         print_string(" "); print_i32(out_primary.size);
-                        print_string(" "); print_i32(secondary.size);
+                        print_string(" "); print_i32(secondary.size); 
                         print_string(" "); print_i32(out_secondary.size);
                         break()
                     }
@@ -755,7 +755,7 @@ fn @cpu_dis_trace( scene: Scene
                 }
                 // Add the contribution for secondary rays to the frame buffer
                 for i in range(0, secondary.size) {
-                    if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries*/ {
+                    if secondary.prim_id(i) < 0 /* || secondary.grid_id(i) == scene.num_geometries */{
                         let j = secondary.rays.id(i);
                         accumulate(j,
                             make_color(
@@ -793,42 +793,6 @@ fn @cpu_dis_trace( scene: Scene
         print_counter(transfer_counter, total_counter, "transfer");
         print_counter(total_counter,   total_counter, "total");
     }
-}
-
-fn @cpu_get_grid( primary: PrimaryStream
-                , domain: Domain
-                , min_max: MinMax
-                , vector_width: i32
-                , capacity: i32
-                ) -> i32 {
-    let bbox        = domain.bbox;
-    let grid_i32    = make_vec3_i32(domain.grid.x as i32, domain.grid.y as i32, domain.grid.z as i32);
-    let step        = vec3_div(vec3_sub(bbox.max, bbox.min), domain.grid);
-    let inv_step    = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
-    let num_grids   = grid_i32.x * grid_i32.y * grid_i32.z;
-
-    let grid_ids    = primary.grid_id;
-    let write_grid  = @ |i, _, id| primary.grid_id(i) = id;
-    let ray_reader  = make_ray_stream_reader(primary.rays, 1);
-    let ray_ids     = primary.rays.id;
-    
-    for src_id, _ in vectorized_range(vector_width, 0, primary.size) {
-        let ray = ray_reader(src_id, 0);
-        if inside_point_bbox(bbox, ray.org){
-            let grid_pos = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
-            write_grid(src_id, 0, coordinate_grid_id(grid_pos, grid_i32, cpu_intrinsics));
-        } else {
-            let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
-            if t0 <= t1 {
-                let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
-                let grid_pos = vec3_mul(vec3_sub(its, bbox.min), inv_step);
-                write_grid(src_id, 0, coordinate_grid_id(grid_pos, grid_i32, cpu_intrinsics));
-            } else {
-                write_grid(src_id, 0, num_grids);
-            }
-        }
-    } 
-    num_grids
 }
 
 extern fn cpu_sort_primary_grid(primary: &PrimaryStream, ray_begins: &mut [i32], ray_ends: &mut[i32], num_grids: i32) -> i32 {

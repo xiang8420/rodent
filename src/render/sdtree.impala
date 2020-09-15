@@ -1,0 +1,14 @@
+
+struct QuadTreeNode {
+    // Generates a ray for a point on the image plane (in [-1, 1]^2)
+    generate_ray: fn (f32, f32) -> Ray,
+    // Projects a 3D point on the image plane
+    project: fn (Vec3) -> Vec3,
+    // Unprojects a point on the image plane
+    unproject: fn (Vec3) -> Vec3,
+    // Computes the local camera geometry for a point on the image plane
+    geometry: fn (f32, f32) -> CameraGeometry,
+    //image decomposition according to privious process time
+    tile: Tile,
+    valid: bool
+}
