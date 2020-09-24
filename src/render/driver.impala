@@ -9,10 +9,8 @@ extern "C" {
     fn rodent_initial_gpu_host_data(i32) -> ();
     fn rodent_gpu_get_first_primary_stream(i32, &mut PrimaryStream, i32) -> ();
     fn rodent_gpu_get_second_primary_stream(i32, &mut PrimaryStream, i32) -> ();
-    fn rodent_gpu_get_primary_buffer_stream(i32, &mut PrimaryStream, i32) -> ();
     fn rodent_gpu_get_first_secondary_stream(i32, &mut SecondaryStream, i32) -> ();
     fn rodent_gpu_get_second_secondary_stream(i32, &mut SecondaryStream, i32) -> ();
-    fn rodent_gpu_get_secondary_buffer_stream(i32, &mut SecondaryStream, i32) -> ();
     fn rodent_gpu_get_tmp_buffer(i32, &mut &mut [i32], i32) -> ();
     fn rodent_first_primary_save(i32, i32, i32, bool) -> i32;
     fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
@@ -29,6 +27,7 @@ extern "C" {
     fn rodent_present(i32) -> ();
 
     fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
+    fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();
     fn rodent_thread_buffer_size() ->i32;
     fn rodent_cpu_get_thread_num() -> i32; 
     fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
@@ -237,7 +236,7 @@ fn @make_primary_stream_hit_reader(primary: PrimaryStream, vector_width: i32) ->
                       primary.v(k))
         )
     }
-} 
+}
 fn @make_primary_stream_hit_writer(primary: PrimaryStream, vector_width: i32, invalid_geom_id: i32) -> fn (i32, i32, Hit) -> () {
     @ |i, j, hit| {
         let k = i * vector_width + j;
@@ -252,8 +251,8 @@ fn @make_primary_stream_hit_writer(primary: PrimaryStream, vector_width: i32, in
 fn @make_secondary_stream_hit_writer(secondary: SecondaryStream, vector_width: i32) -> fn (i32, i32, Hit) -> () {
     @ |i, j, hit| {
         let k = i * vector_width + j;
+        secondary.prim_id(k) = hit.prim_id;
         secondary.rays.tmin(k) = hit.distance;
-        secondary.prim_id(k)   = hit.prim_id;
         secondary.grid_id(k)   = hit.geom_id; 
     }
 }

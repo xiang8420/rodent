@@ -62,7 +62,7 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
     inList = new RayStreamList(ps->get_buffer_size());
 
     memory[2] = physical_memory_used_by_process();
-    printf("Memory %d kb out list %d in list %d\n", memory[0], memory[1] - memory[0], memory[2] - memory[1]);
+    printf("Memory %ld kb out list %ld in list %ld\n", memory[0], memory[1] - memory[0], memory[2] - memory[1]);
     
     st = clock();
     recv_t = 0; wait_t = 0;
@@ -103,7 +103,7 @@ int MWNode::get_unloaded_chunk(){
 
 void MWNode::send_message() {
     
-    clear_outlist();
+    //clear_outlist();
     if(comm->isMaster()) {
         //master idle
      //   printf("master all status all thread wait %d inlist %d %d %d %d\n", 

@@ -479,8 +479,22 @@ static void write_bvh_buffer(std::vector<Node>& nodes, std::vector<Tri>& tris, s
     of.write((char*)&node_size, sizeof(uint32_t));
     of.write((char*)&tri_size,  sizeof(uint32_t));
     printf("write nvh nodes %ld\n", nodes.size());
+    
+   
+//    std::ofstream of_nodes("data/nodes", std::ios::binary);
+//    size_t in_size = nodes.size() * sizeof(nodes[0]);
+//    printf("nodes dat %d\n", in_size);
+//    of_nodes.write((char*)&in_size,  sizeof(size_t));
+//    of_nodes.write((char*)nodes.data(), in_size);
+//
+//    std::ofstream of_tris("data/tris", std::ios::binary);
+//    in_size = tris.size() * sizeof(tris[0]);
+//    printf("tris dat size %ld sizeof tris[0] %ld\n", tris.size(), sizeof(tris[0]));
+//    of_tris.write((char*)&in_size,  sizeof(size_t));
+//    of_tris.write((char*)tris.data(), in_size);
+
     write_buffer(of, nodes);
-    printf("write nvh tri %ld\n", tris.size());
+    printf("write bvh tri %ld\n", tris.size());
     write_buffer(of, tris );
     info("BVH with ", nodes.size(), " node(s), ", tris.size(), " tri(s)");
 }
@@ -803,10 +817,10 @@ void mpi_gather_light( std::vector<int>   &light_ids
     std::swap(new_light_norms,  light_norms);
     std::swap(new_light_colors, light_colors);
     std::swap(new_light_areas,  light_areas);
-    printf("light areas size %d\n", light_areas.size());
+    printf("light areas size %ld\n", light_areas.size());
 
     int n = 0;
-    printf("num lights %d\n", num_lights.size());
+    printf("num lights %ld\n", num_lights.size());
     for(int i = 0; i < num_lights.size(); i++) {
         std::string light_ids_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/ligt_ids.bin";
         printf("light ids chunk %d tris %d lights %d\n\n", i, num_tris[i], num_lights[i]);
@@ -821,10 +835,10 @@ void mpi_gather_light( std::vector<int>   &light_ids
         n += num_lights[i];
         
         write_buffer(light_ids_path, tri_light_ids);
-        printf("end light ids chunk %d %d\n", i, tri_light_ids.size());
+        printf("end light ids chunk %d %ld\n", i, tri_light_ids.size());
     }
 
-    printf("%d %d %d %d\n", light_verts.size(), light_norms.size(), light_colors.size(), light_areas.size());
+    printf("%ld %ld %ld %ld\n", light_verts.size(), light_norms.size(), light_colors.size(), light_areas.size());
     printf("end mpi light gather\n");
 }
 
@@ -997,7 +1011,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             auto& v1 = tri_mesh.vertices[tri_mesh.indices[i + 1]];
             auto& v2 = tri_mesh.vertices[tri_mesh.indices[i + 2]];
            
-            printf("%d find %d is light\n", proc_rank, i / 4); 
+            printf("%d find %ld is light\n", proc_rank, i / 4); 
             tri_lights.emplace_back(i / 4);
             chunk_num_lights++;
 
@@ -1025,11 +1039,11 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light_colors.emplace_back(mat.ke);
             }
         }
-        obj::write_obj(tri_mesh, mtl_lib, i);
+//        obj::write_obj(tri_mesh, mtl_lib, i);
         chunk_num_tris = tri_mesh.indices.size() / 4;
     }
     mpi_gather_light(tri_lights, num_lights, num_tris, light_verts, light_norms, light_areas, light_colors, proc_rank, proc_size);
-    printf("%d after mpi gather %d\n", proc_rank, light_areas.size());
+    printf("%d after mpi gather %ld\n", proc_rank, light_areas.size());
     
     int global_num_lights = light_areas.size();
     ///write simple mesh
@@ -1079,7 +1093,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     float* areas_data = (float*)light_areas.data();
     float* colors_data = (float*)light_colors.data();
     
-    printf("recv lisght verts %d :\n", light_areas.size()); 
+    printf("recv lisght verts %ld :\n", light_areas.size()); 
     for(int j = 0; j < light_areas.size(); j++) {
         for(int k = 0; k < 3; k ++) {
           //  printf("%d %f %f %f | ", j, verts_data[j * 9 + k * 3 + 0], verts_data[j * 9 + k * 3 + 1], verts_data[j * 9 + k * 3 + 2]); 
@@ -1143,9 +1157,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        num_tris:     27\n"  //wrong num tris
  //      << "        num_tris:     " << tri_mesh.indices.size() / 4 << "\n"
        << "    };\n"
-       << "    let bvh = device.load_bvh(file.bvh);\n"
-       << "    let node = bvh.node(0); \n"
-       << "    let bbox = node.bbox(0);   \n";
+       << "    let bvh = device.load_bvh(file.bvh);\n";
    
 
 
@@ -1165,7 +1177,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         }
     } else {
 //        write_buffer("data/light_areas.bin",  light_areas);
-        write_buffer_hetero(data_path, "ligt_are.bin",  light_areas,  padding_flag, true);
+        write_buffer_hetero(data_path, "ligt_are.bin",  light_areas,  padding_flag, false);
         write_buffer_hetero(data_path, "ligt_ver.bin",  light_verts,  padding_flag, true);
         write_buffer_hetero(data_path, "ligt_nor.bin",  light_norms,  padding_flag, true);
         write_buffer_hetero(data_path, "ligt_col.bin",  light_colors, padding_flag, true);
