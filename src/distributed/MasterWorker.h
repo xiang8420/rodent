@@ -293,7 +293,7 @@ void MWNode::run(ImageDecomposition * camera) {
     
     comm->os <<" start run message thread \n";
     
-    camera->decomposition(ps->get_chunk_map(), false, comm->rank, comm->size); 
+    camera->decomposition(ps->get_chunk_map(), true, comm->rank, comm->size); 
     ps->updata_local_chunk();
 
     int deviceNum = ps->get_dev_num();

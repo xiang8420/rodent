@@ -128,7 +128,7 @@ static void write_buffer(std::ostream& os, const Array& array) {
 
 template <typename Array>
 static void write_buffer(const std::string& file_name, const Array& array) {
-    std::ofstream of(file_name, std::ios::binary);
+    //std::ofstream of(file_name, std::ios::binary);
     remove(file_name.c_str());
     std::ofstream of(file_name, std::ios::binary | std::ios::app);
     write_buffer(of, array);

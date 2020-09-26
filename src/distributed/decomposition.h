@@ -93,23 +93,46 @@ struct MeshChunk{
     }
 };
 
+struct ImageBlock {
+    union {
+        struct { int xmin, ymin, xmax, ymax; };
+        int values[4];
+    };
+
+    ImageBlock() {xmin = 0; ymin = 0; xmax = 0; ymax = 0; } 
+    ImageBlock(int xmax, int ymax) : xmax(xmax), ymax(ymax), xmin(0), ymin(0) 
+    {}
+    
+    ImageBlock(int xmin, int ymin, int xmax, int ymax) : xmin(xmin), ymin(ymin), xmax(xmax), ymax(ymax)  
+    {}
+    
+    int operator [] (size_t i) const { return values[i]; }
+    int& operator [] (size_t i) { return values[i]; }
+};
+
 // Grid hierarchy for scheduling
 struct ImageDecomposition {
     float2 scale;
     
     int width, height, spp, proc_spp;
-    int region[4]; 
+    
+    //multi process load same chunk. 
+    ImageBlock render_block, chunk_project_block; 
+
     float3 eye, dir, right, up; 
     float w, h;
+    float w_sin, h_sin;
     std::vector<int>   domain;
     std::vector<float> depth;
     
     ImageDecomposition(){}
 
     float3 project_point_to_image(float3 p) {
-        float3 d = normalize(p - eye); 
-        float3 res(dot(d, right) / w, dot(d, up) / h, length(p - eye)/*-dot(d, dir)*/); 
-       // printf("d %f %f %f p %f %f %f p2 %f %f %f\n", d.x, d.y, d.z, p.x, p.y, p.z, res.x, res.y, res.z); 
+          //  let d = vec3_normalize(math, vec3_sub(p, eye));
+          //  make_vec3(vec3_dot(d, right) / w, vec3_dot(d, up) / h, -vec3_dot(d, dir))
+        float3 d = normalize(p - eye);
+        float3 res(dot(d, right) / w_sin, dot(d, up) / h_sin, dot(dir, (p - eye))); 
+        printf("d %f %f %f p %f %f %f p2 %f %f %f\n", d.x, d.y, d.z, p.x, p.y, p.z, res.x, res.y, res.z); 
         return res ;
     }
   
@@ -138,7 +161,7 @@ struct ImageDecomposition {
             error("Failed to save PNG file\n");
     }
 
-    void project_cube_to_image(BBox box, int chunk) {
+    ImageBlock project_cube_to_image(BBox box, int chunk, bool Record) {
         float3 p_min(1), p_max(-1);
         p_min.z = 0xff;
         float3 p;
@@ -150,40 +173,45 @@ struct ImageDecomposition {
                     
                     p.z = z == 0 ? box.min.z : box.max.z;
                     float3 p2 = project_point_to_image(p); 
+                    printf("project p2 %f %f %f\n", p2.x, p2.y, p2.z);
                     float depth = p2.z;
-                    p_min = max(float3(-1), min(p_min, p2));
-                    p_max = min(float3(1),  max(p_max, p2));
+                    p_min = min(p_min, p2);
+                    p_max = max(p_max, p2);
                     //z 
                     p_min.z = depth < p_min.z ? depth : p_min.z;
                 }
             }
         }
-       // printf("project min %f %f %f max %f %f %f\n", p_min.x, p_min.y, p_min.z, p_max.x, p_max.y, p_max.z); 
+        p_min = max(float3(-1), p_min);
+        p_max = min(float3(1), p_max);
+        printf("project min %f %f %f max %f %f %f\n", p_min.x, p_min.y, p_min.z, p_max.x, p_max.y, p_max.z); 
         //左上 0 0 
-        int pid[4]; 
-        pid[0] = (p_min.x + 1) * width / 2;
-        pid[1] = (p_max.x + 1) * width / 2;
-        pid[2] = (1 - p_max.y) * height / 2;
-        pid[3] = (1 - p_min.y) * height / 2;
-
+        ImageBlock block( (p_min.x + 1) * width  / 2
+                        , (1 - p_max.y) * height / 2
+                        , (p_max.x + 1) * width  / 2
+                        , (1 - p_min.y) * height / 2);
        
-        for(int y = pid[2]; y < pid[3]; y++) {
-            for(int x = pid[0]; x < pid[1]; x++) {
-                int id = y * width + x;
-                if(domain[id] == -1 || p_min.z < depth[id]) {
-                    domain[id] = chunk;
-                    depth[id] = p_min.z;
+        if(Record) { 
+            for(int y = block.ymin; y < block.ymax; y++) {
+                for(int x = block.xmin; x < block.xmax; x++) {
+                    int id = y * width + x;
+                    if(domain[id] == -1 || p_min.z < depth[id]) {
+                        domain[id] = chunk;
+                        depth[id] = p_min.z;
+                    }
                 }
             }
-        } 
+        }
+
+        return block;
     }
 
-    int get_most_unloaded_chunk(int *region, int *chunk_map, int chunk_size) {
+    int get_most_unloaded_chunk(int *block, int *chunk_map, int chunk_size) {
         int* chunks = new int [chunk_size];
         for(int i = 0; i< chunk_size; i++)
             chunks[i] = 0;
-        for(int y = region[1]; y < region[3]; y++) {
-            for(int x = region[0]; x < region[2]; x ++) {
+        for(int y = block[1]; y < block[3]; y++) {
+            for(int x = block[0]; x < block[2]; x ++) {
                 if(domain[y * width + x] >= 0)
                     chunks[domain[y * width + x]] ++;
             }
@@ -198,14 +226,14 @@ struct ImageDecomposition {
                 unloaded = i;
             }
         }
-      //  printf("get most unloaded %d %d %d %d chunk %d\n", region[0], region[1], region[2], region[3], c);
+      //  printf("get most unloaded %d %d %d %d chunk %d\n", block[0], block[1], block[2], block[3], c);
         c = c==-1 ? unloaded : c;
         return c;
     }
     
-    void image_domain_decomposition(int* render_region, int* chunk_map, int proc_rank, int proc_size) {
+    void image_domain_decomposition(ImageBlock image, int* chunk_map, int proc_rank, int proc_size) {
 
-        MeshChunk chunks;
+        MeshChunk chunks; //MeshChunk get bbox automaticly
         for(int i = 0; i < width * height; i++)
             domain[i] = -1;
         int chunk_size = chunks.size; 
@@ -217,42 +245,45 @@ struct ImageDecomposition {
             chunk_map[i] = -1;
 
         for(int i = 0; i < chunk_size; i++) {
-            project_cube_to_image(chunks.list[i], i);
+            project_cube_to_image(chunks.list[i], i, true);
         }
+       
+        //global available block 
+        ImageBlock gblock = image;
+        //ImageBlock gblock = project_cube_to_image(chunks.bbox, 0, false);
+        printf("global avail block %d %d %d %d\n", gblock[0], gblock[1], gblock[2], gblock[3]);
         
-        int step_width = width / scale[0];
-        int step_height = height / scale[1];   
+       // int step_width = width / scale[0];
+       // int step_height = height / scale[1];   
+        int step_width = (gblock.xmax - gblock.xmin) / scale[0];
+        int step_height = (gblock.ymax - gblock.ymin) / scale[1];   
         printf("step width %d height %d\n", step_width, step_height); 
 
         for(int i = 0; i < proc_size; i++) {
-            int region[4];
             int x = i % int(scale[0]);
             int y = i / int(scale[0]);
 
-            region[0] = x * step_width; 
-            region[1] = y * step_height;  
-            region[2] = std::min(width, region[0] + step_width); 
-            region[3] = std::min(width, region[1] + step_height); 
+            int xmin = gblock.xmin + x * step_width;
+            int ymin = gblock.ymin + y * step_height;
+            ImageBlock block(xmin, ymin, std::min(gblock.xmax, xmin + step_width), std::min(gblock.ymax, ymin + step_height));  
             
-            int chunk = chunk_size == proc_size ? i : get_most_unloaded_chunk(&region[0], chunk_map, chunks.size); 
+            int chunk = chunk_size == proc_size ? i : get_most_unloaded_chunk(&block[0], chunk_map, chunks.size); 
            
+            printf("rank %d x %d y %d block %d %d %d %d\n", i, x, y, block[0], block[1], block[2], block[3]);
             if(chunk != -1); 
                 chunk_map[chunk] = i;
 
             if(i == proc_rank) {
-                for(int k = 0; k < 4; k++)
-                    render_region[k] = region[k]; 
+                render_block = block; 
             }
         }
-        printf("renderregion %d %d %d %d\n", render_region[0], render_region[1], render_region[2], render_region[3]);
+        printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
         write_project_result(); 
     }
     
     void decomposition(int* chunk_map, bool imageDecompose, int rank, int size) {
-        region[0] = 0;     region[1] = 0;
-        region[2] = width; region[3] = height;
         if(imageDecompose) {
-            image_domain_decomposition(region, chunk_map, rank, size); 
+            image_domain_decomposition(ImageBlock(width, height), chunk_map, 0 /*rank*/, 1/*size*/); 
         } else {
             MeshChunk chunks;
             spp = spp / size;
@@ -273,12 +304,16 @@ struct ImageDecomposition {
         w = std::tan(fov * PI / 360.0f);
         h = w / ratio;
         
+        w_sin = std::sin(fov * PI / 360.0f);
+        h_sin = w_sin / ratio;
+        printf("fov w %f h %f w sin %f h sin %f\n", w, h, w_sin, h_sin);
+        
         domain.resize(width * height);
         std::fill(domain.begin(), domain.end(), -1);
         depth.resize(width * height);    
     }
     
-    int* get_region() { return &region[0]; }
+    int* get_render_block() { return &render_block[0]; }
 
     int get_spp() { return spp; }
 

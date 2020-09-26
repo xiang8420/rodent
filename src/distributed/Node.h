@@ -131,7 +131,7 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
     Communicator * comm = wk->comm; 
     ProcStatus *ps = wk->ps;
     
-    int* region = camera->get_region();
+    int* region = camera->get_render_block();
     int sppProc = camera->get_spp(); 
     int sppDev = sppProc / devNum;
     
