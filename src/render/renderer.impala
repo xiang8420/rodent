@@ -79,7 +79,7 @@ fn @make_path_tracing_renderer(max_path_len: i32, spp: i32)-> Renderer {
             }
 
             let rnd = &mut state.rnd;
-            // Note: randi() returns random integers, but we only want positive integers here 
+            // Note: randi() returns random integers, but we only want positive integers here
             // For a scene chunk may access to invaild light
             let light_id = (randi(rnd) & 0x7FFFFFFF) % scene.num_lights;
             let light = @@(scene.lights)(light_id);

@@ -11,7 +11,7 @@ fn @cpu_get_tile( width: i32
         24 => (width / 4, height / 6),
         _  => (width / 4, height / 8)
     };
-    (w, h)  
+    (w + 1 as i32, h + 1 as i32)  
 }
 
 // Trace function ------------------------------------------------------------------
@@ -38,7 +38,8 @@ fn @cpu_parallel_tiles( image: Tile
     let num_tiles_y = round_up(height as i32, tile_height) / tile_height;
     let num_tiles = num_tiles_x * num_tiles_y;
     let tiles_div = make_fast_div(num_tiles_x as u32);
-    for i in parallel(num_cores, 0, num_cores) {
+
+    for i in range(0, num_cores) {
         let y = fast_div(tiles_div, i as u32) as i32;
         let x = i - num_tiles_x * y;
         let xmin = image.xmin + x * tile_width;
@@ -54,6 +55,16 @@ fn @cpu_parallel_tiles( image: Tile
         print_string(" ");
         print_i32(ymax); 
         print_string("\n");
+
+    }
+
+    for i in parallel(num_cores, 0, num_cores) {
+        let y = fast_div(tiles_div, i as u32) as i32;
+        let x = i - num_tiles_x * y;
+        let xmin = image.xmin + x * tile_width;
+        let ymin = image.ymin + y * tile_height;
+        let xmax = cpu_intrinsics.min(xmin + tile_width,  image.xmax);
+        let ymax = cpu_intrinsics.min(ymin + tile_height, image.ymax);
         @@body(xmin, ymin, xmax, ymax, image.spp, i)
     }
 }
@@ -630,7 +641,6 @@ fn @cpu_dis_trace( scene: Scene
 
     let valid_camera = scene.camera.valid; 
     print_string("start rendering\n");   
-    print_i32(valid_camera as i32);
     for xmin, ymin, xmax, ymax, spp_thread, tid in cpu_parallel_tiles(scene.camera.tile, 0, false) {
         with cpu_profile(&mut total_counter) {
             // Get ray streams/states from the CPU driver
@@ -643,18 +653,14 @@ fn @cpu_dis_trace( scene: Scene
 
             let mut out_primary     : OutRayStream;
             let mut out_secondary   : OutRayStream;
-            rodent_cpu_get_out_ray_stream(&mut out_primary,   num_rays / 2, true);
-            rodent_cpu_get_out_ray_stream(&mut out_secondary, num_rays / 2, false);
-            print_string("out secondary capacity: ");
-            print_i32(out_secondary.capacity);
-            print_string("\n");
+            rodent_cpu_get_out_ray_stream(&mut out_primary,   capacity, true);
+            rodent_cpu_get_out_ray_stream(&mut out_secondary, capacity, false);
             let mut id = 0;
             if !valid_camera { id = num_rays; }
             
-            let print_node = 1;
             let mut idle = false;
             let last_tile = false;
-            print_string("thread start rendering\n");
+            //print_size("thread render start ", tid, "\n");
             while true {
                 let first = (id == 0);
                 // (Re-)generate primary rays
@@ -662,15 +668,13 @@ fn @cpu_dis_trace( scene: Scene
                     primary.size = cpu_generate_rays(primary, capacity, path_tracer.on_emit, &mut id, xmin, ymin, xmax, ymax, 
                                                 film_width, film_height, tid, spp_thread, vector_width);
                 }
-              //  print_string("after generate\n");
                 with cpu_profile(&mut transfer_counter) {
                     let (primary_size, out_primary_size) = cpu_primary_transfer(primary, out_primary, min_max, vector_width, id == num_rays, scene);
                     primary.size = primary_size; 
                     out_primary.size = out_primary_size; 
-              //      print_string("after transfer\n");
                     
                     if primary.size == 0  && secondary.size ==0 && id == num_rays  {
-                        idle = (id == num_rays && primary_size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
+                        idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
                         if(out_primary.size > 0) {
                             rodent_worker_primary_send(-1, out_primary.size);
                             out_primary.size = 0;
@@ -678,22 +682,17 @@ fn @cpu_dis_trace( scene: Scene
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, idle); 
              //           rodent_first_primary_check(-1, primary.size, 1, true);                
                     }
-              //      print_string("after send and recv\n");
                     if(primary.size < 0) {
-                        print_string("end rendering"); print_i32(primary.size); 
-                        print_string(" "); print_i32(out_primary.size);
-                        print_string(" "); print_i32(secondary.size); 
-                        print_string(" "); print_i32(out_secondary.size);
+                        print_size("end rendering", primary.size, " ");  
+                        print_size(" ", out_primary.size, " ");  
+                        print_size(" ", secondary.size, " "); 
+                        print_size(" ", out_secondary.size, "\n");
                         break()
                     }
                 }
                 // Trace primary rays
                 with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {
-                    if use_embree {
-                        rodent_cpu_intersect_primary_embree(primary, scene.num_geometries, select(first, -1, 0));
-                    } else {
-                        cpu_traverse_primary(scene, min_max, primary, single, vector_width);
-                    }
+                    cpu_traverse_primary(scene, min_max, primary, single, vector_width);
                 }
                 // Sort hits by shader id, and filter invalid hits
                 let mut ray_begins : [i32 * 1024];
@@ -719,16 +718,9 @@ fn @cpu_dis_trace( scene: Scene
                 with cpu_profile(&mut transfer_counter) {
                     if primary.size ==0 && secondary.size == 0 && id == num_rays {
                         idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
-                        print_i32(scene.chunk);
-                        print_string(" save out going buffer");
-                        print_i32(out_secondary.size);
-                        print_string(" secondary ");
-                        print_i32(secondary.size);
-                        print_string(" primary ");
-                        print_i32(primary.size);
-                        print_string(" id ");
-                        print_i32(id);
-                        print_string("\n");
+                        print_size("chunk ", scene.chunk, "\n");
+                        print_size("save out going buffer ", out_secondary.size, "\n");
+                        print_size("secondary ", secondary.size, "\n");
                         if out_secondary.size > 0 {
                             rodent_worker_secondary_send(-1, out_secondary.size);
                             out_secondary.size = 0;
@@ -737,20 +729,12 @@ fn @cpu_dis_trace( scene: Scene
                     }
                 }
                 if secondary.size < 0 {
-                    print_string("end rendering"); print_i32(primary.size); 
-                    print_string(" "); print_i32(out_primary.size);
-                    print_string(" "); print_i32(secondary.size); 
-                    print_string(" "); print_i32(out_secondary.size);
                     break()
                 }
                 // Compact and trace secondary rays
                 if likely(secondary.size > 0) {
                     with cpu_profile(&mut shadow_counter) {
-                        if use_embree {
-                            rodent_cpu_intersect_secondary_embree(secondary);
-                        } else {
-                            cpu_traverse_secondary(scene, min_max, secondary, single, false, vector_width);
-                        }
+                        cpu_traverse_secondary(scene, min_max, secondary, single, false, vector_width);
                     }
                 }
                 // Add the contribution for secondary rays to the frame buffer
@@ -777,8 +761,7 @@ fn @cpu_dis_trace( scene: Scene
     }
     if cpu_profiling_enabled {
         fn print_counter(counter: i64, total: i64, name: &[u8]) -> () {
-            print_string("grid: ");
-            print_i32(scene.chunk);
+            print_size("grid: ", scene.chunk, " ");
             print_string(name);
             print_string(": ");
             print_i64(counter);

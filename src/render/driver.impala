@@ -280,3 +280,10 @@ fn @make_primary_stream_state_writer(primary: PrimaryStream, vector_width: i32) 
         primary.depth(k)     = state.depth;
     }
 }
+
+fn @print_size(head: &[u8], size: i32, rear: &[u8]) -> () {
+    print_string(head); 
+    print_i32(size);
+    print_string(rear);
+}
+
