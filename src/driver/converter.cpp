@@ -663,16 +663,10 @@ void mpi_gather(std::vector<T> &data, int *out_counts, int in_size, int global_s
             printf("displs %d ", displs[i]);
         }
     }
-    printf("%d before gather %d \n", proc_rank, out_counts[proc_rank]);
+    printf(" %d before gather %d \n", proc_rank, out_counts[proc_rank]);
     MPI_Gatherv((float*)data.data(), out_counts[proc_rank] * in_size, MPI_FLOAT, (float*)recv_buffer.data(), rcounts.data(), displs.data(), MPI_FLOAT, 0, MPI_COMM_WORLD);
     if(proc_rank == 0) {
-        for(int i = 0; i < recv_buffer.size();i++)
-            printf(" | %d| ", recv_buffer[i]);
-        printf("\n");
         std::swap(recv_buffer, data);
-        int * d = (int*) recv_buffer.data();
-        for(int i = 0; i < recv_buffer.size();i++)
-            printf(" | %d| ", recv_buffer[i]);
     }
 }
 

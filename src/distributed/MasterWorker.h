@@ -252,8 +252,8 @@ void MWNode::message_thread(void* tmp) {
                ps->all_thread_waiting(), wk->inList->size(), ps->all_proc_idle(), ps->all_rays_received(), wk->rayList_empty());
         }
         do {
-      //      if(comm->isMaster()) 
-      //          comm->os<<"master wait recv\n";
+      //     if(comm->isMaster()) 
+      //         comm->os<<"master wait recv\n";
             recv = comm->recv_message(wk->rayList, wk->inList,  ps);
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
         

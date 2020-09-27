@@ -185,7 +185,7 @@ struct ImageDecomposition {
         p_min = max(float3(-1), p_min);
         p_max = min(float3(1), p_max);
         printf("project min %f %f %f max %f %f %f\n", p_min.x, p_min.y, p_min.z, p_max.x, p_max.y, p_max.z); 
-        //左上 0 0 
+        //top-left 0 0 
         ImageBlock block( (p_min.x + 1) * width  / 2
                         , (1 - p_max.y) * height / 2
                         , (p_max.x + 1) * width  / 2
@@ -249,12 +249,12 @@ struct ImageDecomposition {
         }
        
         //global available block 
-        ImageBlock gblock = image;
-        //ImageBlock gblock = project_cube_to_image(chunks.bbox, 0, false);
+        //ImageBlock gblock = image;
+        ImageBlock gblock = project_cube_to_image(chunks.bbox, 0, false);
         printf("global avail block %d %d %d %d\n", gblock[0], gblock[1], gblock[2], gblock[3]);
         
-       // int step_width = width / scale[0];
-       // int step_height = height / scale[1];   
+        // int step_width = width / scale[0];
+        // int step_height = height / scale[1];   
         int step_width = (gblock.xmax - gblock.xmin) / scale[0];
         int step_height = (gblock.ymax - gblock.ymin) / scale[1];   
         printf("step width %d height %d\n", step_width, step_height); 
@@ -267,7 +267,16 @@ struct ImageDecomposition {
             int ymin = gblock.ymin + y * step_height;
             ImageBlock block(xmin, ymin, std::min(gblock.xmax, xmin + step_width), std::min(gblock.ymax, ymin + step_height));  
             
-            int chunk = chunk_size == proc_size ? i : get_most_unloaded_chunk(&block[0], chunk_map, chunks.size); 
+            int chunk;
+            if(chunk_size == proc_size) {
+                chunk = i;
+            } else if(chunk_size > proc_size) {
+                chunk = get_most_unloaded_chunk(&block[0], chunk_map, chunks.size); 
+            } else if(chunk_size == 1) {
+                chunk = 0;
+            } else {
+                error("chunk size ", chunk_size, " proc size ", proc_size, "invalid");
+            }
            
             printf("rank %d x %d y %d block %d %d %d %d\n", i, x, y, block[0], block[1], block[2], block[3]);
             if(chunk != -1); 
@@ -283,7 +292,7 @@ struct ImageDecomposition {
     
     void decomposition(int* chunk_map, bool imageDecompose, int rank, int size) {
         if(imageDecompose) {
-            image_domain_decomposition(ImageBlock(width, height), chunk_map, 0 /*rank*/, 1/*size*/); 
+            image_domain_decomposition(ImageBlock(width, height), chunk_map, rank, size); 
         } else {
             MeshChunk chunks;
             spp = spp / size;

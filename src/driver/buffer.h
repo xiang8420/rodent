@@ -37,22 +37,24 @@ static void read_buffer(std::istream& is, Array& array) {
     array = std::move(Array(size / sizeof(array[0])));
     char* out = (char*)array.data();
     size_t st = 0;
-//    printf("before decompress Memory %ld \n", physical_memory_used_by_process() / 1024);
+    printf("before decompress Memory %ld \n", physical_memory_used_by_process() / 1024);
     while(st < size) {
         size_t compress_size, decompress_size;
        
         is.read((char*)&decompress_size, sizeof(size_t));
         is.read((char*)&compress_size, sizeof(size_t));
         
-//        printf("in size %ld out size%ld\n",compress_size, decompress_size);
         std::vector<char> in;
         in.resize(compress_size); 
         is.read(in.data(), in.size());
+        
+        printf("in size %ld \n",compress_size);
+        printf("origin data %ld\n", decompress_size); 
         for(int i =0; i < 100; i++) {
-            printf("%c ", in[i]);
+            printf("%c ", in[st + i]);
         }
         printf("\n");
-        LZ4_decompress_safe(in.data(), (char*)array.data()/*&out[st]*/, in.size(), decompress_size);
+        LZ4_decompress_safe(in.data(), &out[st], in.size(), decompress_size);
 
         st += decompress_size;
     }
@@ -97,27 +99,30 @@ static void write_buffer(std::ostream& os, const Array& array) {
     int st = 0;
     size_t size = array.size() * sizeof(array[0]); 
     os.write((char*)&size, sizeof(size_t));
+
+    size_t lz4_max = LZ4_MAX_INPUT_SIZE;
+    printf("all size %d lz4 max  %d\n", size, lz4_max);
     while(st < size) {
-        size_t origin_size = size > LZ4_MAX_INPUT_SIZE ? LZ4_MAX_INPUT_SIZE : size; 
+        size_t origin_size = size - st > lz4_max ? lz4_max : size - st; 
         printf("before compress Memory %ld array size %ld array[0 ]%ld %d\n", physical_memory_used_by_process() / 1024, array.size(), sizeof(array[0]), LZ4_compressBound(origin_size));
-        
+        printf("origin data %d\n", origin_size); 
         for(int i =0; i < 100; i++) {
-            printf("%c ", in[i]);
+            printf("%c ", in[st + i]);
         }
-        printf("\n");
+        printf("\n\n");
         std::vector<char> out;
         out.resize(LZ4_compressBound(origin_size));
         out.resize(LZ4_compress_default((const char*)&in[st], (char*)out.data(), origin_size, out.size()/*LZ4_compressBound(origin_size)*/));
-        for(int i =0; i < 100; i++) {
-            printf("%c ", out[i]);
-        }
-        printf("\n");
+//        for(int i =0; i < 100; i++) {
+//            printf("%c ", out[i]);
+//        }
+//        printf("\n");
         
         size_t compress_size = out.size();
 
         os.write((char*)&origin_size, sizeof(size_t));
         os.write((char*)&compress_size, sizeof(size_t));
-        printf("in size %ld out size%ld\n",origin_size, out.size());
+        printf("origin size %ld out size%ld\n",origin_size, out.size());
         printf("after compress Memory %ld %d\n", physical_memory_used_by_process() / 1024, LZ4_compressBound(origin_size));
     
         os.write(out.data(), out.size());

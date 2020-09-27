@@ -4,7 +4,7 @@
 #include "../driver/buffer.h"
 
 Communicator::Communicator() {
-    MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, NULL);
+    MPI_Init(NULL, NULL);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     master = size - 1;
