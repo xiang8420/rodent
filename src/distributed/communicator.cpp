@@ -31,6 +31,7 @@ void Communicator::all_gather_float(float *a, float *res, int size) {
 }
 
 void Communicator::reduce_image(float* film, float *reduce_buffer, int pixel_num){
+    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
 }
 

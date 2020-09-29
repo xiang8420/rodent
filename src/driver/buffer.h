@@ -62,6 +62,7 @@ static void read_buffer(std::istream& is, Array& array) {
 
 template <typename Array>
 static void read_buffer(const std::string& file_name, Array& array) {
+    printf("read %s\n", file_name);
     std::ifstream is(file_name, std::ios::binary);
     read_buffer(is, array);
 }
@@ -101,11 +102,11 @@ static void write_buffer(std::ostream& os, const Array& array) {
     os.write((char*)&size, sizeof(size_t));
 
     size_t lz4_max = LZ4_MAX_INPUT_SIZE;
-    printf("all size %d lz4 max  %d\n", size, lz4_max);
+    printf("all size %ld lz4 max  %ld\n", size, lz4_max);
     while(st < size) {
         size_t origin_size = size - st > lz4_max ? lz4_max : size - st; 
         printf("before compress Memory %ld array size %ld array[0 ]%ld %d\n", physical_memory_used_by_process() / 1024, array.size(), sizeof(array[0]), LZ4_compressBound(origin_size));
-        printf("origin data %d\n", origin_size); 
+        printf("origin data %ld\n", origin_size); 
         for(int i =0; i < 100; i++) {
             printf("%c ", in[st + i]);
         }

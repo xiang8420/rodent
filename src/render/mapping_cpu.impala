@@ -9,6 +9,7 @@ fn @cpu_get_tile( width: i32
         8  => (width / 4, height / 2),
         16 => (width / 4, height / 4),
         24 => (width / 4, height / 6),
+        30 => (width / 5, height / 6),
         _  => (width / 4, height / 8)
     };
     (w + 1 as i32, h + 1 as i32)  

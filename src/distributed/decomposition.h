@@ -115,7 +115,6 @@ struct ImageDecomposition {
     
     int width, height, spp, proc_spp;
     int block_count; 
-    bool wait; //block waiting to be process 
     
     //multi process load same chunk. 
     ImageBlock render_block, chunk_project_block; 
@@ -293,7 +292,6 @@ struct ImageDecomposition {
         }
         printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
         write_project_result(); 
-        wait = false;
     }
     
     void image_decomposition(ImageBlock image, int proc_rank, int proc_size) {
@@ -327,7 +325,6 @@ struct ImageDecomposition {
         render_block = blockList[proc_rank]; 
         printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
         write_project_result(); 
-        wait = false;
     }
 
     void decomposition(int* chunk_map, int block, int rank, int size) {
@@ -371,12 +368,9 @@ struct ImageDecomposition {
     
     void set_render_block(int i) { 
         render_block = blockList[i]; 
-        wait = true ;
     }
 
     size_t get_block_count() { return block_count; }
-    
-    bool block_waiting() { return wait; }
     
     int get_spp() { return spp; }
 

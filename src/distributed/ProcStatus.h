@@ -76,7 +76,7 @@ public:
     }
   
     void thread_reset() {
-        cpu_thread_num = 16;//std::thread::hardware_concurrency();
+        cpu_thread_num = 1;//std::thread::hardware_concurrency();
         printf("\ncpu thread num %d\n", cpu_thread_num);
         thread_idle.resize(cpu_thread_num);
         for(int i = 0; i < cpu_thread_num; i++) 
