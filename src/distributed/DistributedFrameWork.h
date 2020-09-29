@@ -12,8 +12,10 @@
 #include "decomposition.h"
 #include "ProcStatus.h"
 
+#include <assert.h>
 #include "Node.h"
 #include "P2PNode.h"
+#include "AllCopyNode.h"
 #include "MasterWorker.h"
 
 #define PRIMARY_WIDTH 21
@@ -59,9 +61,11 @@ struct DistributedFrameWork {
             node = new P2PNode(comm, ps);
         } else if(type == "MWNode") {
             node = new MWNode(comm, ps);
+        } else if(type == "AllCopy") {
+            node = new AllCopyNode(comm, ps); 
         } else {
-            std::cerr << "Undifined node type\n";
-        } 
+            error("Unknown node type");
+        }
     }
 
     ~DistributedFrameWork() {

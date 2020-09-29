@@ -16,7 +16,6 @@ private:
     std::vector<int>  chunk_map;
 
     //decomposition
-    ImageDecomposition *camera;   
 
     std::mutex mutex;
    
@@ -25,6 +24,7 @@ private:
     int size, rank;
     std::vector<bool> proc_idle;
 public:    
+    ImageDecomposition *camera;   
     std::vector<int>  global_rays;
 
 public:
@@ -226,6 +226,8 @@ public:
         buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         
         global_rays.resize(size * size);
+
+        local_chunk = 0;
     }
 
     void updata_local_chunk() {

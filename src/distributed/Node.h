@@ -75,7 +75,7 @@ bool Node::inout_list_empty() {
 }
 
 int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
-    if(comm->size == 1 || ps->Exit() || ps->has_new_chunk()) {
+    if(comm->size == 1 || ps->Exit() || ps->has_new_chunk() || ps->get_chunk_size() == 1) {
         comm->os << "rthread exit new chunk \n";
         return -1;
     }

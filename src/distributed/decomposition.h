@@ -12,7 +12,6 @@
 #define PI 3.14159265359f
 #endif
 
-
 inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
@@ -51,7 +50,7 @@ struct MeshChunk{
         bbox  = BBox(get_bbox());
         scale = float3(get_grid());
         chunk_division();
-        size = scale[0] * scale[1] * scale[2];
+        size = get_chunk_num();
     }
     
     bool chunk_division() {
@@ -115,16 +114,20 @@ struct ImageDecomposition {
     float2 scale;
     
     int width, height, spp, proc_spp;
+    int block_count; 
+    bool wait; //block waiting to be process 
     
     //multi process load same chunk. 
     ImageBlock render_block, chunk_project_block; 
 
     float3 eye, dir, right, up; 
+
     float w, h;
     float w_sin, h_sin;
     std::vector<int>   domain;
     std::vector<float> depth;
-    
+    std::vector<ImageBlock> blockList;
+
     ImageDecomposition(){}
 
     float3 project_point_to_image(float3 p) {
@@ -282,22 +285,64 @@ struct ImageDecomposition {
             if(chunk != -1); 
                 chunk_map[chunk] = i;
 
+            blockList.emplace_back(block);
+
             if(i == proc_rank) {
                 render_block = block; 
             }
         }
         printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
         write_project_result(); 
+        wait = false;
     }
     
-    void decomposition(int* chunk_map, bool imageDecompose, int rank, int size) {
-        if(imageDecompose) {
-            image_domain_decomposition(ImageBlock(width, height), chunk_map, rank, size); 
-        } else {
+    void image_decomposition(ImageBlock image, int proc_rank, int proc_size) {
+        
+        splat(block_count, &scale[0], 2);
+        printf("image scale %f %f\n", scale[0], scale[1]);
+       
+        //global available block 
+        //ImageBlock gblock = image;
+        ImageBlock gblock = project_cube_to_image(BBox(get_bbox()), 0, false);
+        
+        // int step_width = width / scale[0];
+        // int step_height = height / scale[1];   
+        int step_width = (gblock.xmax - gblock.xmin) / scale[0];
+        int step_height = (gblock.ymax - gblock.ymin) / scale[1];   
+        printf("step width %d height %d\n", step_width, step_height); 
+
+        for(int i = 0; i < block_count; i++) {
+            int x = i % int(scale[0]);
+            int y = i / int(scale[0]);
+
+            int xmin = gblock.xmin + x * step_width;
+            int ymin = gblock.ymin + y * step_height;
+            ImageBlock block(xmin, ymin, std::min(gblock.xmax, xmin + step_width), std::min(gblock.ymax, ymin + step_height));  
+            
+            printf("rank %d x %d y %d block %d %d %d %d\n", i, x, y, block[0], block[1], block[2], block[3]);
+
+            blockList.emplace_back(block);
+
+        }
+        render_block = blockList[proc_rank]; 
+        printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
+        write_project_result(); 
+        wait = false;
+    }
+
+    void decomposition(int* chunk_map, int block, int rank, int size) {
+        block_count = block;
+        if(block_count == size) {
+            image_domain_decomposition(ImageBlock(width, height), chunk_map, rank, size);
+        } else if (block_count == 1) {
             MeshChunk chunks;
             spp = spp / size;
-            for(int i = 0; i < chunks.size; i++) 
+            for(int i = 0; i < chunks.size; i++)
                 chunk_map[i] = i;
+        } else if (block_count > size) {
+            if(get_chunk_num() != 1)
+               error("image block decomposition, chunk must be 1");
+            image_decomposition(ImageBlock(width, height), rank, size); 
         }
     }
    
@@ -323,7 +368,16 @@ struct ImageDecomposition {
     }
     
     int* get_render_block() { return &render_block[0]; }
+    
+    void set_render_block(int i) { 
+        render_block = blockList[i]; 
+        wait = true ;
+    }
 
+    size_t get_block_count() { return block_count; }
+    
+    bool block_waiting() { return wait; }
+    
     int get_spp() { return spp; }
 
     void rotate(float yaw, float pitch) {

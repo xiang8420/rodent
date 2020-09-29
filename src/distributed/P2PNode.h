@@ -30,8 +30,12 @@ public:
 P2PNode::P2PNode(struct Communicator *comm, struct ProcStatus *ps) 
     : Node(comm, ps) 
 {
+
     int chunk_size = ps->get_chunk_size();
+    assert(chunk_size == comm->size && comm->size != 1); 
+    
     statistic = new int[chunk_size * 4/*dep*/ * 2]; 
+
     std::fill(statistic, statistic + chunk_size * 4/*dep*/ * 2, 0);
     
     rayList = new RayList *[chunk_size];
@@ -181,7 +185,9 @@ void P2PNode::count_rays(int width, int height)
 }
 
 void P2PNode::run(ImageDecomposition * camera) {
-    camera->decomposition(ps->get_chunk_map(), true/*false*/, comm->rank, comm->size); 
+    
+    /*block size equels proc size*/
+    camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size); 
     ps->updata_local_chunk();
 
     int deviceNum = ps->get_dev_num();

@@ -39,7 +39,6 @@ struct MWNode : public Node{
             }
         }
     }
-
 };
 
 MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -293,7 +292,7 @@ void MWNode::run(ImageDecomposition * camera) {
     
     comm->os <<" start run message thread \n";
     
-    camera->decomposition(ps->get_chunk_map(), true, comm->rank, comm->size); 
+    camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size);
     ps->updata_local_chunk();
 
     int deviceNum = ps->get_dev_num();
@@ -306,7 +305,8 @@ void MWNode::run(ImageDecomposition * camera) {
         
         for( auto &thread: workThread) 
             thread.join();
-    	
+
+        workThread.clear();
     } else {
         comm->os <<"mthread  \n";
         printf("%d start mthread run\n ", comm->rank);
