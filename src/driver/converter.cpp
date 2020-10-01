@@ -424,11 +424,11 @@ static void write_buffer_hetero(std::string path, std::string file_name, const A
 
 static void write_tri_mesh(std::string path, const obj::TriMesh& tri_mesh, unsigned short target ) {
     printf("write tri mesh %s\n", path.c_str());
-    write_buffer_hetero(path,  "tri_vert.bin", tri_mesh.vertices,     target, true);
-    write_buffer_hetero(path,  "tri_norm.bin", tri_mesh.normals,      target, true);
-    write_buffer_hetero(path,  "face_nor.bin", tri_mesh.face_normals, target, true);
-    write_buffer_hetero(path,  "text_cod.bin", tri_mesh.texcoords,    target, true);
-    write_buffer(path + "tri_indx.bin",      tri_mesh.indices);
+    write_buffer_hetero(path,  "vertices.bin", tri_mesh.vertices,     target, true);
+    write_buffer_hetero(path,  "normals.bin", tri_mesh.normals,      target, true);
+    write_buffer_hetero(path,  "face_normals.bin", tri_mesh.face_normals, target, true);
+    write_buffer_hetero(path,  "textcoords.bin", tri_mesh.texcoords,    target, true);
+    write_buffer(path + "indices.bin",      tri_mesh.indices);
 }
 
 
@@ -623,7 +623,7 @@ void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export
             else
 #endif
             build_bvh<4, 4>(tri_mesh, nodes, tris);
-            write_bvh_buffer(nodes, tris, chunk_path + "bvh_sse_.bin");
+            write_bvh_buffer(nodes, tris, chunk_path + "bvh_sse.bin");
             bvh_export += 2;
         }
     } else {
@@ -637,7 +637,7 @@ void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export
             else
 #endif
             build_bvh<8, 4>(tri_mesh, nodes, tris);
-            write_bvh_buffer(nodes, tris, chunk_path + "bvh_avx_.bin");
+            write_bvh_buffer(nodes, tris, chunk_path + "bvh_avx.bin");
             bvh_export += 4;
         }
     }
@@ -816,7 +816,7 @@ void mpi_gather_light( std::vector<int>   &light_ids
     int n = 0;
     printf("num lights %ld\n", num_lights.size());
     for(int i = 0; i < num_lights.size(); i++) {
-        std::string light_ids_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/ligt_ids.bin";
+        std::string light_ids_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/light_ids.bin";
         printf("light ids chunk %d tris %d lights %d\n\n", i, num_tris[i], num_lights[i]);
         std::vector<int> tri_light_ids(num_tris[i]);
 
@@ -919,8 +919,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     // Record if triangles in a chunk is light, 
 
     //create data directory 
-    create_directory("data/");
+    //std::string data_path  = "data_grid" + std::to_string(chunk_size) + "/"; 
     std::string data_path  = "data/"; 
+    std::cout<<data_path<<"\n";
+    create_directory(data_path.c_str());
     float elapsed_ms = 1;
     
     auto ticks = std::chrono::high_resolution_clock::now();
@@ -940,7 +942,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         int &chunk_num_lights = num_lights[i]; 
         int &chunk_num_tris = num_tris[i]; 
         
-        std::string chunk_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/";
+        std::string chunk_path = data_path;
+        chunk_path += (i > 9 ? "0" : "00") + std::to_string(i) + "/";
         create_directory(chunk_path.c_str());
         
         for(int j = 0; j < obj_file_paths.size(); j ++) {
@@ -1073,7 +1076,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             }
             light_ids[i / 4] = find_light;
         }
-        write_buffer(simple_mesh_path + "ligt_ids.bin", light_ids);
+        write_buffer(simple_mesh_path + "light_ids.bin", light_ids);
     }
 
     elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
@@ -1171,10 +1174,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         }
     } else {
 //        write_buffer("data/light_areas.bin",  light_areas);
-        write_buffer_hetero(data_path, "ligt_are.bin",  light_areas,  padding_flag, false);
-        write_buffer_hetero(data_path, "ligt_ver.bin",  light_verts,  padding_flag, true);
-        write_buffer_hetero(data_path, "ligt_nor.bin",  light_norms,  padding_flag, true);
-        write_buffer_hetero(data_path, "ligt_col.bin",  light_colors, padding_flag, true);
+        write_buffer_hetero(data_path, "light_areas.bin",  light_areas,  padding_flag, false);
+        write_buffer_hetero(data_path, "light_verts.bin",  light_verts,  padding_flag, true);
+        write_buffer_hetero(data_path, "light_normals.bin",  light_norms,  padding_flag, true);
+        write_buffer_hetero(data_path, "light_colors.bin",  light_colors, padding_flag, true);
         os << "    let light_verts = device.load_buffer(file.light_verts);\n"
            << "    let light_areas = device.load_buffer(file.light_areas);\n"
            << "    let light_norms = device.load_buffer(file.light_norms);\n"

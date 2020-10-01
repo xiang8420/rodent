@@ -122,7 +122,7 @@ void AllCopyNode::run(ImageDecomposition * camera) {
             ps->set_proc_idle(comm->rank);
             printf("end rthread\n"); 
             std::unique_lock <std::mutex> lock(block_mutex); 
-            while (!ps->Exit() && !ps->is_proc_idle()) {
+            while (!ps->Exit() && !camera->block_waiting()) {
                 printf("wait for block\n");
                 block_cond.wait(lock);
                 printf("get block\n");
@@ -151,7 +151,7 @@ void AllCopyNode::run(ImageDecomposition * camera) {
             printf("mthread worker idle %d\n", comm->rank);
             MPI_Send(&comm->rank, 1, MPI_INT, comm->master, 0, MPI_COMM_WORLD);
             MPI_Recv(&new_block, 1, MPI_INT, comm->master, 0, MPI_COMM_WORLD, &status);
-            printf("mthread worker  %d recv %d\n", new_block);
+            printf("mthread worker  %d recv %d\n", comm->rank, new_block);
             if(new_block == -1)
                 break;
             camera->set_render_block(new_block);
@@ -162,7 +162,6 @@ void AllCopyNode::run(ImageDecomposition * camera) {
                 thread.join();
             workThread.clear();
         }
-        printf("worker %d exit\n", comm->rank);
     }
 
 

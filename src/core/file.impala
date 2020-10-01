@@ -1,6 +1,23 @@
 extern "C" {
     fn sprintf(str: &[u8], format: &[u8], i: i32) -> ();
 }
+
+fn strcat(s1: &[u8], s2: &[u8]) -> [u8 * 99] {
+
+    let mut res:[u8 * 99];
+    let mut i = 0;
+    while(s1(i) != '\0') {
+        res(i) = s1(i); i++;
+    }
+    let n1 = i;
+    i = 0;
+    while(s2(i) != '\0') {
+        res(i + n1) = s2(i); i++;
+    }
+    res(i + n1) = '\0';
+    res
+}
+
 fn int_to_string(i: i32) -> [u8 * 5]{
     let mut str:[u8 * 5];
     sprintf(str, "%d", i);
@@ -19,121 +36,64 @@ fn int_to_string(i: i32) -> [u8 * 5]{
     str(4) = '\0';
     str
 }
-fn strcat_5_4(a: &[u8], b:&[u8]) -> [u8 * 10]{
-    let mut c: [u8 * 10];
-    for i in range(0, 5){
-        c(i) = a(i);
-    }
-    for i in range(0, 4){
-        c(i + 5) = b(i);
-    }
-    c(9) = '\0';
-    c
-}
-fn strcat_9_12(a: &[u8], b: &[u8]) -> [u8 * 22]{
-    let mut c: [u8 * 22];
-    for i in range(0, 9){
-        c(i) = a(i);
-    }
-    for i in range(0, 12){
-        c(i + 9) = b(i)
-    }
-    c(21) = '\0';
-    c
-}
-fn strcat_9_4(a: &[u8], b: &[u8]) -> [u8 * 14]{
-    let mut c: [u8 * 14];
-    for i in range(0, 9){
-        c(i) = a(i);
-    }
-    for i in range(0, 13){
-        c(i + 9) = b(i)
-    }
-    c(13) = '\0';
-    c
-}
-fn strcat_13_12(a: &[u8], b: &[u8]) -> [u8 * 26]{
-    let mut c: [u8 * 26];
-    for i in range(0, 13){
-        c(i) = a(i);
-    }
-    for i in range(0, 12){
-        c(i + 13) = b(i);
-    }
-    c(25) = '\0';
-    c
-}
 struct File_path{
-    bvh: [u8 * 22],
+    bvh: [u8 * 99],
 //tri mesh
-    vertices: [u8 * 26], 
-    normals:  [u8 * 26], 
-    face_normals: [u8 * 26],
-    texcoords: [u8 * 26], 
-    indices: [u8 * 22],
+    vertices: [u8 * 99], 
+    normals:  [u8 * 99], 
+    face_normals: [u8 * 99],
+    texcoords: [u8 * 99], 
+    indices: [u8 * 99],
 //light
-    light_ids: [u8 * 22],
-    light_verts: [u8 * 22], 
-    light_areas: [u8 * 22], 
-    light_norms: [u8 * 22], 
-    light_colors: [u8 * 22],
+    light_ids: [u8 * 99],
+    light_verts: [u8 * 99], 
+    light_areas: [u8 * 99], 
+    light_norms: [u8 * 99], 
+    light_colors: [u8 * 99],
 //material    
-    simple_kd: [u8 * 26], 
-    simple_ks: [u8 * 26],
-    simple_ns: [u8 * 22]
+    simple_kd: [u8 * 99], 
+    simple_ks: [u8 * 99],
+    simple_ns: [u8 * 99]
 }
-fn make_file_path(dev_type: i32, chunk_id: i32) -> File_path {
-    let data = "data/";
+fn make_file_path(dev_type: i32, chunk_rank: i32/*, chunk_size: i32*/) -> File_path {
+    let data = "data/\0";
+
     let mut dev: [u8 * 5];
-    let mut bvh:[u8 * 13];
+    let mut bvh: [u8 * 13];
     if dev_type == 0 {
         bvh = "bvh_nvvm.bin";
         dev = "gpu/";
     } else {
         if dev_type == 1 {
-            bvh = "bvh_avx_.bin";
+            bvh = "bvh_avx.bin\0";
         } else {
-            bvh = "bvh_sse_.bin";
+            bvh = "bvh_sse.bin\0";
         }
         dev = "cpu/";
     }
     
-    let data_chunk     = strcat_5_4(data, int_to_string(chunk_id));
-    let data_dev       = strcat_5_4(data, dev);
-    let data_chunk_dev = strcat_9_4(data_chunk, dev);
-
-    let vertices      = "tri_vert.bin";
-    let normals       = "tri_norm.bin";
-    let face_normals  = "face_nor.bin";
-    let texcoords     = "text_cod.bin";
-    let indices       = "tri_indx.bin";
-    let light_ids     = "ligt_ids.bin";
-    
-    let light_verts   = "ligt_ver.bin";
-    let light_areas   = "ligt_are.bin";
-    let light_normals = "ligt_nor.bin";
-    let light_colors  = "ligt_col.bin";
-    let simple_kd     = "simpl_kd.bin";
-    let simple_ks     = "simpl_ks.bin";
-    let simple_ns     = "simpl_ns.bin";
+    let data_chunk     = strcat(data, int_to_string(chunk_rank));
+    let data_dev       = strcat(data, dev);
+    let data_chunk_dev = strcat(data_chunk, dev);
     
     File_path{
-        bvh: strcat_9_12(data_chunk, bvh), 
-        vertices: strcat_13_12(data_chunk_dev, vertices),
-        normals: strcat_13_12(data_chunk_dev, normals), 
-        face_normals: strcat_13_12(data_chunk_dev, face_normals),
-        texcoords: strcat_13_12(data_chunk_dev, texcoords), 
+        bvh:          strcat(data_chunk, bvh), 
+        vertices:     strcat(data_chunk_dev, "vertices.bin"),
+        normals:      strcat(data_chunk_dev, "normals.bin"), 
+        face_normals: strcat(data_chunk_dev, "face_normals.bin"),
+        texcoords:    strcat(data_chunk_dev, "textcoords.bin"), 
 
-        indices: strcat_9_12(data_chunk, indices),
-        light_ids: strcat_9_12(data_chunk, light_ids),
+        indices:      strcat(data_chunk, "indices.bin"),
+        light_ids:    strcat(data_chunk, "light_ids.bin"),
         
-        light_verts: strcat_9_12(data_dev, light_verts), 
-        light_areas: strcat_9_12(data_dev, light_areas),
-        light_norms: strcat_9_12(data_dev, light_normals),
-        light_colors: strcat_9_12(data_dev, light_colors),
+        light_verts:  strcat(data_dev, "light_verts.bin"), 
+        light_areas:  strcat(data_dev, "light_areas.bin"),
+        light_norms:  strcat(data_dev, "light_normals.bin"),
+        light_colors: strcat(data_dev, "light_colors.bin"),
      
-        simple_kd: strcat_13_12(data_chunk_dev, simple_kd),
-        simple_ks: strcat_13_12(data_chunk_dev, simple_ks),
-        simple_ns: strcat_9_12(data_chunk, simple_ns)
+        simple_kd:    strcat(data_chunk_dev, "simple_kd.bin"),
+        simple_ks:    strcat(data_chunk_dev, "simple_ks.bin"),
+        simple_ns:    strcat(data_chunk, "simple_ns.bin")
     }
 }
+
