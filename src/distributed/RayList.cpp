@@ -3,6 +3,27 @@
 #include <fstream>
 #include <iostream>
 
+
+inline size_t physical_memory_used_by_process() {
+    FILE* file = fopen("/proc/self/status", "r");
+    int result = -1;
+    char line[128];
+
+    while (fgets(line, 128, file) != nullptr) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            int len = strlen(line);
+            const char* p = line;
+            for (; std::isdigit(*p) == false; ++p) {}
+            line[len - 3] = 0;
+            result = atoi(p);
+            break;
+        }
+    }
+    fclose(file);
+    return result;
+}
+
+
 inline int set_ray_mask(bool *mask, int width, bool compact) {
     
     for(int i = 0; i < width; i++ ) {
@@ -22,14 +43,18 @@ inline int set_ray_mask(bool *mask, int width, bool compact) {
     } 
 }
 
-Rays::Rays(int capacity, int width, bool compact) 
-    : capacity(capacity), logic_width(width), compact(compact) 
+void Rays::resize(int cap, int width, bool comp) 
 {
-    mask = new bool[width];
+    capacity = cap;
+    compact = comp;
+    
+    logic_width = width;
     store_width = set_ray_mask(mask, width, compact);
     
-    data.reserve(4 * capacity * store_width);
+        size_t memory = physical_memory_used_by_process();
     data.resize(capacity * store_width);
+        printf("1new rays resize cap %d %ld kb %ld mb, data.size %ld, capacity %ld\n", capacity, memory, memory / 1024, data.size(), data.capacity());
+
     size = 0;
 }
 
@@ -39,9 +64,10 @@ Rays::Rays(float * ptr, int capacity, int width, int copy_size)
 {
     compact = false;
     logic_width = store_width = width;
-    mask = new bool[width];
     set_ray_mask(mask, width, false);
+        size_t memory = physical_memory_used_by_process();
     data.resize(capacity * store_width);
+        printf("2new rays resize cap %d %ld kb %ld mb\n", capacity, memory, memory / 1024);
     
     // mask used as ptr mask not this 
     bool *ptr_mask = new bool[width];
@@ -67,28 +93,36 @@ Rays::Rays(float * ptr, int capacity, int width, int copy_size)
 }
 
 int Rays::check_capacity(int num) {
-//    printf("check size %d num %d capacity %d data size %d data capacity%ld\n", size, num, capacity, data.size(), data.capacity());
+    printf("check size %d num %d capacity %d data size %ld data capacity%ld\n", size, num, capacity, data.size(), data.capacity());
     if(num + size >= capacity) {
-//        printf("put resize %ld capacity%ld %ld\n", data.size(), data.capacity(), data.data());
+        //return 0;
+
+
+        size_t memory = physical_memory_used_by_process();
+        printf("rays resize %ld kb %ld mb\n", memory, memory / 1024);
+        printf("put resize %ld capacity%ld\n", data.size(), data.capacity());
         capacity += std::max(num, 1048608);
         data.resize(capacity * store_width);
+        printf("after put resize %ld capacity%ld\n", data.size(), data.capacity());
+        printf("after rays resize %ld kb %ld mb\n", memory, memory / 1024);
 //        printf("end put resize %ld capacity%ld %ld\n", data.size(), data.capacity(), data.data());
     }
     return capacity;
 }
 
 void Rays::read_device_buffer(float *rays, int src, int num, int rays_capacity, int rank) {
-    check_capacity(num);
+//    printf("read device buffer %d, ray capacity %d num %d\n", rank, num, rays_capacity);
     int* iptr = (int *) data.data();
     for(int i = 0; i < num; i++) {
-        for(int k = 0, j = 0; j < logic_width; j++) {
+        int k = 0;
+        for(int j = 0; j < logic_width; j++) {
             if(mask[j]) {
+                //printf("| %d %d %d %d", rank, (size + i) * store_width + k, (src + i) * logic_width + j, data.size(), num);
                 data[(size + i) * store_width + k]  = rays[(src + i) * logic_width + j];
                 k++; 
             }
         }
     }
-    
 
 //    for(int i = 0, k = 0; i < logic_width; i++) {
 //        if(mask[i]) {
@@ -126,8 +160,10 @@ int Rays::write_to_device_buffer(Rays * buffer, int buffer_size, int rays_capaci
 
 
 void Rays::read_from_rays(struct Rays* a, int st){
-//    printf("write to rays ptr\n");
-    check_capacity(1);
+    printf("read from rays ptr\n");
+    if(check_capacity(1)==0) return;
+    
+
     if(a->store_width != store_width) printf("width not match");
     for(int i = 0; i < store_width; i++){
         data[size * store_width + i] = a->data[st * store_width + i];
@@ -137,7 +173,8 @@ void Rays::read_from_rays(struct Rays* a, int st){
 
 void Rays::read_from_ptr(char *src_ptr, int copy_size) {
     printf("read frome ptr\n");
-    check_capacity(copy_size);
+    if(check_capacity(copy_size)==0) return;
+
     char* dst_ptr = (char*)get_data() + size * store_width * sizeof(float);
     int copy_length = copy_size * store_width * sizeof(float);
     memcpy(dst_ptr, src_ptr, copy_length);
@@ -165,27 +202,40 @@ inline void swap(float **a, float **b) {
     *a = *b;
     *b = *tmp;
 }
-
-void RayList::read_from_device_buffer(RayList ** raylist, float *out_buffer,  size_t size, size_t capacity, bool primary, int rank) {
+double RayList::time = 0;
+void RayList::read_from_device_buffer(RayList * raylist, float *out_buffer,  size_t size, size_t capacity, bool primary, int rank, int chunk_size) {
     int width       = primary ? 21 : 14;
     int* chunkIds   = (int*)(out_buffer);
 
     int st = 0, num = 0; 
     int tmp = chunkIds[9] >> 12;
+    printf("read frome divice buffer %ld\n", size);
+    auto ticks = std::chrono::high_resolution_clock::now();
+    for(int i = 0; i < chunk_size; i++) { 
+        if(raylist[i].primary.check_capacity(size) == 0) return;
+        if(raylist[i].secondary.check_capacity(size) == 0) return;
+    }
+
+
     for(int i = 0; i < size; i++) {
         int chunk = chunkIds[i * width + 9] >> 12;
         if(chunk == tmp) {
             num ++;
         } else {
-            Rays *list = primary ? raylist[tmp]->primary : raylist[tmp]->secondary;
-            list->read_device_buffer(out_buffer, st, num, capacity, rank); 
+            Rays &ray = primary ? raylist[tmp].primary : raylist[tmp].secondary;
+            //printf("before list read st %d num %d capacity %d dst chunk %d rank %d\n", st, num, capacity, tmp, rank);
+            ray.read_device_buffer(out_buffer, st, num, capacity, rank);
             tmp = chunk;
             st = i; 
             num = 1; 
         }
     }
-    Rays *list = primary ? raylist[tmp]->primary : raylist[tmp]->secondary;
-    list->read_device_buffer(out_buffer, st, num, capacity, rank); 
+    Rays &ray = primary ? raylist[tmp].primary : raylist[tmp].secondary;
+    ray.read_device_buffer(out_buffer, st, num, capacity, rank); 
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
+    
+    time += elapsed_ms; 
+    printf("read device time cost %lf ms", time);
 }
 
 void RayList::write_to_device_buffer(RayList *buffer, int rank) {
@@ -194,11 +244,11 @@ void RayList::write_to_device_buffer(RayList *buffer, int rank) {
     printf("write to device buffer\n");
     os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
     os<<"write to device buffer\n"; 
-    if(buffer->primary->empty() && !get_primary()->empty()) {
-        primary->write_to_device_buffer(buffer->primary, buffer->logic_capacity, buffer->store_capacity, rank, true);
+    if(buffer->primary.empty() && !get_primary().empty()) {
+        primary.write_to_device_buffer(&(buffer->primary), buffer->logic_capacity, buffer->store_capacity, rank, true);
     }
-    if(buffer->secondary->empty() && !get_secondary()->empty()) {
-        secondary->write_to_device_buffer(buffer->secondary, buffer->logic_capacity, buffer->store_capacity, rank, false);
+    if(buffer->secondary.empty() && !get_secondary().empty()) {
+        secondary.write_to_device_buffer(&(buffer->secondary), buffer->logic_capacity, buffer->store_capacity, rank, false);
     }
     os<<"end write to device buffer\n"; 
 }
@@ -208,45 +258,45 @@ void RayList::read_from_message(char* src_ptr, int msg_primary_size, int msg_sec
     os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
     printf("read from message\n");
     os<<"read from message\n"; 
-    if(msg_primary_size > 0 ) {
-        if(primary->size + msg_primary_size > primary->capacity){
-            os<<" read from message resize primary size"<<primary->size<<" "<<msg_primary_size<<" "<<primary->capacity<<"\n"; 
-        }
-        
-        primary->read_from_ptr(src_ptr, msg_primary_size); 
-        src_ptr += msg_primary_size * primary->store_width * sizeof(float); 
-    } 
-    if(msg_secondary_size > 0) {
-        if(secondary->size + msg_secondary_size > secondary->capacity){
-            os<<" read from message resize secondary size"<<secondary->size<<" "<<msg_secondary_size<<" "<<secondary->capacity<<"\n"; 
-        }
-        secondary->read_from_ptr(src_ptr, msg_secondary_size); 
-    }
-    os<<"end read from message\n"; 
+//    if(msg_primary_size > 0 ) {
+//        if(primary->size + msg_primary_size > primary->capacity){
+//            os<<" read from message resize primary size"<<primary->size<<" "<<msg_primary_size<<" "<<primary->capacity<<"\n"; 
+//        }
+//        
+//        primary->read_from_ptr(src_ptr, msg_primary_size); 
+//        src_ptr += msg_primary_size * primary->store_width * sizeof(float); 
+//    } 
+//    if(msg_secondary_size > 0) {
+//        if(secondary->size + msg_secondary_size > secondary->capacity){
+//            os<<" read from message resize secondary size"<<secondary->size<<" "<<msg_secondary_size<<" "<<secondary->capacity<<"\n"; 
+//        }
+//        secondary->read_from_ptr(src_ptr, msg_secondary_size); 
+//    }
+//    os<<"end read from message\n"; 
 }
 
-void RayList::read_from_message(RayList** rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {
+void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {
     std::ofstream os; 
     os.open("out/proc_buffer_master", std::ios::out | std::ios::app ); 
-    os<<"master read from message\n"; 
+    os<<"master read from message: all primary size "<<msg_primary_size<<" secondary "<<msg_secondary_size<<"\n"; 
     
     int* id_ptr = (int*) ptr;
-    int width = rayList[0]->get_primary()->store_width;
+    int width = rayList[0].get_primary().store_width;
     int st = 0, ed = 0; 
     int tmp = id_ptr[9] >> 12;
-    while(ed < msg_primary_size) {
+    while(ed < msg_primary_size - 1) {
         ed ++;
         int chunk = id_ptr[ed * width + 9] >> 12;
         if( chunk != tmp || ed == msg_primary_size - 1) {
-            os<<"copy st "<<st<<" ed "<<ed<<"chunk "<<chunk<<" tmp "<<tmp<<"\n"; 
-            rayList[tmp]->get_primary()->read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
+            os<<"copy st "<<st<<" ed "<<ed<<" ed*width+9 "<<id_ptr[ed * width + 9]<<" chunk "<<chunk<<" tmp "<<tmp<<"\n"; 
+            rayList[tmp].get_primary().read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
             tmp = chunk;
             st = ed; 
-        } 
+        }
     } 
     os<<"secondary \n"; 
     ptr = ptr + msg_primary_size * width * sizeof(float); 
-    width = rayList[0]->get_secondary()->store_width;
+    width = rayList[0].get_secondary().store_width;
     id_ptr = (int*) ptr;
     st = 0; ed = 0; 
     tmp = id_ptr[9] >> 12;
@@ -255,7 +305,7 @@ void RayList::read_from_message(RayList** rayList, char* ptr, int msg_primary_si
         int chunk = id_ptr[ed * width + 9] >> 12;
         if( chunk != tmp || ed == msg_secondary_size - 1) {
             os<<"copy st "<<st<<" ed "<<ed<<"chunk "<<chunk<<" tmp "<<tmp<<"\n"; 
-            rayList[tmp]->get_secondary()->read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
+            rayList[tmp].get_secondary().read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
             tmp = chunk;
             st = ed; 
         } 
@@ -271,17 +321,17 @@ void RayList::classification(RayList ** raylist, Rays *raybuffer) {
     if( raybuffer->logic_width == 21) {
         for(int i = 0; i < recv_size; i++) {
             int chunk = bufferdata[i * width + 9]  >> 12;
-            raylist[chunk]->primary->read_from_rays(raybuffer, i);
-            if(raylist[chunk]->primary->full()){
-                printf("error data is is full %d %d \n", chunk, raylist[chunk]->primary->get_size());   
+            raylist[chunk]->primary.read_from_rays(raybuffer, i);
+            if(raylist[chunk]->primary.full()){
+                printf("error data is is full %d %d \n", chunk, raylist[chunk]->primary.get_size());   
             }
         }
     } else {
         for(int i = 0; i < recv_size; i++){
             int chunk = bufferdata[i * width + 9]  >> 12;
-            raylist[chunk]->secondary->read_from_rays(raybuffer, i);
-            if(raylist[chunk]->secondary->full()){
-                printf("error data is is full %d %d \n", chunk, raylist[chunk]->secondary->get_size());   
+            raylist[chunk]->secondary.read_from_rays(raybuffer, i);
+            if(raylist[chunk]->secondary.full()){
+                printf("error data is is full %d %d \n", chunk, raylist[chunk]->secondary.get_size());   
             }
         }
     }
@@ -295,16 +345,18 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
     os<<"read from message\n"; 
 
     int copy_size = std::min(logic_capacity, msg_primary_size);
+    os<<"copy size "<<copy_size<<" logic capacity "<<logic_capacity<<" msg primary "<<msg_primary_size<<"\n";
     float *ptr = (float*)src_ptr;
      
     while(copy_size > 0) {
         Rays * rays   = new struct Rays(ptr, store_capacity, 21, copy_size);
         
+        int width = RAY_COMPACT ? 16 : 21; 
 
         int * ids = (int*)ptr;
         os<<"primary copy size "<<copy_size<<"\n"<<" ptr ray";
         for(int i = 0; i < std::min(copy_size, 5); i ++) {
-            os<<"| "<< ids[i * 16] <<" "<< ids[i * 16 + 9] << " ";
+            os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
         } os<<"\n ";
 
         ids = (int*)(rays->get_data());
@@ -315,7 +367,6 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
 
 
         msg_primary_size -= copy_size; 
-        int width = RAY_COMPACT ? 16 : 21; 
         ptr += copy_size * width; 
         primary.emplace_back(rays);
         

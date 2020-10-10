@@ -7,13 +7,13 @@
 class ProcStatus {
 private:
     //thread 
-    std::vector<bool> thread_idle;
+    bool *thread_idle;
     int cpu_thread_num;
     int dev_num;
 
     //domain settings
     int chunk_size, local_chunk;
-    std::vector<int>  chunk_map;
+    int *chunk_map;
 
     //decomposition
 
@@ -32,7 +32,7 @@ public:
     
     void unlock(){mutex.unlock();}
     
-    int* get_chunk_map(){return chunk_map.data();}
+    int* get_chunk_map(){return chunk_map;}
     
     int get_chunk_size(){return chunk_size;}
 
@@ -76,9 +76,7 @@ public:
     }
   
     void thread_reset() {
-        cpu_thread_num = 1;//std::thread::hardware_concurrency();
         printf("\ncpu thread num %d\n", cpu_thread_num);
-        thread_idle.resize(cpu_thread_num);
         for(int i = 0; i < cpu_thread_num; i++) 
             thread_idle[i] = false;
     }
@@ -94,7 +92,6 @@ public:
 
     bool all_proc_idle(){
         for(int i = 0; i < size; i++){
-            std::cout<<proc_idle[i]<<" ";
             if(!proc_idle[i]) 
                 return false;
         } 
@@ -115,7 +112,7 @@ public:
             sent += global_rays[i];
             recv += global_rays[i + size];
         }
-        printf("check %d %d\n", sent, recv);
+        printf("check $$ %d %d\n", sent, recv);
         if (sent <= recv )
             return true;
         else 
@@ -192,10 +189,10 @@ public:
     }
     
     ~ProcStatus(){
-        chunk_map.clear();
+        delete[] thread_idle;
+        delete[] chunk_map;
         proc_idle.clear();
         global_rays.clear();
-        thread_idle.clear();
 
         printf("procstatus delete\n");
     }
@@ -204,24 +201,17 @@ public:
         : rank(comm_rank), size(comm_size), chunk_size(cSize), dev_num(dev)
     {
         
-        printf("before tile scheduler\n");
-        
-        
-        printf("after tile scheduler\n");
+        cpu_thread_num = 1;//std::thread::hardware_concurrency();
+        thread_idle = new bool[cpu_thread_num];
         thread_reset(); 
+        
         proc_reset();
          
-        printf("after tile scheduler\n");
         exit = false;
       
         //inital chunk map  
-        chunk_map.resize(chunk_size);
+        chunk_map = new int[chunk_size];
         // 
-        
-        for(int i = 0; i < chunk_size; i++) {
-            printf(" %d", chunk_map[i]);
-        }
-        //
         buffer_size = 1024 * 1024 / cpu_thread_num;
         buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
         

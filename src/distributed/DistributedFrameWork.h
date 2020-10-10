@@ -49,13 +49,15 @@ static void save_image(float *result, const std::string& out_file, size_t width,
 
 struct DistributedFrameWork {
     Node *node;
+    Communicator *comm;
+    ProcStatus *ps;
 
     std::string type;
     
     DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
     {
-        Communicator * comm = new Communicator();
-        ProcStatus * ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
+        comm = new Communicator();
+        ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
         // mpi
         if(type == "P2PNode") {
             node = new P2PNode(comm, ps);
@@ -70,11 +72,34 @@ struct DistributedFrameWork {
 
     ~DistributedFrameWork() {
         printf("delete distributed frame work\n");
+        delete node;
+        delete ps;
+        delete comm;
     }
     
     void run(ImageDecomposition *camera) {
         printf("dis frame worker run\n");
         
+        /*block size equels proc size*/
+        if(type == "P2PNode") {
+            camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size); 
+        } else if(type == "MWNode") {
+            camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size);
+        } else if(type == "AllCopy") {
+            int block_count = comm->size * 2;
+            camera->decomposition(ps->get_chunk_map(), block_count, comm->rank, comm->size);
+        } else {
+            error("Unknown node type");
+        }
+        
+        printf("chunk map \n"); 
+        for(int i = 0; i < ps->get_chunk_size(); i++) {
+            printf("| %d", ps->get_chunk_map()[i]);
+        }
+        printf("\n");
+        
+        ps->updata_local_chunk();
+
         node->run(camera);
         
     }

@@ -15,8 +15,8 @@
 inline void splat(size_t n, float* grid, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
-    
-    int axit = 1;
+
+    int axit = 0;
     int cur_n = n;
     //choose longest axit splat
     while(cur_n != 1){
@@ -48,7 +48,7 @@ struct MeshChunk{
     
     MeshChunk() {
         bbox  = BBox(get_bbox());
-        scale = float3(get_grid());
+        scale = float3(get_chunk());
         chunk_division();
         size = get_chunk_num();
     }
@@ -92,6 +92,33 @@ struct MeshChunk{
     }
 };
 
+  
+static void write_project_result(int width, int height, int* domain) {
+    ImageRgba32 img;
+    img.width = width;
+    img.height = height;
+    img.pixels.reset(new uint8_t[width * height * 4]);
+
+    float3 color[] = { float3(0, 60, 0), float3(120, 0, 0), float3(180, 0, 0),
+                       float3(0, 60, 0), float3(0, 120, 0), float3(0, 180, 0),
+                       float3(0, 0, 60), float3(0, 0, 120), float3(0, 0, 180)};
+
+    for (size_t y = 0; y < height; ++y) {
+        for (size_t x = 0; x < width; ++x) {
+            if(domain[y * width + x] != -1) {
+                int c = domain[y * width + x];
+                img.pixels[4 * (y * width + x) + 0] = color[c].x;
+                img.pixels[4 * (y * width + x) + 1] = color[c].y;
+                img.pixels[4 * (y * width + x) + 2] = color[c].z;
+                img.pixels[4 * (y * width + x) + 3] = 255;
+            }
+        }
+    }
+    std::string out = "chunk.png";
+//    if (!save_png(out, img))
+//        error("Failed to save PNG file\n");
+}
+
 struct ImageBlock {
     union {
         struct { int xmin, ymin, xmax, ymax; };
@@ -115,7 +142,6 @@ struct ImageDecomposition {
     
     int width, height, spp, proc_spp;
     int block_count; 
-    bool wait; //block waiting to be process 
     
     //multi process load same chunk. 
     ImageBlock render_block, chunk_project_block; 
@@ -128,7 +154,10 @@ struct ImageDecomposition {
     std::vector<float> depth;
     std::vector<ImageBlock> blockList;
 
-    ImageDecomposition(){}
+    ImageDecomposition(){
+        width = 0;
+        height = 0;
+    }
 
     float3 project_point_to_image(float3 p) {
           //  let d = vec3_normalize(math, vec3_sub(p, eye));
@@ -137,31 +166,6 @@ struct ImageDecomposition {
         float3 res(dot(d, right) / w_sin, dot(d, up) / h_sin, dot(dir, (p - eye))); 
         printf("d %f %f %f p %f %f %f p2 %f %f %f\n", d.x, d.y, d.z, p.x, p.y, p.z, res.x, res.y, res.z); 
         return res ;
-    }
-  
-    void write_project_result() {
-        ImageRgba32 img;
-        img.width = width;
-        img.height = height;
-        img.pixels.reset(new uint8_t[width * height * 4]);
-        float3 color[] = { float3(0, 60, 0), float3(120, 0, 0), float3(180, 0, 0),
-                           float3(0, 60, 0), float3(0, 120, 0), float3(0, 180, 0),
-                           float3(0, 0, 60), float3(0, 0, 120), float3(0, 0, 180)};
-
-        for (size_t y = 0; y < height; ++y) {
-            for (size_t x = 0; x < width; ++x) {
-                if(domain[y * width + x] != -1) {
-                    int c = domain[y * width + x];
-                    img.pixels[4 * (y * width + x) + 0] = color[c].x;
-                    img.pixels[4 * (y * width + x) + 1] = color[c].y;
-                    img.pixels[4 * (y * width + x) + 2] = color[c].z;
-                    img.pixels[4 * (y * width + x) + 3] = 255;
-                }
-            }
-        }
-        std::string out = "chunk.png";
-        if (!save_png(out, img))
-            error("Failed to save PNG file\n");
     }
 
     ImageBlock project_cube_to_image(BBox box, int chunk, bool Record) {
@@ -292,8 +296,7 @@ struct ImageDecomposition {
             }
         }
         printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
-        write_project_result(); 
-        wait = false;
+        //write_project_result(width, height, domain.data()); 
     }
     
     void image_decomposition(ImageBlock image, int proc_rank, int proc_size) {
@@ -326,8 +329,7 @@ struct ImageDecomposition {
         }
         render_block = blockList[proc_rank]; 
         printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
-        write_project_result(); 
-        wait = false;
+        //write_project_result(width, height, domain.data()); 
     }
 
     void decomposition(int* chunk_map, int block, int rank, int size) {
@@ -371,12 +373,9 @@ struct ImageDecomposition {
     
     void set_render_block(int i) { 
         render_block = blockList[i]; 
-        wait = true ;
     }
 
     size_t get_block_count() { return block_count; }
-    
-    bool block_waiting() { return wait; }
     
     int get_spp() { return spp; }
 

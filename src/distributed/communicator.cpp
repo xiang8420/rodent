@@ -14,7 +14,7 @@ Communicator::Communicator() {
     }
     
     printf("comm rank %d \n", rank);
-    os = std::ofstream("out/proc_" + std::to_string(rank));
+    os     = std::ofstream("out/proc_" + std::to_string(rank));
     send_ray_count = 0; recv_ray_count = 0;
     send_msg_count = 0; recv_msg_count = 0;
 }
@@ -71,10 +71,10 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 	// My rank relative to the broadcast root
 	int d = ((size + rank) - root) % size;
     
-    os << "mthread root " << root<< " rank " << rank <<" 2*d + 1 "<<2*d+1<< std::endl;
+//    os << "mthread root " << root<< " rank " << rank <<" 2*d + 1 "<<2*d+1<< std::endl;
 	// Only export if its either P2P or broadcast and this isn't a leaf
 	if (m->is_broadcast() && (2*d + 1) >= size) {
-        os << "mthread root | " << root<< " rank " << rank <<" 2*d + 1 "<<2*d+1<< std::endl;
+//        os << "mthread root | " << root<< " rank " << rank <<" 2*d + 1 "<<2*d+1<< std::endl;
         return 0;
     }
 
@@ -89,28 +89,31 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     msb->total_size = m->get_header_size() + (m->has_content() ? m->get_size() : 0);
     msb->send_buffer = (char *)malloc(msb->total_size);
     memcpy(msb->send_buffer, m->get_header(), m->get_header_size());
-    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size()<<"broadcast"<<m->is_broadcast()<<std::endl;
+//    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size()<<"broadcast"<<m->is_broadcast()<<std::endl;
     if (m->has_content())
         memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_size());
      
     if (m->is_broadcast()) {
-        os<<"mthread broadcast\n";
+//        os<<"mthread broadcast\n";
         int l = (2 * d) + 1;
 		int destination = (root + l) % size;
 		MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->lrq);
+        os <<"m>"<<destination<<" "<< m->get_tag() <<"\n";
 		k++;
 
 		if ((l + 1) < size)
 		{
-		    os<<"mthread export to l + 1 "<<l + 1<<" tag "<<tag<<"\n";	
+//		    os<<"mthread export to l + 1 "<<l + 1<<" tag "<<tag<<"\n";	
             destination = (root + l + 1) % size;
 		    MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, destination, tag, MPI_COMM_WORLD, &msb->rrq);
+            os <<"m>"<<destination<<" "<< m->get_tag() <<"\n";
 			k++;
 		}
         send_msg_count+=k;	
     } else {
-        os<< "mthread send msg " << m->get_ray_size() <<"to "<<m->get_destination()<<" tag "<<tag<< std::endl;
+//        os<< "mthread send msg " << m->get_ray_size() <<"to "<<m->get_destination()<<" tag "<<tag<< std::endl;
         MPI_Isend(msb->send_buffer, msb->total_size, MPI_CHAR, m->get_destination(), tag, MPI_COMM_WORLD, &msb->lrq);
+        os <<"m>"<<m->get_destination()<<" "<< m->get_tag() <<"\n";
         k++;
 	    send_ray_count++;
     }
@@ -121,7 +124,7 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     return k;
 }
 
-bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStatus *ps) {
+bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatus *ps) {
     int recv_ready;
     MPI_Status status;
     MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &recv_ready, &status);
@@ -129,14 +132,17 @@ bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStat
     if (recv_ready) {
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
-        os<<"mthread recv msg "<<count<<"\n ";
+//        os<<"mthread recv msg "<<count<<"\n ";
         printf("%d before recv rays\n", rank);
         Message *recv_msg = new RecvMsg(List, inList, ps->get_local_chunk(), status, MPI_COMM_WORLD); 
-        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" size "<<recv_msg->get_ray_size() 
-            <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
+        os<<"m<"<<status.MPI_SOURCE/*recv_msg->get_sender()*/<<" "<<recv_msg->get_tag() <<"\n";
+//        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" tag "<<recv_msg->get_tag()<<" size "<<recv_msg->get_ray_size() 
+//            <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
+//        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" size "<<recv_msg->get_ray_size() 
+//            <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
         
         if (recv_msg->is_broadcast()) {
-            os << "mthread recv broadcast\n";
+//            os << "mthread recv broadcast\n";
             Export(recv_msg, ps); 
         }
        // os << "mthread switch msg type "<<recv_msg->get_type()<<"\n";
@@ -153,23 +159,23 @@ bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStat
                     if(isMaster()) 
                         printf("master recv status\n");
                     int sender = std::max(recv_msg->get_sender(), recv_msg->get_root()); 
-                        os << "mthread| recv status set proc " <<sender << "idle \n";
+//                        os << "mthread| recv status set proc " <<sender << "idle \n";
                     int * tmp = ps->get_status();
-                        os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
-                    if(List[recv_msg->get_chunk()]->empty())
+//                        os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
+                    if(List[recv_msg->get_chunk()].empty())
                         ps->set_proc_idle(sender);
                     
                     bool res = ps->update_global_rays((int*)recv_msg->get_content());
                     int *s = ps->get_status();
                     printf("recv status %d %d %d %d\n", s[0], s[1], s[2], s[3]);
-                    os<< "update all rays received "<< s[0] <<" "<< s[1] <<" "<<s[2]<<" "<<s[3]<<"\n";
+//                    os<< "update all rays received "<< s[0] <<" "<< s[1] <<" "<<s[2]<<" "<<s[3]<<"\n";
                     return true;
                 } 
             case Ray: 
                 {
                     if(isMaster()) 
                         printf("master recv ray\n");
-                    os << "mthread| ray recv \n";
+//                    os << "mthread| ray recv \n";
                     
                     ps->accumulate_recv(recv_msg->get_ray_size());
                     //set itself busy
@@ -181,19 +187,19 @@ bool Communicator::recv_message(RayList** List, RayStreamList * inList, ProcStat
                 {
                 //    ps->set_exit();
                    // //if this proc need new chunk
-                    os<<"recv schedule\n";
+//                    os<<"recv schedule\n";
                     int * a = ps->get_chunk_map();
-                    os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
+//                    os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                     if(ps->update_chunk((int*)recv_msg->get_content())) {
                         for(int i = 0; i < ps->get_chunk_size(); i++) {
-                            List[i]->type = "out"; 
+                            List[i].type = "out"; 
                         }
-                        List[ps->get_local_chunk()]->type = "in";
-                        os<<"mthread new chun k" << ps->get_local_chunk()<<"\n";
+                        List[ps->get_local_chunk()].type = "in";
+//                        os<<"mthread new chun k" << ps->get_local_chunk()<<"\n";
                         int * s = (int*)recv_msg->get_content();
-                        os<<s[0]<<" "<<s[1]<<" "<<s[2]<<" "<<s[3]<<"\n";
+//                        os<<s[0]<<" "<<s[1]<<" "<<s[2]<<" "<<s[3]<<"\n";
                         int * a = ps->get_chunk_map();
-                        os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
+//                        os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                         printf("mthread new chunk %d\n", ps->get_local_chunk());
                         
                     //    Message *recv_ray_msg = new RecvMsg(List, status, MPI_COMM_WORLD); 
@@ -226,12 +232,12 @@ void Communicator::send_message(Message *message, ProcStatus *rs) {
     //serialize
     
     //current process is not destination or broadcast, send to destination 
-    os <<"mthread| send message"<<message->get_destination() <<"\n";
-    os<< "mthread send message: size "<<message->get_size()<<" broadcast "<<message->is_broadcast()<<std::endl;
+//    os <<"mthread| send message to "<<message->get_destination() <<" tag "<< message->get_tag() <<"\n";
+//    os<< "mthread send message: size "<<message->get_size()<<" broadcast "<<message->is_broadcast()<<std::endl;
     if (message->is_broadcast() || (message->get_destination() != rank))
         Export(message, rs);
 
-    os << "mthread| after send message\n";    
+//    os << "mthread| after send message\n";    
     if (message->is_broadcast()) {
         if (message->is_collective()) {
             rs->set_exit();

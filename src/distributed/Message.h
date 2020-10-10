@@ -9,6 +9,7 @@ enum MsgType {Status, Ray, Schedule, Quit};
 struct MessageHeader {
     int      root;                   // will be -1 for point-to-point
     int      sender;                 // will be -1 for broadcast
+    int      tag;
     MsgType  type; //0 status, 1 rays , 2 quit
     int      content_size;
     int      primary, secondary;    
@@ -19,8 +20,8 @@ struct MessageHeader {
 
     MessageHeader(){}
 
-    MessageHeader(int root, int sender, MsgType type, bool collective, int size, bool idle, int chunk) 
-        : root(root), sender(sender), type(type), collective(collective), content_size(size), idle(idle), chunk(chunk)
+    MessageHeader(int root, int sender, MsgType type, bool collective, int size, bool idle, int chunk, int tag) 
+        : root(root), sender(sender), type(type), collective(collective), content_size(size), idle(idle), chunk(chunk), tag(tag)
     {
        primary   = 0; 
        secondary = 0; 
@@ -57,6 +58,8 @@ public:
         cond.notify_one();
 	    mutex.unlock();
     }
+
+    int get_tag() {return header->tag;}
 
     bool exit_msg() {return header->type == 2; }
     bool ray_msg() {return header->type == 1; }
@@ -122,32 +125,31 @@ public:
 class RayMsg : public Message{
 
 public:
-    RayMsg(RayList* outList, int src, int dst, int chunk, bool idle);
-    RayMsg(RayList** List, int src, int dst, int chunk_size, bool idle);
+    RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag);
+    RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int tag);
 };
 
 class RecvMsg : public Message {
 
 public:
     RecvMsg(MPI_Status &status, MPI_Comm comm);
-    
-    RecvMsg(RayList** List, RayStreamList* inList, int local_chunk, MPI_Status &status, MPI_Comm comm); 
+    RecvMsg(RayList* List, RayStreamList* inList, int local_chunk, MPI_Status &status, MPI_Comm comm); 
 };
 
 class QuitMsg : public Message {
 
 public:
-    QuitMsg(int src);
+    QuitMsg(int src, int tag);
 };
 
 class StatusMsg : public Message {
 
 public:
-    StatusMsg(int , int, int* , int, int);
+    StatusMsg(int , int, int* , int, int, int);
 };
 
 class ScheduleMsg : public Message {
 
 public:
-    ScheduleMsg(int , int*, int, int);
+    ScheduleMsg(int , int*, int, int, int);
 };

@@ -32,26 +32,17 @@ P2PNode::P2PNode(struct Communicator *comm, struct ProcStatus *ps)
 {
 
     int chunk_size = ps->get_chunk_size();
-    assert(chunk_size == comm->size && comm->size != 1); 
+    assert(chunk_size == comm->size); 
     
     statistic = new int[chunk_size * 4/*dep*/ * 2]; 
 
     std::fill(statistic, statistic + chunk_size * 4/*dep*/ * 2, 0);
     
-    rayList = new RayList *[chunk_size];
-    for(int i = 0; i < chunk_size; i++) {
-        rayList[i] = new RayList(ps->get_buffer_size() * 4, "out");
-    }
-    inList = new RayStreamList(ps->get_buffer_size());
-    
-    comm->os << "out list size"<<rayList[0]->size() << "capacity" << rayList[0]->get_primary()->get_capacity() << std::endl; 
+    comm->os << "out list size"<<rayList[0].size() << "capacity" << rayList[0].get_primary().get_capacity() << std::endl; 
 }
 
 P2PNode::~P2PNode() {
-    for(int i = 0; i < ps->get_chunk_size(); i++){
-        delete rayList[i];
-    }
-    delete inList;
+    delete[] statistic;
 }
 
 void P2PNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
@@ -63,18 +54,18 @@ void P2PNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capa
         comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
     }
     comm->os<<"\n";
-    RayList::read_from_device_buffer(rayList, retired_rays, size, capacity, primary, comm->rank);
+    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->rank, ps->get_chunk_size());
     out_mutex.unlock(); 
 }
 
 //check proc status, return if proc need to wait 
 bool P2PNode::check_rendering_status() {
-    comm->os<<"mthread status inlist size "<<inList->size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
+    comm->os<<"mthread status inlist size "<<inList.size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
     for(int i = 0; i < ps->get_chunk_size(); i++)
-        comm->os<<" "<<rayList[i]->size();
+        comm->os<<" "<<rayList[i].size();
     comm->os<<"\n";
 
-    if(ps->all_thread_waiting() && inList->empty() ) {
+    if(ps->all_thread_waiting() && inList.empty() ) {
         if(rayList_empty()) {
             comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
             ps->set_proc_idle(comm->rank);
@@ -83,14 +74,14 @@ bool P2PNode::check_rendering_status() {
 
                 //if all worker end synchronous 
                 comm->os<<"mthread all proc idle send collective\n";
-                QuitMsg quit_msg(comm->rank); 
+                QuitMsg quit_msg(comm->rank, get_tag()); 
                 comm->send_message(&quit_msg, ps);
                 ps->set_exit();
                 comm->os<<"set exit\n";
                 inList_not_empty.notify_all();
             } else {
                 comm->os<<"mthread proc idle send status\n";
-                StatusMsg status(comm->rank, -1, ps->get_status(), ps->get_local_chunk(), comm->size); 
+                StatusMsg status(comm->rank, -1, ps->get_status(), ps->get_local_chunk(), comm->size, get_tag()); 
                 comm->send_message(&status, ps);
             }
             return true; 
@@ -123,10 +114,10 @@ void P2PNode::message_thread(void* tmp) {
         if(ps->Exit()) break;
         bool recv = false;
         do {
-            recv = comm->recv_message(wk->rayList, wk->inList, ps);
+            recv = comm->recv_message(wk->rayList.data(), &(wk->inList), ps);
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
 
-        if(!wk->inList->empty()) {
+        if(!wk->inList.empty()) {
             wk->inList_not_empty.notify_one();
         }
 
@@ -135,7 +126,7 @@ void P2PNode::message_thread(void* tmp) {
         int cId = wk->get_sent_list();
         
         if(cId >= 0 ) {
-                int* ids = (int*)(wk->rayList[cId]->get_primary()->get_data());
+                int* ids = (int*)(wk->rayList[cId].get_primary().get_data());
                 for(int i = 0; i < 5; i ++) {
                     printf("%d %d |", ids[i * 16], ids[i * 16 + 9]);
                     comm->os<<"* "<< ids[i * 16] <<" "<< ids[i * 16 + 9] << " ";
@@ -143,17 +134,17 @@ void P2PNode::message_thread(void* tmp) {
                 printf("\n");
             ps->set_proc_busy(ps->get_proc(cId));
             wk->out_mutex.lock();
-            comm->os<<"mthread new RayMsg"<<cId<<"size "<<wk->rayList[cId]->size()<<"\n";
-            RayMsg *ray_msg = new RayMsg(wk->rayList[cId], comm->rank, ps->get_proc(cId), cId, false); 
-            comm->os<<"mthread RayMsg"<<ray_msg->get_chunk()<<"\n";
+            comm->os<<"mthread new RayMsg"<<cId<<"size "<<wk->rayList[cId].size()<<"\n";
+            RayMsg ray_msg(wk->rayList[cId], comm->rank, ps->get_proc(cId), cId, false, wk->get_tag()); 
+            comm->os<<"mthread RayMsg"<<ray_msg.get_chunk()<<"\n";
             wk->out_mutex.unlock(); 
-            comm->send_message(ray_msg, ps);
+            comm->send_message(&ray_msg, ps);
         }
         comm->purge_completed_mpi_buffers();
         usleep(100);
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
-    comm->os <<" inlist "<< wk->inList->size()
+    comm->os <<" inlist "<< wk->inList.size()
              <<" recv "<<ps->global_rays[comm->rank + comm->size]
              <<std::endl;
     wk->inList_not_empty.notify_all();
@@ -186,13 +177,9 @@ void P2PNode::count_rays(int width, int height)
 
 void P2PNode::run(ImageDecomposition * camera) {
     
-    /*block size equels proc size*/
-    camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size); 
-    ps->updata_local_chunk();
 
     int deviceNum = ps->get_dev_num();
-    bool PreRendering = false;
-    if(PreRendering && comm->rank == 0) {
+    if(comm->rank == 0) {
         work_thread(this, camera, 0, 1, true, true);
         count_rays(camera->width, camera->height); 
     }

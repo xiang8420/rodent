@@ -3,15 +3,17 @@
 #include <vector>
 #include <mutex>
 
-#define RAY_COMPACT true
+#define RAY_COMPACT false
 
 struct Rays {
     std::vector<float> data;
     int size, capacity, logic_width, store_width;
     bool compact; 
-    bool *mask;
+    bool mask[30];
 
-    Rays(int capacity, int width, bool compact); 
+    Rays(){}; 
+   
+    void resize(int capacity, int width, bool compact); 
     
     Rays(float *, int, int, int); 
 
@@ -48,51 +50,81 @@ struct Rays {
 };
 
 struct RayList {
-    struct Rays *primary;
-    struct Rays *secondary;
+    struct Rays primary;
+    struct Rays secondary;
     size_t logic_capacity, store_capacity;
     std::string type;
     std::mutex mutex;
 
+    static double time; 
+
+    RayList() {
+        logic_capacity = 1048576;
+        store_capacity = (logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
+        primary.resize(store_capacity, 21, RAY_COMPACT);
+        secondary.resize(store_capacity, 14, RAY_COMPACT);
+        RayList::time = 0;
+        type = "out";
+    }
+
     RayList(int n, std::string type):logic_capacity(n), type(type) {
         store_capacity = (n & ~((1 << 5) - 1)) + 32; // round to 32
-        primary   = new struct Rays(store_capacity, 21, RAY_COMPACT);
-        secondary = new struct Rays(store_capacity, 14, RAY_COMPACT);
-    }
-    
-    ~RayList() {
-        delete primary;
-        delete secondary;
+        primary.resize(store_capacity, 21, RAY_COMPACT);
+        secondary.resize(store_capacity, 14, RAY_COMPACT);
+        RayList::time = 0;
     }
 
-    struct Rays* get_primary() {return primary;}
-    struct Rays* get_secondary() {return secondary;}
+    RayList(const RayList& a) {
+        printf("cant copy construct\n");
+        logic_capacity = a.logic_capacity; 
+        store_capacity = a.store_capacity; 
+        primary.resize(store_capacity, 21, RAY_COMPACT);
+        secondary.resize(store_capacity, 14, RAY_COMPACT);
+        type = "out";
+        RayList::time = 0;
+    }
 
-    int primary_size(){return primary->size;}    
+    void set_capacity(int n, std::string t) {
+        logic_capacity = n;
+        store_capacity = (n & ~((1 << 5) - 1)) + 32; // round to 32
+        primary.resize(store_capacity, 21, RAY_COMPACT);
+        secondary.resize(store_capacity, 14, RAY_COMPACT);
+        RayList::time = 0;
+        type = t;
+    }
     
-    int secondary_size(){return secondary->size;}    
+    ~RayList() {}
+
+    Rays& get_primary() {return primary;}
+
+    Rays& get_secondary() {return secondary;}
+
+    int primary_size(){return primary.size;}    
+    
+    int secondary_size(){return secondary.size;}    
    
 
-    int size() { return primary->size + secondary->size; }
-    bool empty() { return primary->empty() && secondary->empty(); } 
+    int size() { return primary.size + secondary.size; }
+    bool empty() { return primary.empty() && secondary.empty(); } 
 
     void clear() {
-        primary->size = 0 ;
-        secondary->size = 0;
+        primary.size = 0 ;
+        secondary.size = 0;
     }
 
     void lock() {mutex.lock();}
     void unlock() {mutex.unlock();}
     
-    static void read_from_device_buffer(RayList ** raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank);
+    static void read_from_device_buffer(RayList * raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank, int chunk_size);
     
     void write_to_device_buffer(RayList *, int);
     
     void read_from_message(char*, int, int, int); 
     
-    static void read_from_message(RayList **, char*, int, int);
+    static void read_from_message(RayList *, char*, int, int);
      
     static void classification(RayList ** raylists, Rays *raybuffer);
+
 };
 
 struct RayStreamList {
@@ -103,12 +135,10 @@ struct RayStreamList {
     std::string type;
     std::mutex mutex;
 
-    RayStreamList (int capacity) {
+    void set_capacity (int capacity) {
         logic_capacity = capacity;
         store_capacity = (capacity & ~((1 << 5) - 1)) + 32; // round to 32
     }
-    
-    ~RayStreamList() {}
     
     int primary_size(){return primary.size();}    
     

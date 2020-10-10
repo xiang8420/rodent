@@ -105,8 +105,6 @@ void AllCopyNode::run(ImageDecomposition * camera) {
     int deviceNum = ps->get_dev_num();
 
     ps->camera = camera;
-    int block_count = comm->size * 2;
-    camera->decomposition(ps->get_chunk_map(), block_count, comm->rank, comm->size);
 
     std::vector<std::thread> workThread;
     if(comm->isMaster()) {
@@ -122,7 +120,7 @@ void AllCopyNode::run(ImageDecomposition * camera) {
             ps->set_proc_idle(comm->rank);
             printf("end rthread\n"); 
             std::unique_lock <std::mutex> lock(block_mutex); 
-            while (!ps->Exit() && !camera->block_waiting()) {
+            while (!ps->Exit() && !ps->is_proc_idle()) {
                 printf("wait for block\n");
                 block_cond.wait(lock);
                 printf("get block\n");
@@ -162,6 +160,7 @@ void AllCopyNode::run(ImageDecomposition * camera) {
                 thread.join();
             workThread.clear();
         }
+        printf("worker %d exit\n", comm->rank);
     }
 
 
