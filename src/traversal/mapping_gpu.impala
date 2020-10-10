@@ -191,10 +191,10 @@ fn @gpu_traverse_single( acc: Accelerator
                        ) -> () {
     let block_size = 64;
     let ray_count  = num_packets * packet_size;
-    let grid  = (round_up(num_packets, block_size), packet_size, 1);
+    let chunk  = (round_up(num_packets, block_size), packet_size, 1);
     let block = (block_size, packet_size, 1);
 
-    for work_item in acc.exec(grid, block) {
+    for work_item in acc.exec(chunk, block) {
         let (i, j) = (work_item.tidx() + work_item.bidx() * block_size, work_item.tidy());
         if (i + j) >= ray_count { continue() }
 

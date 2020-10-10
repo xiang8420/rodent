@@ -1306,8 +1306,8 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        bvh:            bvh, \n"
        << "        bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
                                                          << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
-       << "        grid:           make_vec3("<< chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f),\n"     
-       << "        chunk:          chunk \n"
+       << "        chunk:          make_vec3("<< chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f),\n"     
+       << "        chunk_id:       chunk \n"
        << "    }\n"
        << "}\n\n";
     
@@ -1368,7 +1368,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     }
     os << "extern fn get_bbox() -> &[f32] { &["<< bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f, "
        << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
-    os << "extern fn get_grid() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";
+    os << "extern fn get_chunk() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";
 
     info("Scene was converted successfully");
     return true;
@@ -1411,7 +1411,7 @@ int main(int argc, char** argv) {
     size_t dev[5];   // 5 device max
     Target target[5];
 
-    size_t grid = 4;
+    size_t chunk = 4;
     size_t spp = 4;
     size_t max_path_len = 64;
     bool embree_bvh = false;
@@ -1468,9 +1468,9 @@ int main(int argc, char** argv) {
             } else if (!strcmp(argv[i], "-spp") || !strcmp(argv[i], "--samples-per-pixel")) {
                 if (!check_option(i++, argc, argv)) return 1;
                 spp = strtol(argv[i], NULL, 10);
-            } else if(!strcmp(argv[i], "-g") || !strcmp(argv[i], "--grid")) { 
+            } else if(!strcmp(argv[i], "-c") || !strcmp(argv[i], "--chunk")) { 
                 if (!check_option(i++, argc, argv)) return 1;
-                grid = strtol(argv[i], NULL, 10);
+                chunk = strtol(argv[i], NULL, 10);
             } else if (!strcmp(argv[i], "--max-path-len")) {
                 if (!check_option(i++, argc, argv)) return 1;
                 max_path_len = strtol(argv[i], NULL, 10);
@@ -1497,7 +1497,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::ofstream of("main.impala");
-    if (!convert_obj(obj_file, dev_num, target, dev, max_path_len, spp, embree_bvh, of, grid))
+    if (!convert_obj(obj_file, dev_num, target, dev, max_path_len, spp, embree_bvh, of, chunk))
         return 1;
     return 0;
 }

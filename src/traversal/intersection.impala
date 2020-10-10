@@ -212,36 +212,36 @@ fn @inside_point_bbox(bbox: BBox, p: Vec3) -> bool {
   && p.z >= bbox.min.z && p.z <= bbox.max.z) 
 }
 
-fn @get_chunk_id(n: i32) -> i32 {
+fn @extract_chunk_id(n: i32) -> i32 {
     if n == -1000 {
         return( -1 )
     }
     n >> 12 as i32
 }
 
-fn @coordinate_grid_id(grid: Vec3, scale: Vec3_i32, math: Intrinsics) -> i32 {
-    let id = make_vec3_i32(math.floorf(grid.x) as i32, math.floorf(grid.y) as i32, math.floorf(grid.z) as i32); 
+fn @coordinate_chunk_id(chunk: Vec3, scale: Vec3_i32, math: Intrinsics) -> i32 {
+    let id = make_vec3_i32(math.floorf(chunk.x) as i32, math.floorf(chunk.y) as i32, math.floorf(chunk.z) as i32); 
     (id.x * scale.y + id.y) * scale.z + id.z
 }
 
-fn @get_grid_id(grid: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsics) -> i32 {
-    let id = make_vec3_i32(math.floorf(grid.x) as i32, math.floorf(grid.y) as i32, math.floorf(grid.z) as i32); 
+fn @get_chunk_id(chunk: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsics) -> i32 {
+    let id = make_vec3_i32(math.floorf(chunk.x) as i32, math.floorf(chunk.y) as i32, math.floorf(chunk.z) as i32); 
     ((id.x * scale.y + id.y) * scale.z) + id.z
 }
 
-fn @coordinate_compress(grid: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsics) -> i32 {
-    let mut id = make_vec3_i32(math.floorf(grid.x) as i32, math.floorf(grid.y) as i32, math.floorf(grid.z) as i32); 
-    if grid.x == max.x {id.x = scale.x - 1; } 
-    if grid.y == max.y {id.y = scale.y - 1; } 
-    if grid.z == max.z {id.z = scale.z - 1; } 
+fn @coordinate_compress(chunk: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsics) -> i32 {
+    let mut id = make_vec3_i32(math.floorf(chunk.x) as i32, math.floorf(chunk.y) as i32, math.floorf(chunk.z) as i32); 
+    if chunk.x == max.x {id.x = scale.x - 1; } 
+    if chunk.y == max.y {id.y = scale.y - 1; } 
+    if chunk.z == max.z {id.z = scale.z - 1; } 
     
     if  id.x < 0 || id.x >= scale.x 
      || id.y < 0 || id.y >= scale.y
      || id.z < 0 || id.z >= scale.z {
         return( -1000 )
     } 
-    let grid = ((id.x * scale.y + id.y) * scale.z) + id.z;
-    (grid << 12) + (id.x << 8) + (id.y << 4) + id.z
+    let chunk = ((id.x * scale.y + id.y) * scale.z) + id.z;
+    (chunk << 12) + (id.x << 8) + (id.y << 4) + id.z
 }
 
 fn @get_coordinate(n: i32) -> (Vec3_i32) {
@@ -251,14 +251,14 @@ fn @get_coordinate(n: i32) -> (Vec3_i32) {
     make_vec3_i32(x, y, z)
 }
 
-fn @get_grid_coordinate(grid: i32, scale: Vec3_i32) -> (Vec3_i32) {
-    let x = grid / (scale.y  * scale.z );
-    let y = (grid - x * (scale.y * scale.z)) / scale.z;
-    let z = grid % scale.z; 
+fn @get_chunk_coordinate(chunk: i32, scale: Vec3_i32) -> (Vec3_i32) {
+    let x = chunk / (scale.y  * scale.z );
+    let y = (chunk - x * (scale.y * scale.z)) / scale.z;
+    let z = chunk % scale.z; 
     make_vec3_i32(x, y, z)
 }
 
-fn @get_closest_grid(min_max: MinMax, ray: Ray, org: Vec3,  bbox: BBox, id: Vec3_i32, scale: Vec3_i32, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
+fn @get_closest_chunk(min_max: MinMax, ray: Ray, org: Vec3,  bbox: BBox, id: Vec3_i32, scale: Vec3_i32, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {
     let mut bound: Vec3;
     let mut step_dir = make_vec3(1.0f, 1.0f, 1.0f);
     let id_f = make_vec3(id.x as f32, id.y as f32, id.z as f32);

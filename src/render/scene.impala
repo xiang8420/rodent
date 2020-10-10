@@ -8,13 +8,13 @@ struct Scene {
     camera:     Camera,
     bvh:        Bvh,    
     bbox:       BBox,
-    grid:       Vec3,
-    chunk:      i32
+    chunk:      Vec3,
+    chunk_id: i32
 }
 
 struct Domain {
     bbox: BBox,
-    grid: Vec3 
+    chunk: Vec3 
 }
 
 // Rendering device

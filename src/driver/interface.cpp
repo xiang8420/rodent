@@ -462,15 +462,11 @@ struct Interface {
     }
 
     const DeviceImage& load_jpg(int32_t dev, const std::string& filename) {
-        printf("before load jpg\n");
         auto& images = devices[dev].images;
-        printf("image \n");
         auto it = images.find(filename);
-        printf("it \n");
         if (it != images.end())
             return it->second;
         ImageRgba32 img;
-        printf("img \n");
         if (!::load_jpg(filename, img))
             error("Cannot load JPG file '", filename, "'");
         info("Loaded JPG file '", filename, "'");
@@ -588,7 +584,7 @@ inline void get_ray_stream(RayStream& rays, float* ptr, size_t capacity) {
 
 inline void get_primary_stream(PrimaryStream& primary, float* ptr, size_t capacity) {
     get_ray_stream(primary.rays, ptr, capacity);
-    primary.grid_id   = (int*)ptr + 9 * capacity;
+    primary.chunk_id   = (int*)ptr + 9 * capacity;
     primary.geom_id   = (int*)ptr + 10 * capacity;
     primary.prim_id   = (int*)ptr + 11 * capacity;
     primary.t         = ptr + 12 * capacity;
@@ -605,7 +601,7 @@ inline void get_primary_stream(PrimaryStream& primary, float* ptr, size_t capaci
 
 inline void get_secondary_stream(SecondaryStream& secondary, float* ptr, size_t capacity) {
     get_ray_stream(secondary.rays, ptr, capacity);
-    secondary.grid_id = (int*)ptr + 9 * capacity;
+    secondary.chunk_id = (int*)ptr + 9 * capacity;
     secondary.prim_id = (int*)ptr + 10 * capacity;
     secondary.color_r = ptr + 11 * capacity;
     secondary.color_g = ptr + 12 * capacity;
@@ -632,7 +628,7 @@ inline void copy_primary_ray(PrimaryStream a, PrimaryStream b, int src_id, int d
    b.rays.dir_z[dst_id] = a.rays.dir_z[src_id];
    b.rays.tmin[dst_id]  = a.rays.tmin[src_id];
    b.rays.tmax[dst_id]  = a.rays.tmax[src_id];
-   b.grid_id[dst_id]    = a.grid_id[src_id];
+   b.chunk_id[dst_id]    = a.chunk_id[src_id];
    if (keep_hit) {
        b.geom_id[dst_id] = a.geom_id[src_id];
        b.prim_id[dst_id] = a.prim_id[src_id];
@@ -852,7 +848,7 @@ void rodent_secondary_check(int32_t dev, int primary_size, int32_t print_mark, b
     } 
     for(int i = 0; i < 5; i++){
         printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
-                    secondary.rays.id[i],    secondary.grid_id[i],    secondary.rays.tmin[i],
+                    secondary.rays.id[i],    secondary.chunk_id[i],    secondary.rays.tmin[i],
                     secondary.rays.org_x[i], secondary.rays.org_y[i], secondary.rays.org_z[i],
                     secondary.rays.dir_x[i], secondary.rays.dir_y[i], secondary.rays.dir_z[i]);
     }
@@ -861,7 +857,7 @@ void rodent_secondary_check(int32_t dev, int primary_size, int32_t print_mark, b
     get_secondary_stream(buffer, array.data(), array.size() / 14);
     for(int i = 0; i < 3; i++){
         printf("buffer id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
-                    buffer.rays.id[i], buffer.grid_id[i], buffer.rays.tmin[i],
+                    buffer.rays.id[i], buffer.chunk_id[i], buffer.rays.tmin[i],
                     buffer.rays.org_x[i], buffer.rays.org_y[i], buffer.rays.org_z[i],
                     buffer.rays.dir_x[i], buffer.rays.dir_y[i], buffer.rays.dir_z[i]);
     }
@@ -880,7 +876,7 @@ void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mar
     }
     for(int i = 0; i < 5; i++) {
         printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f geom %d prim %d\n", 
-                    primary.rays.id[i+0], primary.grid_id[i+0], primary.rays.tmin[i],
+                    primary.rays.id[i+0], primary.chunk_id[i+0], primary.rays.tmin[i],
                     primary.rays.org_x[i], primary.rays.org_y[i], primary.rays.org_z[i],
                     primary.rays.dir_x[i], primary.rays.dir_y[i], primary.rays.dir_z[i],
                     primary.geom_id[i], primary.prim_id[i]);
