@@ -132,14 +132,14 @@ void MWNode::send_message() {
                 if(unloaded_chunk > -1) {
 //                    comm->os<<"mthread scheduleMsg"<<"\n";
                     ps->update_chunk(idle_proc, unloaded_chunk);
-                    RayMsg *ray_msg = new RayMsg(rayList[unloaded_chunk], comm->rank, idle_proc, unloaded_chunk, false, get_tag()); 
+                    RayMsg ray_msg(rayList[unloaded_chunk], comm->rank, idle_proc, unloaded_chunk, false, get_tag()); 
                     
 //                    comm->os<<"mthread schedule RayMsg "<<ray_msg->get_chunk()<<"\n";
-                    comm->send_message(ray_msg, ps);
+                    comm->send_message(&ray_msg, ps);
                     ps->set_proc_busy(idle_proc);
                     
-                    ScheduleMsg *msg = new ScheduleMsg(comm->rank, ps->get_chunk_map(), idle_proc, ps->get_chunk_size(), get_tag()); 
-                    comm->send_message(msg, ps);
+                    ScheduleMsg msg(comm->rank, ps->get_chunk_map(), idle_proc, ps->get_chunk_size(), get_tag()); 
+                    comm->send_message(&msg, ps);
                     
               //      return;//////??
                 }
@@ -161,10 +161,10 @@ void MWNode::send_message() {
 //                }
 //                printf("\n");
                 
-                RayMsg *ray_msg = new RayMsg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
+                RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
                 
 //                comm->os<<"mthread RayMsg "<<ray_msg->get_chunk()<<"\n";
-                comm->send_message(ray_msg, ps);
+                comm->send_message(&ray_msg, ps);
             }
         }
         out_mutex.unlock(); 
@@ -202,7 +202,6 @@ void MWNode::send_message() {
 //            comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
             out_mutex.lock();
             int cId = get_sent_list();
-            RayMsg* ray_msg;
             if(cId >= 0 /*&& rayList[cId]->size() > 0.4 * ps->get_buffer_size()*/) {
 //                int dst_proc = ps->get_proc(cId);
 ////                comm->os<<"mthread new RayMsg "<<cId<<" dst proc "<<dst_proc<<" size "<<rayList[cId]->size()<<" local chunk "<<ps->get_local_chunk()<<"\n";
@@ -212,8 +211,8 @@ void MWNode::send_message() {
 //            } else {
                 for(int i = 0; i < ps->get_chunk_size(); i++) {
                     if(rayList[i].size() > 0 && rayList[i].type == "out") {
-                        ray_msg = new RayMsg(rayList[i], comm->rank, comm->master, i, false, get_tag()); 
-                        comm->send_message(ray_msg, ps);
+                        RayMsg ray_msg(rayList[i], comm->rank, comm->master, i, false, get_tag()); 
+                        comm->send_message(&ray_msg, ps);
                         break;
                     }
                 }

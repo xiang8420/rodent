@@ -111,8 +111,7 @@ RayMsg::RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int t
     std::ofstream os; 
     os.open("out/proc_buffer_worker", std::ios::out | std::ios::app ); 
     
-    header = new MessageHeader(-1, src, MsgType::Ray, false, 0, idle, -1, tag);
-    destination = dst;
+    header = new MessageHeader(-1, src, dst, MsgType::Ray, false, 0, idle, -1, tag);
     
     os<<"RayMsg :\n";
     for(int i = 0; i < chunk_size; i++) {
@@ -157,8 +156,7 @@ RayMsg::RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int t
 
 RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag) {
     printf("construct message ray\n");
-    header = new MessageHeader(-1, src, MsgType::Ray, false, 0, idle, chunk, tag);
-    destination = dst;
+    header = new MessageHeader(-1, src, dst, MsgType::Ray, false, 0, idle, chunk, tag);
 //    Rays* primary = outList->get_primary(); 
 //    int width = primary->store_width; 
 //    int* ids = (int*)(primary->get_data());
@@ -187,19 +185,17 @@ RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag
 
 QuitMsg::QuitMsg(int src, int tag) {
     printf("construct message quit \n");
-    header = new MessageHeader(src, -1, MsgType::Quit, true, 0, true, -1, tag);
+    header = new MessageHeader(src, -1, -1, MsgType::Quit, true, 0, true, -1, tag);
     printf("new Message root %d collective %d\n", header->root, header->collective);
-    destination = -1;
 }
 
 StatusMsg::StatusMsg(int src, int dst, int* status, int chunk, int proc_size, int tag) {
     printf("construct message status src %d\n", src);
     if(dst == -1) 
-        header = new MessageHeader(src, -1, MsgType::Status, false, 0, true, chunk, tag);
+        header = new MessageHeader(src, -1, dst, MsgType::Status, false, 0, true, chunk, tag);
     else 
-        header = new MessageHeader(-1, src, MsgType::Status, false, 0, true, chunk, tag);
+        header = new MessageHeader(-1, src, dst, MsgType::Status, false, 0, true, chunk, tag);
 
-    destination = dst;
    
     int length = proc_size * proc_size * sizeof(int);
     content.resize(length);
@@ -212,8 +208,7 @@ StatusMsg::StatusMsg(int src, int dst, int* status, int chunk, int proc_size, in
 //broad cast schedule
 ScheduleMsg::ScheduleMsg(int src, int* chunkStatus, int chunk, int chunk_size, int tag) {
     printf(" construct message schedule src %d\n", src);
-    header = new MessageHeader(src, -1, MsgType::Schedule, false, 0, false, chunk, tag);
-    destination = -1;
+    header = new MessageHeader(src, -1, -1, MsgType::Schedule, false, 0, false, chunk, tag);
     int length = chunk_size * sizeof(int);
     content.resize(length);
     memcpy(content.data(), chunkStatus, length);

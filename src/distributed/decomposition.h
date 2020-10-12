@@ -168,7 +168,16 @@ struct ImageDecomposition {
         return res ;
     }
 
-    ImageBlock project_cube_to_image(BBox box, int chunk, bool Record) {
+    ImageBlock project_cube_to_image(BBox box, int chunk, bool Record, ImageBlock image) {
+        if(box.is_inside(eye)) { 
+            int num_pixels = width * height;
+            for(int i = 0; i < num_pixels; i++) {
+                domain[i] = chunk;
+                depth[i] = 0;
+            }
+            return image;
+        }
+
         float3 p_min(1), p_max(-1);
         p_min.z = 0xff;
         float3 p;
@@ -252,12 +261,12 @@ struct ImageDecomposition {
             chunk_map[i] = -1;
 
         for(int i = 0; i < chunk_size; i++) {
-            project_cube_to_image(chunks.list[i], i, true);
+            project_cube_to_image(chunks.list[i], i, true, image);
         }
        
         //global available block 
-        //ImageBlock gblock = image;
-        ImageBlock gblock = project_cube_to_image(chunks.bbox, 0, false);
+        ImageBlock gblock = project_cube_to_image(chunks.bbox, 0, false, image);
+
         printf("global avail block %d %d %d %d\n", gblock[0], gblock[1], gblock[2], gblock[3]);
         
         // int step_width = width / scale[0];
@@ -305,8 +314,7 @@ struct ImageDecomposition {
         printf("image scale %f %f\n", scale[0], scale[1]);
        
         //global available block 
-        //ImageBlock gblock = image;
-        ImageBlock gblock = project_cube_to_image(BBox(get_bbox()), 0, false);
+        ImageBlock gblock = project_cube_to_image(BBox(get_bbox()), 0, false, image);
         
         // int step_width = width / scale[0];
         // int step_height = height / scale[1];   

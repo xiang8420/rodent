@@ -16,12 +16,13 @@ struct MessageHeader {
     int      chunk;   //-1 means mixed rays
     bool     collective;
     bool     idle;      //if this process is idle
+    int      destination;
 //    int      padding[2]; 
 
     MessageHeader(){}
 
-    MessageHeader(int root, int sender, MsgType type, bool collective, int size, bool idle, int chunk, int tag) 
-        : root(root), sender(sender), type(type), collective(collective), content_size(size), idle(idle), chunk(chunk), tag(tag)
+    MessageHeader(int root, int sender, int dst,  MsgType type, bool collective, int size, bool idle, int chunk, int tag) 
+        : root(root), sender(sender), destination(dst), type(type), collective(collective), content_size(size), idle(idle), chunk(chunk), tag(tag)
     {
        primary   = 0; 
        secondary = 0; 
@@ -34,30 +35,20 @@ struct MessageHeader {
 class Message { 
 protected:
 
-    int destination;
     MessageHeader *header;
     std::vector<char> content;
-    std::mutex mutex;
-    std::condition_variable cond; 
 
 public:
     Message();
     
     Message(MessageHeader *h): header(h) { }
 
+
     // write content to a raylists
     int write_raylist(struct RayList *outlist);
   
     // read inlist to message 
     int read_raylist(struct RayList *inlist);
-    
-    //! notify to a blocking thread that it should resume processing
-	void notify() { 
-		mutex.lock();
-		header->idle = true;
-        cond.notify_one();
-	    mutex.unlock();
-    }
 
     int get_tag() {return header->tag;}
 
@@ -98,9 +89,9 @@ public:
 
 	bool has_content() { return header->HasContent(); }
 
-    void set_destination(int i) { destination = i; }
+    void set_destination(int i) { header->destination = i; }
     
-    int get_destination() { return destination; }
+    int get_destination() { return header->destination; }
 
     unsigned char *get_header() { return (unsigned char *)header; }
       
