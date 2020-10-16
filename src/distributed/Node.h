@@ -49,10 +49,10 @@ Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
     rayList.resize(chunk_size); //        = new RayList *[chunk_size];
 //    rayList = new RayList *[chunk_size];
     for(int i = 0; i < chunk_size; i++) {
-        rayList.emplace_back(RayList(1048608, "out"));
+        rayList.emplace_back(RayList(0, "out"));
         //rayList[i].set_capacity(1048608, "out");
     }
-    inList.set_capacity(1048576);
+    inList.set_capacity(1048576/*ps->get_buffer_size()*/);
   //  for(int i = 0; i < ps->get_chunk_size(); i++) { 
   //      printf("new out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
   //      printf("new out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
@@ -65,10 +65,6 @@ int Node::get_tag(){
 
 Node::~Node() {
     printf("%d delete Node\n", comm->rank);
-    //for(int i = 0; i < ps->get_chunk_size(); i++) {
-    //    delete rayList[i];
-    //}
-    //delete[] rayList;
 }
 
 bool Node::outList_empty() {  
@@ -101,48 +97,52 @@ bool Node::inout_list_empty() {
 
 int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
     if(comm->size == 1 || ps->Exit() || ps->has_new_chunk() || ps->get_chunk_size() == 1) {
-//        comm->os << "rthread exit new chunk \n";
+        comm->os << "rthread exit new chunk \n";
         return -1;
     }
-//    comm->os<<"rthread inlist size" <<inList.size()<<"\n";
+    comm->os<<"rthread inlist size" <<inList.size()<<"\n";
     
     ps->set_thread_idle(thread_id, thread_wait);
     
     std::unique_lock <std::mutex> lock(inList.mutex); 
     while (thread_wait && inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
-//        comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
+        comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
         inList_not_empty.wait(lock);
-//        comm->os<<"rthread get condition" <<thread_wait<<" "<<ps->Exit()<<"\n";
+        comm->os<<"rthread get condition" <<thread_wait<<" "<<ps->Exit()<<"\n";
     }
     
     if(ps->Exit() || ps->has_new_chunk()) {  
         return -1;
     }
     
-//    comm->os<<"rthread after wait\n";
-    struct Rays *inRays = primary ? inList.get_primary() : inList.get_secondary();
+    comm->os<<"rthread after wait\n";
+    if(primary && inList.primary_size() > 0) {
+        rays_stream = inList.get_primary();
+    } else if (!primary && inList.secondary_size() > 0) {
+        rays_stream = inList.get_secondary();
+    } else {
+        return rays_size;
+    }
+
     lock.unlock();
 
-    if(inRays != NULL) {
-        ps->set_thread_idle(thread_id, false);
-        int copy_size = inRays->size;
-        int width = inRays->store_width;
-//        printf("copy primary size %d\n", copy_size);
-//        comm->os<<"rthread width "<<width <<" logic width "<<inRays->logic_width<<"\n";
-        memcpy(*rays, inRays->get_data(), ps->get_buffer_capacity() * width * sizeof(float)); 
-        inRays->size = 0;
+    ps->set_thread_idle(thread_id, false);
+    int copy_size = rays_stream->size;
+    int width = rays_stream->width;
+    printf("copy primary size %d\n", copy_size);
+  //  comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
+    memcpy(*rays, rays_stream->get_data(), ps->get_buffer_capacity() * width * sizeof(float));
+    rays_stream->size = 0;
 
-        //printf("%d inRays size %d %d %d\n", comm->rank, inRays->size, primary, inRays->store_width);
-//        int* ids = (int*)(*rays);
-//        comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
-//        for(int i = 0; i < 5; i ++) {
-//            comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_buffer_capacity() * 9];
-//        }
-//        comm->os<<"\n";
-        delete inRays;
-        return copy_size + rays_size;
+     //printf("%d rays_stream size %d %d %d\n", comm->rank, rays_stream->size, primary, rays_stream->store_width);
+    int* ids = (int*)(*rays);
+    comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
+    for(int i = 0; i < copy_size; i ++) {
+        comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_buffer_capacity() * 9];
     }
-    return rays_size;
+    comm->os<<"\n";
+    delete rays_stream;
+    return copy_size + rays_size;
 }
 
 void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preRendering, bool generate_rays) {
@@ -179,19 +179,30 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
 
 // get chunk retun chunk id
 int Node::get_sent_list() {
-    int n = ps->get_chunk_size();
-    int t = -1; 
-    int max = 0; 
-    for(int i = 0; i < n; i++) {
-//        comm->os<<" get sent list "<< i<<" raylist size "<<rayList[i] -> size()<<" "<< ps->get_proc(i)<<"\n";
-        if(rayList[i].size() > max && ps->get_proc(i) != -1 && i != ps->get_local_chunk()) {
-            max = rayList[i].size();
-            t = i;
+    int chunk_size = ps->get_chunk_size();
+    int dst_loaded = -1, dst_unloaded = -1;
+    int max_loaded = 0,  max_unloaded = 0; 
+    for(int i = 0; i < chunk_size; i++) {
+        if(i == ps->get_local_chunk()) continue;
+
+        if(ps->get_proc(i) >= 0 && rayList[i].size() > max_loaded) {
+            max_loaded = rayList[i].size();
+            dst_loaded = i;
+        }
+        if(ps->get_proc(i) < 0 && rayList[i].size() > max_unloaded) {
+            max_unloaded = rayList[i].size();
+            dst_unloaded = i;
         }
     }
-//    comm->os<<"mthread rank " <<comm->rank<<" list "<< t<<" max "<< max<<"\n";
-    if(max <= 0 || t < 0) 
-        return -1;
-    
-    return t;
+    if(comm->isMaster()) {
+        return dst_loaded;
+    } else {
+        if(dst_loaded >= 0 ) {
+            if(ps->all_thread_waiting() || max_loaded > 0.4 * ps->get_buffer_size()) 
+                 return dst_loaded;
+            return -1;
+        } 
+        else 
+           return dst_unloaded; 
+    } 
 }

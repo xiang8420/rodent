@@ -148,7 +148,7 @@ void MWNode::send_message() {
         if(!outList_empty()) {
 
             int cId = get_sent_list();
-            if(cId >= 0 ) {
+            if(ps->get_proc(cId) >= 0 ) {
                 int dst_proc = ps->get_proc(cId);
 //                comm->os<<"mthread master new RayMsg "<<cId<<" size "<<rayList[cId]->size()<<" rank "<<comm->rank<<" dst "<<dst_proc<<"\n";
                 
@@ -176,9 +176,7 @@ void MWNode::send_message() {
 //                comm->os<< "mthread send status msg\n";
                 int * tmp = ps->get_status();
 //                comm->os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
-                
                 ps->set_proc_idle(comm->rank);
-                //send to master I am idle
 //                comm->os<<"mthread local chunk"<<ps->get_local_chunk()<<"\n";
                 StatusMsg status(comm->rank, comm->master, ps->get_status(), ps->get_local_chunk(), comm->size, get_tag()); 
                 comm->send_message(&status, ps);
@@ -197,24 +195,24 @@ void MWNode::send_message() {
         
         if (ps->has_new_chunk()) {
             inList_not_empty.notify_all();
+            for(int i = 0; i < ps->get_chunk_size(); i++) {
+                comm->os<<"new chunk raylist "<<rayList[i].size()<<" |";
+            }
+            comm->os<<"\n";
         }
         if (!outList_empty()) {
 //            comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
             out_mutex.lock();
             int cId = get_sent_list();
-            if(cId >= 0 /*&& rayList[cId]->size() > 0.4 * ps->get_buffer_size()*/) {
-//                int dst_proc = ps->get_proc(cId);
-////                comm->os<<"mthread new RayMsg "<<cId<<" dst proc "<<dst_proc<<" size "<<rayList[cId]->size()<<" local chunk "<<ps->get_local_chunk()<<"\n";
-//                ps->set_proc_busy(dst_proc);
-//                ray_msg = new RayMsg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
-//                comm->send_message(ray_msg, ps);
-//            } else {
-                for(int i = 0; i < ps->get_chunk_size(); i++) {
-                    if(rayList[i].size() > 0 && rayList[i].type == "out") {
-                        RayMsg ray_msg(rayList[i], comm->rank, comm->master, i, false, get_tag()); 
-                        comm->send_message(&ray_msg, ps);
-                        break;
-                    }
+            if(cId >= 0) {
+                if(ps->get_proc(cId) >= 0) {
+                    int dst_proc = ps->get_proc(cId);
+                    ps->set_proc_busy(dst_proc);
+                    RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
+                    comm->send_message(&ray_msg, ps);
+                } else {
+                    RayMsg ray_msg(rayList[cId], comm->rank, comm->master, cId, false, get_tag()); 
+                    comm->send_message(&ray_msg, ps);
                 }
             }
             out_mutex.unlock(); 
@@ -281,21 +279,20 @@ void MWNode::message_thread(void* tmp) {
 void MWNode::run(ImageDecomposition * camera) {
     
     comm->os <<" start run message thread \n";
-    
+
 
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
     std::vector<std::thread> workThread;
     if(comm->size == 1) {
-        work_thread(this, camera, 0, 1, false, true);
-  //      printf("only one worker %d  ", comm->rank);
-  //      for(int i = 0; i < deviceNum; i++) 
-  //          workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-  //      
-  //      for( auto &thread: workThread) 
-  //          thread.join();
+        printf("only one worker %d  ", comm->rank);
+        for(int i = 0; i < deviceNum; i++) 
+            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
+        
+        for( auto &thread: workThread) 
+            thread.join();
 
-  //      workThread.clear();
+        workThread.clear();
     } else {
         comm->os <<"mthread  \n";
         comm->os <<comm->rank<<" start mthread run\n ";
