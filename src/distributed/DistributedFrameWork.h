@@ -7,7 +7,6 @@
 #include <dirent.h>
 #include <unistd.h>
 
-#include "RayList.h"
 #include "communicator.h"
 #include "decomposition.h"
 #include "ProcStatus.h"
@@ -20,6 +19,8 @@
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
+
+
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
@@ -53,7 +54,7 @@ struct DistributedFrameWork {
     ProcStatus *ps;
 
     std::string type;
-    
+
     DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
     {
         comm = new Communicator();

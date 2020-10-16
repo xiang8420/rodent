@@ -50,9 +50,6 @@ set(DRIVER_SRCS
     driver/interface.h
     driver/interface.cpp
     distributed/Node.h 
-    distributed/RayList.cpp
-    distributed/Message.cpp
-    distributed/communicator.cpp
     distributed/ProcStatus.h
     distributed/decomposition.h
     driver/driver.cpp
