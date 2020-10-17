@@ -14,7 +14,7 @@ extern "C" {
     fn rodent_gpu_get_tmp_buffer(i32, &mut &mut [i32], i32) -> ();
     fn rodent_first_primary_save(i32, i32, i32, bool) -> i32;
     fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
-    fn rodent_secondary_check(i32, i32, i32, bool) -> ();
+    fn rodent_secondary_check(i32, i32, i32, i32, bool) -> ();
     fn rodent_gpu_first_primary_load(i32, &mut PrimaryStream, i32) -> i32;
     fn rodent_load_buffer(i32, &[u8]) -> &[i8];
     fn rodent_load_bvh2_tri1(i32, &[u8], &mut &[Node2], &mut &[Tri1]) -> ();

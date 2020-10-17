@@ -17,8 +17,6 @@ public:
     bool check_rendering_status(); 
    
     // send primary and secondary
-    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
-  
     void count_rays(int, int);
 
     static void message_thread(void* tmp);
@@ -43,19 +41,6 @@ P2PNode::P2PNode(struct Communicator *comm, struct ProcStatus *ps)
 
 P2PNode::~P2PNode() {
     delete[] statistic;
-}
-
-void P2PNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
-    comm->os<<"rthread save outgoing buffer "<< size <<"\n"; 
-    out_mutex.lock(); 
-    int width = primary ? 21 : 14; 
-    int* ids = (int*)(retired_rays);
-    for(int i = 0; i < 5; i ++) {
-        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
-    }
-    comm->os<<"\n";
-    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->rank, ps->get_chunk_size());
-    out_mutex.unlock(); 
 }
 
 //check proc status, return if proc need to wait 
@@ -179,36 +164,26 @@ void P2PNode::run(ImageDecomposition * camera) {
     
 
     int deviceNum = ps->get_dev_num();
-    if(comm->rank == 0) {
-        work_thread(this, camera, 0, 1, true, true);
-        count_rays(camera->width, camera->height); 
-    }
+//    if(comm->rank == 0) {
+//        work_thread(this, camera, 0, 1, true, true);
+//        count_rays(camera->width, camera->height); 
+//    }
     
     std::vector<std::thread> workThread;
-    if(comm->size == 1) {
-        printf("only one worker %d  ", comm->rank);
+    std::thread mthread(message_thread, this);
+    comm->os << "loaded chunk()"<<ps->get_local_chunk()<< std::endl; 
+    ps->chunk_loaded();
+    //    //all proc start proc 0 send schedule? 
+    while(!ps->Exit()) {
+        int chunk = ps->get_local_chunk(); 
         for(int i = 0; i < deviceNum; i++) 
             workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
         
         for( auto &thread: workThread) 
             thread.join();
-    	
-    } else {
-        std::thread mthread(message_thread, this);
-        comm->os << "loaded chunk()"<<ps->get_local_chunk()<< std::endl; 
-        ps->chunk_loaded();
-        //    //all proc start proc 0 send schedule? 
-        while(!ps->Exit()) {
-            int chunk = ps->get_local_chunk(); 
-            for(int i = 0; i < deviceNum; i++) 
-                workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-            
-            for( auto &thread: workThread) 
-                thread.join();
-            
-        }
-        printf("%d worker exit\n", comm->rank);
-        mthread.join();
+        
     }
+    printf("%d worker exit\n", comm->rank);
+    mthread.join();
     return;
 } 

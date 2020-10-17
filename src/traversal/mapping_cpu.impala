@@ -230,20 +230,7 @@ fn @cpu_traverse_single_helper( mut ray: Ray
 
                 // Intersect primitives
                for j in vectorize(prim.size) {
-               //for j in range(0, prim.size) {
-                    if j > 100 {
-                        let a = j;
-                    } 
-                    if j > 500 {
-                        let a = j;
-                    }
-                    if j > 483669 {
-                        print_string("bug here : ");
-                        print_i32(j);
-                    }
                     if !prim.is_valid(j) { continue() }
-                   // print_i32(j);
-                   // print_string(" ");
 
                     let prim_hit = prim.intersect(j, cpu_intrinsics, ray, continue);
                     if any_hit {

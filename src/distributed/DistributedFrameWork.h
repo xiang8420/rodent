@@ -13,6 +13,7 @@
 
 #include <assert.h>
 #include "Node.h"
+#include "SingleNode.h"
 #include "P2PNode.h"
 #include "AllCopyNode.h"
 #include "MasterWorker.h"
@@ -60,15 +61,12 @@ struct DistributedFrameWork {
         comm = new Communicator();
         ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
         // mpi
-        if(type == "P2PNode") {
-            node = new P2PNode(comm, ps);
-        } else if(type == "MWNode") {
-            node = new MWNode(comm, ps);
-        } else if(type == "AllCopy") {
-            node = new AllCopyNode(comm, ps); 
-        } else {
-            error("Unknown node type");
-        }
+        if(chunk == 1 && comm->size == 1 ) node = new SingleNode(comm, ps);
+        else if(type == "P2PNode") node = new P2PNode(comm, ps);
+        else if(type == "MWNode") node = new MWNode(comm, ps);
+        else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
+        else error("Unknown node type");
+        
     }
 
     ~DistributedFrameWork() {
@@ -82,25 +80,18 @@ struct DistributedFrameWork {
         printf("dis frame worker run\n");
         
         /*block size equels proc size*/
-        if(type == "P2PNode") {
+        if(type == "P2PNode" || type == "MWNode") {
             camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size); 
-        } else if(type == "MWNode") {
-            camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size);
-        } else if(type == "AllCopy") {
-            int block_count = comm->size * 2;
-            camera->decomposition(ps->get_chunk_map(), block_count, comm->rank, comm->size);
         } else {
-            error("Unknown node type");
-        }
+            int block_count = comm->size == 1 ? 1 : comm->size * 2;
+            camera->decomposition(ps->get_chunk_map(), block_count, comm->rank, comm->size);
+        } 
         
-        printf("chunk map \n"); 
         for(int i = 0; i < ps->get_chunk_size(); i++) {
             printf("| %d", ps->get_chunk_map()[i]);
         }
         printf("\n");
-        
         ps->updata_local_chunk();
-
         node->run(camera);
         
     }

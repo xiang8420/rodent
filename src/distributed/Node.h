@@ -23,11 +23,11 @@ public:
 
     Communicator * get_communicator(){ return comm; }
 
+    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
+
     int load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait);
     
     static void work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preprocess, bool shoot_rays);
-   
-    virtual void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary) = 0;
 
     virtual void run(ImageDecomposition * camera) = 0;
 
@@ -41,6 +41,9 @@ public:
 
     int get_tag();
     
+    bool all_queue_empty();
+
+    void clear_outlist();
 };
 
 Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
@@ -49,7 +52,7 @@ Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
     rayList.resize(chunk_size); //        = new RayList *[chunk_size];
 //    rayList = new RayList *[chunk_size];
     for(int i = 0; i < chunk_size; i++) {
-        rayList.emplace_back(RayList(0, "out"));
+        rayList.emplace_back(RayList(1048576, "out"));
         //rayList[i].set_capacity(1048608, "out");
     }
     inList.set_capacity(1048576/*ps->get_buffer_size()*/);
@@ -67,6 +70,13 @@ Node::~Node() {
     printf("%d delete Node\n", comm->rank);
 }
 
+bool Node::all_queue_empty(){ 
+    for(int i = 0; i < ps->get_chunk_size(); i++) {
+        if(!rayList[i].empty()) {return false;}
+    }
+    return true;
+}
+
 bool Node::outList_empty() {  
     int chunk_size = ps->get_chunk_size();
     for(int i = 0; i < chunk_size; i++) {
@@ -75,6 +85,16 @@ bool Node::outList_empty() {
         }
     }
     return true;
+}
+
+void Node::clear_outlist() {  
+    int chunk_size = ps->get_chunk_size();
+    for(int i = 0; i < chunk_size; i++) {
+        if(rayList[i].type == "out" ) {
+            rayList[i].primary.clear();
+            rayList[i].secondary.clear();
+        }
+    }
 }
 
 bool Node::rayList_empty() {  
@@ -95,15 +115,33 @@ bool Node::inout_list_empty() {
     return inList.empty();
 }
 
+void Node::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
+    out_mutex.lock(); 
+    int width = primary?21:14; 
+    comm->os<<"rthread save outgoing buffer "<< size <<" width "<<width<<"\n"; 
+    int* ids = (int*)(retired_rays);
+    for(int i = 0; i < 5; i ++) {
+        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
+    }
+    comm->os<<"\n";
+    for(int i = 0; i < ps->get_chunk_size(); i++) { 
+        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
+        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
+    }
+    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->rank, ps->get_chunk_size());
+    out_mutex.unlock(); 
+}
+
 int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
+    printf("rthread load incoming buffer\n");
     if(comm->size == 1 || ps->Exit() || ps->has_new_chunk() || ps->get_chunk_size() == 1) {
         comm->os << "rthread exit new chunk \n";
         return -1;
     }
-    comm->os<<"rthread inlist size" <<inList.size()<<"\n";
     
     ps->set_thread_idle(thread_id, thread_wait);
     
+    std::cout<<"rthread "<<thread_wait<< " inlist priamry " <<inList.primary_size()<<" secondary "<<inList.secondary_size()<<"\n";
     std::unique_lock <std::mutex> lock(inList.mutex); 
     while (thread_wait && inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
         comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
@@ -114,8 +152,10 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     if(ps->Exit() || ps->has_new_chunk()) {  
         return -1;
     }
-    
-    comm->os<<"rthread after wait\n";
+
+    std::cout<<"primary ? "<<primary<<" primary size "<<inList.primary_size()<<" secondary size "<<inList.secondary_size()<<"\n";
+
+    struct RaysStream *rays_stream;
     if(primary && inList.primary_size() > 0) {
         rays_stream = inList.get_primary();
     } else if (!primary && inList.secondary_size() > 0) {
@@ -130,14 +170,14 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     int copy_size = rays_stream->size;
     int width = rays_stream->width;
     printf("copy primary size %d\n", copy_size);
-  //  comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
-    memcpy(*rays, rays_stream->get_data(), ps->get_buffer_capacity() * width * sizeof(float));
+ //   comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
+    memcpy(*rays, rays_stream->get_data(), ps->get_buffer_capacity() * width * sizeof(float)); 
     rays_stream->size = 0;
-
+ 
      //printf("%d rays_stream size %d %d %d\n", comm->rank, rays_stream->size, primary, rays_stream->store_width);
     int* ids = (int*)(*rays);
     comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
-    for(int i = 0; i < copy_size; i ++) {
+    for(int i = 0; i < std::min(5, copy_size); i ++) {
         comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_buffer_capacity() * 9];
     }
     comm->os<<"\n";
@@ -204,5 +244,5 @@ int Node::get_sent_list() {
         } 
         else 
            return dst_unloaded; 
-    } 
+    }
 }

@@ -839,33 +839,34 @@ void rodent_cpu_intersect_secondary_embree(SecondaryStream* secondary) {
 #endif
  
 //debug
-void rodent_secondary_check(int32_t dev, int primary_size, int32_t print_mark, bool is_first_primary) {
+void rodent_secondary_check(int32_t dev, int primary_size, int buffer_size, int32_t print_mark, bool is_first_primary) {
     SecondaryStream secondary;
-    printf("\n%d secondary size  %d\n", print_mark, primary_size);
+    printf("\n%d rthread secondary size  %d\n", print_mark, primary_size);
     if (dev == -1) {
         auto& array = interface->cpu_secondary;
         get_secondary_stream(secondary, array.data(), array.size() / 14);
     } 
-    for(int i = 0; i < 5; i++){
+    for(int i = 0; i < std::min(5, primary_size); i++){
         printf("ray id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
                     secondary.rays.id[i],    secondary.chunk_id[i],    secondary.rays.tmin[i],
                     secondary.rays.org_x[i], secondary.rays.org_y[i], secondary.rays.org_z[i],
                     secondary.rays.dir_x[i], secondary.rays.dir_y[i], secondary.rays.dir_z[i]);
     }
-    SecondaryStream buffer;
     auto& array = interface->cpu_secondary_outgoing;
-    get_secondary_stream(buffer, array.data(), array.size() / 14);
-    for(int i = 0; i < 3; i++){
+    int *data = (int*) array.data();
+    float *fptr = (float*) array.data();
+    printf("buffer size%d\n", buffer_size);
+    for(int i = 0; i < std::min(3, buffer_size); i++){
         printf("buffer id %d chunk %d tmin %f ray org %f %f %f dir %f %f %f\n", 
-                    buffer.rays.id[i], buffer.chunk_id[i], buffer.rays.tmin[i],
-                    buffer.rays.org_x[i], buffer.rays.org_y[i], buffer.rays.org_z[i],
-                    buffer.rays.dir_x[i], buffer.rays.dir_y[i], buffer.rays.dir_z[i]);
+                    data[i*14], data[i*14 + 9], data[i*14 + 7],
+                    fptr[i*14 + 1], fptr[i*14 + 2], fptr[i*14 + 3], 
+                    fptr[i*14 + 4], fptr[i*14 + 5], fptr[i*14 + 6]) ;
     }
 }
 
 void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mark, bool is_first_primary) {
     PrimaryStream primary;
-    printf("%d primary size %d\n", print_mark, primary_size);
+    printf("%d rthread primary size %d\n", print_mark, primary_size);
     if (dev == -1) {
         auto& array = interface->cpu_primary;
         get_primary_stream(primary, array.data(), array.size() / 21);
