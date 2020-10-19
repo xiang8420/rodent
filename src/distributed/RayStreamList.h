@@ -32,6 +32,7 @@ struct RayStreamList {
     RaysStream* get_secondary(); 
     
     void read_from_message(char*, int, int, int); 
+    void read_from_ptr(char*, int, bool, int); 
 
     int primary_size(){ return primary.size();}    
     int secondary_size(){ return secondary.size();}    
@@ -45,16 +46,19 @@ struct RayStreamList {
 RaysStream::RaysStream(float * ptr, int capacity, int width, int copy_size) 
      :capacity(capacity), width(width) 
 {
-        size_t memory = physical_memory_used_by_process();
+    if(copy_size > capacity)
+        error("RaysStream copy size > capacity\n");
+
+    size_t memory = physical_memory_used_by_process();
     data.resize(capacity * width);
-        printf("2new rays resize cap %d %ld kb %ld mb\n", capacity, memory, memory / 1024);
+    printf("2new rays resize cap %d %ld kb %ld mb\n", capacity, memory, memory / 1024);
     
     // mask used as ptr mask not this 
     bool *ptr_mask = new bool[width];
     int  ptr_logic_width = width; 
     int  ptr_store_width = set_ray_mask(ptr_mask, ptr_logic_width, RAY_COMPACT);
     
-    printf("new RaysStrea, ");
+    printf("new RaysStream, ");
     int*a = (int*)data.data();
     int*b = (int*)ptr;
     for(int i = 0, k = 0; i < ptr_logic_width; i++) {
@@ -62,8 +66,8 @@ RaysStream::RaysStream(float * ptr, int capacity, int width, int copy_size)
             for(int j = 0; j < copy_size; j++) {
 
                 data[j + i * capacity] = ptr[j * ptr_store_width + k];
-                if(j < 5  && (i == 0 || i ==9) ) 
-                    printf("| %d %d ", a[j + i * capacity], b[j * ptr_store_width + k]);
+               // if(j < 5  && (i == 0 || i ==9) ) 
+               //     printf("| %d %d ", a[j + i * capacity], b[j * ptr_store_width + k]);
             }
             k++;
         } 
@@ -157,6 +161,44 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
         secondary.push(rays);
         
         copy_size = std::min(logic_capacity, msg_secondary_size);
+    } 
+    os<<"RayStreamList end read from ptr\n"; 
+}
+
+void RayStreamList::read_from_ptr(char* rays_ptr, int rays_size, bool isPrimary, int rank) {
+    std::ofstream os; 
+    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
+    printf("read from message\n");
+    os<<"read from message\n"; 
+
+    int copy_size = std::min(logic_capacity, rays_size);
+    int width = isPrimary ? (RAY_COMPACT ? 16 : 21) : 14; 
+    os<<"copy size "<<copy_size<<" logic capacity "<<logic_capacity<<" priamry ? "<<isPrimary<<" msg ray "<<rays_size<<"\n";
+    float *ptr = (float*)rays_ptr;
+    while(copy_size > 0) {
+        RaysStream * rays   = new struct RaysStream(ptr, store_capacity, width, copy_size);
+
+        int * ids = (int*)ptr;
+        os<<"rays copy size "<<copy_size<<"\n"<<" ptr ray";
+        for(int i = 0; i < std::min(copy_size, 5); i ++) {
+            os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
+        } os<<"\n ";
+
+        ids = (int*)(rays->get_data());
+        os<<"rays ray ";
+        for(int i = 0; i < std::min(copy_size, 5); i ++) {
+            os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
+        } os<<"\n";
+
+
+        rays_size -= copy_size; 
+        ptr += copy_size * width; 
+        if(isPrimary)
+            primary.push(rays);
+        else 
+            secondary.push(rays);
+        
+        copy_size = std::min(logic_capacity, rays_size);
     } 
     os<<"RayStreamList end read from ptr\n"; 
 }

@@ -1,7 +1,6 @@
 class Node {
 
 protected:
-//    struct RayList **rayList;
     std::vector <RayList> rayList;
     RayStreamList inList;  
     
@@ -14,6 +13,7 @@ protected:
     std::condition_variable render_start; //
 
     int msg_tag;
+    bool sync;
 public: 
     Node(Communicator *comm, ProcStatus *ps);
 
@@ -48,14 +48,13 @@ public:
 
 Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
     msg_tag = 0;
+    sync = false;
     int chunk_size = ps->get_chunk_size();
-    rayList.resize(chunk_size); //        = new RayList *[chunk_size];
-//    rayList = new RayList *[chunk_size];
     for(int i = 0; i < chunk_size; i++) {
-        rayList.emplace_back(RayList(1048576, "out"));
+        rayList.emplace_back(RayList("out"));
         //rayList[i].set_capacity(1048608, "out");
     }
-    inList.set_capacity(1048576/*ps->get_buffer_size()*/);
+    inList.set_capacity(ps->get_buffer_size());
   //  for(int i = 0; i < ps->get_chunk_size(); i++) { 
   //      printf("new out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
   //      printf("new out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
@@ -124,33 +123,40 @@ void Node::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacit
         comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
     }
     comm->os<<"\n";
-    for(int i = 0; i < ps->get_chunk_size(); i++) { 
-        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
-        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
-    }
+//    for(int i = 0; i < ps->get_chunk_size(); i++) { 
+//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
+//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
+//    }
     RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->rank, ps->get_chunk_size());
     out_mutex.unlock(); 
 }
 
 int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
-    printf("rthread load incoming buffer\n");
-    if(comm->size == 1 || ps->Exit() || ps->has_new_chunk() || ps->get_chunk_size() == 1) {
-        comm->os << "rthread exit new chunk \n";
-        return -1;
-    }
-    
-    ps->set_thread_idle(thread_id, thread_wait);
-    
-    std::cout<<"rthread "<<thread_wait<< " inlist priamry " <<inList.primary_size()<<" secondary "<<inList.secondary_size()<<"\n";
+    comm->os<<"rthread load incoming buffer inlist size "<<inList.size()<<"\n";
+    if(inList.empty()) {
+        if(sync)
+            return -1;
+        if(ps->Exit() || ps->has_new_chunk() || ps->get_chunk_size() == 1) {
+            comm->os << "rthread exit new chunk \n";
+            return -1;
+        }
+    } 
+    if(inList.empty() && ps->Exit())
+        error();
+
     std::unique_lock <std::mutex> lock(inList.mutex); 
-    while (thread_wait && inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
-        comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
-        inList_not_empty.wait(lock);
-        comm->os<<"rthread get condition" <<thread_wait<<" "<<ps->Exit()<<"\n";
-    }
-    
-    if(ps->Exit() || ps->has_new_chunk()) {  
-        return -1;
+    if(!sync) {
+        ps->set_thread_idle(thread_id, thread_wait);
+        
+        std::cout<<"rthread "<<thread_wait<< " inlist priamry " <<inList.primary_size()<<" secondary "<<inList.secondary_size()<<"\n";
+        while (thread_wait && inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
+            comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
+            inList_not_empty.wait(lock);
+            comm->os<<"rthread get condition" <<thread_wait<<" "<<ps->Exit()<<"\n";
+        }
+        if(ps->Exit() || ps->has_new_chunk()) {  
+            return -1;
+        }
     }
 
     std::cout<<"primary ? "<<primary<<" primary size "<<inList.primary_size()<<" secondary size "<<inList.secondary_size()<<"\n";
@@ -183,6 +189,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     comm->os<<"\n";
     delete rays_stream;
     return copy_size + rays_size;
+        
 }
 
 void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preRendering, bool generate_rays) {

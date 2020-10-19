@@ -23,7 +23,9 @@ struct RaysArray {
 
     RaysArray(){}; 
 
-    ~RaysArray(){data.resize(0);}
+    int clear(); 
+    
+    ~RaysArray(){clear();}
 
     void resize(int capacity, int width); 
 
@@ -32,8 +34,6 @@ struct RaysArray {
     void read_from_ptr(char *src_ptr, int copy_size);
     
     int check_capacity(int);
-    
-    int clear(); 
 
     float& operator[](int id) { return data[id];}
     bool full() { return size == capacity; }
@@ -46,7 +46,6 @@ struct RaysArray {
 struct RayList {
     struct RaysArray primary;
     struct RaysArray secondary;
-    size_t logic_capacity1, store1_capacity;
     std::string type;
     std::mutex mutex;
 
@@ -56,9 +55,11 @@ struct RayList {
 
     RayList(const RayList& ); 
 
-    RayList(int, std::string );
+    RayList(std::string );
 
-    void set_capacity(int, std::string); 
+    void set_capacity(std::string); 
+    
+    void clear();
     
     ~RayList() {}
 
@@ -68,7 +69,6 @@ struct RayList {
     int secondary_size(){ return secondary.size;}    
     int size() { return primary.size + secondary.size; }
     bool empty() { return primary.empty() && secondary.empty(); } 
-    void clear() { primary.size = 0 ; secondary.size = 0; }
     void lock() {mutex.lock();}
     void unlock() {mutex.unlock();}
 
@@ -112,6 +112,8 @@ int RaysArray::clear()
 {
     int s = size;
     data.clear();
+    std::vector<float>().swap(data);
+    capacity = 0;
     size = 0;
     return s;
 }
@@ -124,6 +126,7 @@ int RaysArray::check_capacity(int num) {
         printf("put resize %ld capacity%ld\n", data.size(), data.capacity());
         capacity += std::max(num, 1024);
         data.resize(capacity * store_width);
+        printf("store width %d capacity %d\n", capacity, store_width);
         printf("after put resize %ld capacity%ld\n", data.size(), data.capacity());
         printf("after rays resize %ld kb %ld mb\n", memory, memory / 1024);
     }
@@ -143,15 +146,6 @@ void RaysArray::read_device_buffer(float *rays, int src, int num, int rays_capac
             }
         }
     }
-
-//    for(int i = 0, k = 0; i < logic_width; i++) {
-//        if(mask[i]) {
-//            for(int j = 0; j < num; j++) {
-//                data[(size + j) * store_width + k]  = rays[src + j + i * rays_capacity];
-//            }
-//            k++;
-//        }
-//    }
     size += num;
 }
 
@@ -187,30 +181,34 @@ inline void swap(float **a, float **b) {
     *b = *tmp;
 }
 
+//存储问题 可能从这里解决
+void RayList::clear() {
+    printf("\nraylist clear\n\n");
+    primary.size = 0 ;
+    secondary.size = 0;
+//    primary.clear() ; 
+//    secondary.clear(); 
+}
+
 RayList::RayList(const RayList& a) {
     printf("cant copy construct\n");
-    logic_capacity1 = a.logic_capacity1; 
-    store1_capacity = a.store1_capacity; 
-    primary.resize(store1_capacity, 21);
-    secondary.resize(store1_capacity, 14);
     type = "out";
     RayList::time = 0;
+    primary.resize(1048576, 21);
+    secondary.resize(1048576, 14);
 }
 
-RayList::RayList(int n, std::string type):logic_capacity1(n), type(type) {
-    store1_capacity = (n & ~((1 << 5) - 1)) + 32; // round to 32
-    primary.resize(store1_capacity, 21);
-    secondary.resize(store1_capacity, 14);
+RayList::RayList(std::string type): type(type) {
     RayList::time = 0;
+    primary.resize(1048576, 21);
+    secondary.resize(1048576, 14);
 }
 
-void RayList::set_capacity(int n, std::string t) {
-    logic_capacity1 = n;
-    store1_capacity = (n & ~((1 << 5) - 1)) + 32; // round to 32
-    primary.resize(store1_capacity, 21);
-    secondary.resize(store1_capacity, 14);
+void RayList::set_capacity(std::string t) {
     RayList::time = 0;
     type = t;
+    primary.resize(1048576, 21);
+    secondary.resize(1048576, 14);
 }
 
 

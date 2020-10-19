@@ -148,7 +148,7 @@ public:
 
 Message::Message() {
     printf("construct message void\n");
-    content.reserve(1024 * 1024 * 21 * 3);
+    content.reserve(1024 * 1024 * 21);
    //??? 
 }
 //recv msg
@@ -204,8 +204,6 @@ RecvMsg::RecvMsg(RayList* List, RayStreamList *inList, int local_chunk, MPI_Stat
             if(header->chunk != local_chunk) {
 //                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
                 RayList::read_from_message(List, (char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
-                //bug here master inList
-                //可以发送的时候 分开 其他光线和inlist目标光线
             } else {
 //                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
                 inList->lock();
@@ -301,13 +299,24 @@ RayMsg::RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int t
 RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag) {
     printf("construct message ray\n");
     header = new MessageHeader(-1, src, dst, MsgType::Ray, false, 0, idle, chunk, tag);
-//    RaysArray* primary = outList->get_primary(); 
-//    int width = primary->store_width; 
-//    int* ids = (int*)(primary->get_data());
-//    for(int i = 0; i < 5; i ++) {
-//        printf(" %d %d$", ids[i*width], ids[i*width + 9]);
-//    }
-//    printf("\n");
+    
+    RaysArray &primary = outList.get_primary(); 
+    int width = primary.store_width; 
+    int* ids = (int*)(primary.get_data());
+    printf(" ray msg raylist primary size %d  ", primary.get_size());
+    for(int i = 0; i < std::min(5, primary.get_size()); i ++) {
+        printf(" %d %d$", ids[i*width], ids[i*width + 9]);
+    }
+    printf("\n");
+
+    RaysArray &secondary = outList.get_secondary(); 
+    printf(" ray msg raylist secondary size %d  ", secondary.get_size());
+    width = secondary.store_width; 
+    ids = (int*)(secondary.get_data());
+    for(int i = 0; i < std::min(5, secondary.get_size()); i ++) {
+        printf(" %d %d$", ids[i*width], ids[i*width + 9]);
+    }
+    printf("\n");
 
 
     header->primary = outList.get_primary().size; 
@@ -325,6 +334,7 @@ RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag
     header->content_size = primary_length + secondary_length; 
     
     outList.clear();
+//    printf("outlist clear src %d dst %d\n", src, dst);
 }
 
 QuitMsg::QuitMsg(int src, int tag) {

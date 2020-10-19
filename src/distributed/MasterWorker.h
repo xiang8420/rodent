@@ -8,7 +8,9 @@ struct MWNode : public Node{
 
     int get_unloaded_chunk();
     
-    void send_message();
+    void master_send_message();
+    
+    void worker_send_message(); 
 
     static void message_thread(void* tmp);
     
@@ -51,130 +53,126 @@ int MWNode::get_unloaded_chunk(){
     return unloaded_chunk;
 }
 
-void MWNode::send_message() {
+void MWNode::master_send_message() {
+    //master idle
+    //printf("master all status all thread wait %d inlist %d %d %d %d\n", 
+    //        ps->all_thread_waiting(), inList.size(), ps->all_proc_idle(), ps->all_rays_received(), rayList_empty());
+    for(int i = 0; i < ps->get_chunk_size(); i++)
+        printf("M %d ",rayList[i].size());
+    printf("\n");
+    comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
     
-    //clear_outlist();
-    if(comm->isMaster()) {
-        //master idle
-        //printf("master all status all thread wait %d inlist %d %d %d %d\n", 
-        //        ps->all_thread_waiting(), inList.size(), ps->all_proc_idle(), ps->all_rays_received(), rayList_empty());
-        for(int i = 0; i < ps->get_chunk_size(); i++)
-            printf("M %d ",rayList[i].size());
-        printf("\n");
-        comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
-        
-        if(ps->all_thread_waiting() && inList.empty() && rayList_empty()) {
-            comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
-            ps->set_proc_idle(comm->rank);
-        }
-        if(ps->all_proc_idle() && ps->all_rays_received() && rayList_empty()) {
-            QuitMsg quit_msg(comm->rank, get_tag()); 
-            comm->send_message(&quit_msg, ps);
-            ps->set_exit();
-            comm->os<<"set exit\n";
-            inList_not_empty.notify_all();
-            return;
-        }
+    if(ps->all_thread_waiting() && inList.empty() && rayList_empty()) {
+        comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
+        ps->set_proc_idle(comm->rank);
+    }
+    if(ps->all_proc_idle() && ps->all_rays_received() && rayList_empty()) {
+        QuitMsg quit_msg(comm->rank, get_tag()); 
+        comm->send_message(&quit_msg, ps);
+        ps->set_exit();
+        comm->os<<"set exit\n";
+        inList_not_empty.notify_all();
+        return;
+    }
 
-        //proc idle
-        int idle_proc = ps->get_idle_proc();
-        out_mutex.lock();
-        if(idle_proc >= 0 && ps->all_rays_received()) {
-            //find a unloaded chunk contents unprocessed rays
-            // if idle proc loaded chunk not empty ???
+    //proc idle
+    int idle_proc = ps->get_idle_proc();
+    out_mutex.lock();
+    if(idle_proc >= 0 && ps->all_rays_received()) {
+        //find a unloaded chunk contents unprocessed rays
+        // if idle proc loaded chunk not empty ???
 
-            if(idle_proc == comm->rank) {
-                comm->os<<"master idle\n"; 
-            } else {
-                int unloaded_chunk = get_unloaded_chunk(); 
-                //find a idle proc send chunk id to it
-                if(unloaded_chunk > -1) {
-                    comm->os<<"mthread scheduleMsg"<<"\n";
-                    ps->update_chunk(idle_proc, unloaded_chunk);
-                    RayMsg ray_msg(rayList[unloaded_chunk], comm->rank, idle_proc, unloaded_chunk, false, get_tag()); 
-                    
-                    comm->os<<"mthread schedule RayMsg "<<ray_msg.get_chunk()<<"\n";
-                    comm->send_message(&ray_msg, ps);
-                    ps->set_proc_busy(idle_proc);
-                    
-                    ScheduleMsg msg(comm->rank, ps->get_chunk_map(), idle_proc, ps->get_chunk_size(), get_tag()); 
-                    comm->send_message(&msg, ps);
-                    
-              //      return;//////??
-                }
+        if(idle_proc == comm->rank) {
+            comm->os<<"master idle\n"; 
+        } else {
+            int unloaded_chunk = get_unloaded_chunk(); 
+            //find a idle proc send chunk id to it
+            if(unloaded_chunk > -1) {
+                comm->os<<"mthread scheduleMsg"<<"\n";
+                ps->update_chunk(idle_proc, unloaded_chunk);
+                RayMsg ray_msg(rayList[unloaded_chunk], comm->rank, idle_proc, unloaded_chunk, false, get_tag()); 
+                
+                comm->os<<"mthread schedule RayMsg "<<ray_msg.get_chunk()<<"\n";
+                comm->send_message(&ray_msg, ps);
+                ps->set_proc_busy(idle_proc);
+                
+                ScheduleMsg msg(comm->rank, ps->get_chunk_proc(), idle_proc, ps->get_chunk_size(), get_tag()); 
+                comm->send_message(&msg, ps);
+                
+          //      return;//////??
             }
         }
-        if(!outList_empty()) {
+    }
+    if(!outList_empty()) {
 
-            int cId = get_sent_list();
-            if(ps->get_proc(cId) >= 0 ) {
+        int cId = get_sent_list();
+        if(ps->get_proc(cId) >= 0 ) {
+            int dst_proc = ps->get_proc(cId);
+            comm->os<<"mthread master new RayMsg "<<cId<<" size "<<rayList[cId].size()<<" rank "<<comm->rank<<" dst "<<dst_proc<<"\n";
+            
+            ps->set_proc_busy(dst_proc);
+            
+            RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
+            
+            comm->os<<"mthread RayMsg "<<ray_msg.get_chunk()<<"\n";
+            comm->send_message(&ray_msg, ps);
+        }
+    }
+    out_mutex.unlock(); 
+}
+
+void MWNode::worker_send_message() {
+ // printf("master after proc status\n");
+//    comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
+//    for(int i = 0; i < ps->get_chunk_size(); i++)
+//        printf("w %d ",rayList[i].size());
+//    printf("\n");
+    if (ps->all_thread_waiting() && inList.empty()) {
+        if(rayList_empty()) {
+            comm->os<< "mthread send status msg\n";
+            int * tmp = ps->get_status();
+            comm->os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
+            ps->set_proc_idle(comm->rank);
+            comm->os<<"mthread local chunk"<<ps->get_local_chunk()<<"\n";
+            StatusMsg status(comm->rank, comm->master, ps->get_status(), ps->get_local_chunk(), comm->size, get_tag()); 
+            comm->send_message(&status, ps);
+            comm->os<< "mthread send status msg success\n";
+        } else {
+            int chunk_size = ps->get_chunk_size();
+            for(int i = 0;i < chunk_size; i++)
+                comm->os<<rayList[i].primary_size()<<" "<<rayList[i].secondary_size()<<" "<<rayList[i].type<<" \n";
+            
+            comm->os<<"need another chunk or need send rays\n";
+        }
+    } else {
+      //  comm->os<<"mthread set proc busy\n";
+        ps->set_proc_busy(comm->rank);
+    }
+    
+    if (ps->has_new_chunk()) {
+        inList_not_empty.notify_all();
+        for(int i = 0; i < ps->get_chunk_size(); i++) {
+            comm->os<<"new chunk raylist "<<rayList[i].size()<<" |";
+        }
+        comm->os<<"\n";
+    }
+    if (!outList_empty()) {
+        comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
+        out_mutex.lock();
+        int cId = get_sent_list();
+        if(cId >= 0) {
+            if(ps->get_proc(cId) >= 0) {
                 int dst_proc = ps->get_proc(cId);
-                comm->os<<"mthread master new RayMsg "<<cId<<" size "<<rayList[cId].size()<<" rank "<<comm->rank<<" dst "<<dst_proc<<"\n";
-                
                 ps->set_proc_busy(dst_proc);
-                
                 RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
-                
-                comm->os<<"mthread RayMsg "<<ray_msg.get_chunk()<<"\n";
+                comm->send_message(&ray_msg, ps);
+            } else {
+                RayMsg ray_msg(rayList[cId], comm->rank, comm->master, cId, false, get_tag()); 
                 comm->send_message(&ray_msg, ps);
             }
         }
         out_mutex.unlock(); 
-     // printf("master after proc status\n");
-    } else {
-        comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
-    //    for(int i = 0; i < ps->get_chunk_size(); i++)
-    //        printf("w %d ",rayList[i].size());
-    //    printf("\n");
-        if (ps->all_thread_waiting() && inList.empty()) {
-            if(rayList_empty()) {
-                comm->os<< "mthread send status msg\n";
-                int * tmp = ps->get_status();
-                comm->os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
-                ps->set_proc_idle(comm->rank);
-                comm->os<<"mthread local chunk"<<ps->get_local_chunk()<<"\n";
-                StatusMsg status(comm->rank, comm->master, ps->get_status(), ps->get_local_chunk(), comm->size, get_tag()); 
-                comm->send_message(&status, ps);
-                comm->os<< "mthread send status msg success\n";
-            } else {
-                int chunk_size = ps->get_chunk_size();
-                for(int i = 0;i < chunk_size; i++)
-                    comm->os<<rayList[i].primary_size()<<" "<<rayList[i].secondary_size()<<" "<<rayList[i].type<<" \n";
-                
-                comm->os<<"need another chunk or need send rays\n";
-            }
-        } else {
-          //  comm->os<<"mthread set proc busy\n";
-            ps->set_proc_busy(comm->rank);
-        }
-        
-        if (ps->has_new_chunk()) {
-            inList_not_empty.notify_all();
-            for(int i = 0; i < ps->get_chunk_size(); i++) {
-                comm->os<<"new chunk raylist "<<rayList[i].size()<<" |";
-            }
-            comm->os<<"\n";
-        }
-        if (!outList_empty()) {
-            comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
-            out_mutex.lock();
-            int cId = get_sent_list();
-            if(cId >= 0) {
-                if(ps->get_proc(cId) >= 0) {
-                    int dst_proc = ps->get_proc(cId);
-                    ps->set_proc_busy(dst_proc);
-                    RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
-                    comm->send_message(&ray_msg, ps);
-                } else {
-                    RayMsg ray_msg(rayList[cId], comm->rank, comm->master, cId, false, get_tag()); 
-                    comm->send_message(&ray_msg, ps);
-                }
-            }
-            out_mutex.unlock(); 
-        }
     }
-
-    comm->purge_completed_mpi_buffers();
 }
 
 void MWNode::message_thread(void* tmp) {
@@ -204,12 +202,10 @@ void MWNode::message_thread(void* tmp) {
         //if new chunk havent loaded, render thread havent start, mthread wait
         std::unique_lock <std::mutex> lock(wk->thread_mutex); 
         if(!wk->inList.empty()) {
-            //原有的光线 先放自己这 剩余的 发给master
             if(ps->has_new_chunk() ) {
 //                comm->os<<"wait new chunk\n";
                 while( ps->has_new_chunk()) {
 //                    comm->os<<"wait rthread launch\n";
-
                     wk->render_start.wait(lock); 
                 }
             } 
@@ -219,9 +215,15 @@ void MWNode::message_thread(void* tmp) {
 
         if(ps->Exit()) break;
         
-        wk->send_message(); 
+        //clear_outlist();
+        if(comm->isMaster())
+            wk->master_send_message(); 
+        else
+            wk->worker_send_message();
         
-        usleep(1000);
+        comm->purge_completed_mpi_buffers();
+        
+        usleep(50);
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
     comm->os <<" inlist "<< wk->inList.size()

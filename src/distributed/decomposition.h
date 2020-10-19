@@ -283,6 +283,11 @@ struct ImageDecomposition {
             int ymin = gblock.ymin + y * step_height;
             ImageBlock block(xmin, ymin, std::min(gblock.xmax, xmin + step_width), std::min(gblock.ymax, ymin + step_height));  
             
+            if(chunk_size < proc_size)
+                error("chunk size ", chunk_size, " proc size ", proc_size, "invalid");
+
+//            int chunk = get_most_unloaded_chunk(&block[0], chunk_map, chunks.size); 
+
             int chunk;
             if(chunk_size == proc_size) {
                 chunk = i;

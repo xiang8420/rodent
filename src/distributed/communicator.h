@@ -34,7 +34,7 @@ struct Communicator {
     int get_comm_rank() { return rank; }
     int isMaster(){return rank == master;} 
 
-    void reduce_image(float* film, float *reduce_buffer, int pixel_num);
+    void reduce(float* film, float *reduce_buffer, int pixel_num);
 
     void all_gather_float(float *a, float *res, int size); 
 
@@ -78,7 +78,7 @@ void Communicator::all_gather_float(float *a, float *res, int size) {
     MPI_Allgather(a, 1, MPI_FLOAT, res, 1, MPI_FLOAT, MPI_COMM_WORLD);
 }
 
-void Communicator::reduce_image(float* film, float *reduce_buffer, int pixel_num){
+void Communicator::reduce(float* film, float *reduce_buffer, int pixel_num){
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
 }
@@ -236,7 +236,7 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
                 //    ps->set_exit();
                    // //if this proc need new chunk
 //                    os<<"recv schedule\n";
-                    int * a = ps->get_chunk_map();
+                    int * a = ps->get_chunk_proc();
 //                    os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                     if(ps->update_chunk((int*)recv_msg->get_content())) {
                         for(int i = 0; i < ps->get_chunk_size(); i++) {
@@ -246,7 +246,7 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
 //                        os<<"mthread new chun k" << ps->get_local_chunk()<<"\n";
                         int * s = (int*)recv_msg->get_content();
 //                        os<<s[0]<<" "<<s[1]<<" "<<s[2]<<" "<<s[3]<<"\n";
-                        int * a = ps->get_chunk_map();
+                        int * a = ps->get_chunk_proc();
 //                        os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                         printf("mthread new chunk %d\n", ps->get_local_chunk());
                         
@@ -256,7 +256,7 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
                         return false; // waiting for rays
                     } else {
                         os<<"do nothing\n";
-                        int * a = ps->get_chunk_map();
+                        int * a = ps->get_chunk_proc();
                         os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                         return true;
                     }

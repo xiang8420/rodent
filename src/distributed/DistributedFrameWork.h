@@ -14,14 +14,13 @@
 #include <assert.h>
 #include "Node.h"
 #include "SingleNode.h"
+#include "SyncNode.h"
 #include "P2PNode.h"
 #include "AllCopyNode.h"
 #include "MasterWorker.h"
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
-
-
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
@@ -62,6 +61,7 @@ struct DistributedFrameWork {
         ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
         // mpi
         if(chunk == 1 && comm->size == 1 ) node = new SingleNode(comm, ps);
+        else if(type == "SyncNode") node = new SyncNode(comm, ps);
         else if(type == "P2PNode") node = new P2PNode(comm, ps);
         else if(type == "MWNode") node = new MWNode(comm, ps);
         else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
@@ -80,15 +80,15 @@ struct DistributedFrameWork {
         printf("dis frame worker run\n");
         
         /*block size equels proc size*/
-        if(type == "P2PNode" || type == "MWNode") {
-            camera->decomposition(ps->get_chunk_map(), comm->size, comm->rank, comm->size); 
+        if(type == "P2PNode" || type == "MWNode" || type == "SyncNode") {
+            camera->decomposition(ps->get_chunk_proc(), comm->size, comm->rank, comm->size); 
         } else {
             int block_count = comm->size == 1 ? 1 : comm->size * 2;
-            camera->decomposition(ps->get_chunk_map(), block_count, comm->rank, comm->size);
+            camera->decomposition(ps->get_chunk_proc(), block_count, comm->rank, comm->size);
         } 
         
         for(int i = 0; i < ps->get_chunk_size(); i++) {
-            printf("| %d", ps->get_chunk_map()[i]);
+            printf("| %d", ps->get_chunk_proc()[i]);
         }
         printf("\n");
         ps->updata_local_chunk();
@@ -107,7 +107,7 @@ struct DistributedFrameWork {
         float *reduce_buffer = new float[pixel_num];
         printf("%d before reduce\n", comm->rank);
         
-        comm->reduce_image(film, reduce_buffer, pixel_num);
+        comm->reduce(film, reduce_buffer, pixel_num);
         
         std::string out = "picture/" + out_file + "_f_" + std::to_string(frame) + "_w_" + std::to_string(comm->get_comm_size()) + "_g_" + std::to_string(ps->get_chunk_size());
 
