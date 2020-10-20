@@ -8,11 +8,7 @@ struct AllCopyNode : public Node{
     AllCopyNode(struct Communicator *comm, struct ProcStatus *ps);
     
     ~AllCopyNode();
-
-    int get_unloaded_chunk();
     
-    void check_proc_status();
-   
     void send_message();
 
     static void message_thread(void* tmp);
@@ -29,7 +25,7 @@ AllCopyNode::AllCopyNode(struct Communicator *comm, struct ProcStatus *ps)
     
     printf("new AllCopyNode\n");
     int chunk_size = ps->get_chunk_size();
-    assert(chunk_size == 1 && comm->size == chunk_size); 
+    assert(chunk_size == 1 && comm->get_size() == chunk_size); 
     
     comm->os<< "master chunk size"<<chunk_size<<"\n";
   
@@ -54,19 +50,19 @@ void AllCopyNode::message_thread(void* tmp) {
     ProcStatus * ps = wk->ps;
     ImageDecomposition * camera = ps->get_camera();
 
-    printf("%d message thread\n", comm->rank);
+    printf("%d message thread\n", comm->get_rank());
     comm->os<<"message thread\n";
     
     size_t block_count = camera->get_block_count();
-    int i = comm->size;
-    printf("comm size %d block count %ld\n", comm->size, block_count);
+    int i = comm->get_size();
+    printf("comm size %d block count %ld\n", comm->get_size(), block_count);
     while(i < block_count) {
         //printf("mthread schedule %d mthread\n", i);
         //master waiting
         if(ps->is_proc_idle()) {
             printf("master mthread self schedule %d\n", i);
             camera->set_render_block(i++);
-            ps->set_proc_busy(comm->rank);
+            ps->set_proc_busy(comm->get_rank());
             wk->block_cond.notify_all();
             continue;
         } else {
@@ -89,8 +85,8 @@ void AllCopyNode::message_thread(void* tmp) {
     wk->block_cond.notify_all();
     printf("end schedule2\n");
     int exit = -1;
-    for(int i = 0; i < comm->size; i++){
-        if(i != comm->rank)
+    for(int i = 0; i < comm->get_size(); i++){
+        if(i != comm->get_rank())
             MPI_Send(&exit, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
     }
     printf("end schedule3\n");
@@ -117,7 +113,7 @@ void AllCopyNode::run(ImageDecomposition * camera) {
         workThread.clear();
         while(!ps->Exit()) {
             
-            ps->set_proc_idle(comm->rank);
+            ps->set_proc_idle(comm->get_rank());
             printf("end rthread\n"); 
             std::unique_lock <std::mutex> lock(block_mutex); 
             while (!ps->Exit() && !ps->is_proc_idle()) {
@@ -146,10 +142,11 @@ void AllCopyNode::run(ImageDecomposition * camera) {
 
             int new_block;
             MPI_Status status;
-            printf("mthread worker idle %d\n", comm->rank);
-            MPI_Send(&comm->rank, 1, MPI_INT, comm->master, 0, MPI_COMM_WORLD);
-            MPI_Recv(&new_block, 1, MPI_INT, comm->master, 0, MPI_COMM_WORLD, &status);
-            printf("mthread worker  %d recv %d\n", comm->rank, new_block);
+            printf("mthread worker idle %d\n", comm->get_rank());
+            int comm_rank = comm->get_rank();
+            MPI_Send(&comm_rank, 1, MPI_INT, comm->get_master(), 0, MPI_COMM_WORLD);
+            MPI_Recv(&new_block, 1, MPI_INT, comm->get_master(), 0, MPI_COMM_WORLD, &status);
+            printf("mthread worker  %d recv %d\n", comm->get_rank(), new_block);
             if(new_block == -1)
                 break;
             camera->set_render_block(new_block);
@@ -160,7 +157,7 @@ void AllCopyNode::run(ImageDecomposition * camera) {
                 thread.join();
             workThread.clear();
         }
-        printf("worker %d exit\n", comm->rank);
+        printf("worker %d exit\n", comm->get_rank());
     }
 
 

@@ -7,12 +7,14 @@ struct SyncNode : public Node{
     
     ~SyncNode();
     
-    int get_unloaded_chunk();
+    int get_unloaded_chunk(int *);
     
     void send_message();
 
     void gather_rays(int, int, bool);
 
+    void schedule(int * list_size); 
+    
     void synchronize (); 
 
     void worker_synchronize (); 
@@ -50,16 +52,6 @@ SyncNode::~SyncNode() {
     printf("delete SyncNode\n");
 }
 
-int SyncNode::get_unloaded_chunk(){
-    int unloaded_chunk = -1;
-    for(int i = 0; i < ps->get_chunk_size(); i++) {
-        if(rayList[i].size() > 0 && ps->get_proc(i) == -1) {
-            unloaded_chunk = i; break; 
-        }
-    }
-    return unloaded_chunk;
-}
-
 void get_raylist_size(std::vector <RayList> &rayList, std::vector <int> &list_size) { 
     for(int i = 0; i < rayList.size(); i ++)
         list_size[i] = rayList[i].size();
@@ -67,20 +59,20 @@ void get_raylist_size(std::vector <RayList> &rayList, std::vector <int> &list_si
 
 void SyncNode::gather_rays(int chunk, int owner, bool primary) {
 
-    std::vector<int> gather_rays_size(comm->size);
+    std::vector<int> gather_rays_size(comm->get_size());
     struct RaysArray &rays = primary ? rayList[chunk].get_primary() : rayList[chunk].get_secondary();
-    int width = rays.store_width;
+    int width = rays.get_store_width();
     int list_size = rays.get_size();
-    int proc_size = comm->size;
+    int proc_size = comm->get_size();
     MPI_Gather(&list_size, 1, MPI_INT, gather_rays_size.data(), 1, MPI_INT, owner, MPI_COMM_WORLD);
 
     std::vector<int> rcounts(proc_size);
     std::vector<int> displs(proc_size);
     std::vector<float> recv_buffer;
     int all_rays_size = 0;
-    if(comm->rank == owner) {
+    if(comm->get_rank() == owner) {
         comm->os<<"owner "<<owner<<" list size: ";
-        for(int k = 0; k < comm->size; k ++)
+        for(int k = 0; k < comm->get_size(); k ++)
             comm->os<<gather_rays_size[k]<<" ";
         comm->os<<"\n";
 
@@ -102,7 +94,7 @@ void SyncNode::gather_rays(int chunk, int owner, bool primary) {
         comm->os<<"\n";
     }
     MPI_Gatherv((float*)rays.get_data(), list_size * width , MPI_FLOAT, (float*)recv_buffer.data(), rcounts.data(), displs.data(), MPI_FLOAT, owner, MPI_COMM_WORLD);
-    if(comm->rank == owner)  {
+    if(comm->get_rank() == owner)  {
         comm->os<<"after gatherv owner ray size"<<all_rays_size<<"\n";
         int* iptr = (int*) recv_buffer.data();
         for(int i = 0; i < std::min(5, all_rays_size) ; i ++) {
@@ -115,6 +107,39 @@ void SyncNode::gather_rays(int chunk, int owner, bool primary) {
      
     comm->os<<" raylist "<<chunk<<" size "<< rays.data.size()<<" capacity "<<rays.data.capacity()<<"\n";
 
+}
+
+int SyncNode::get_unloaded_chunk(int* list_size) {
+    int unloaded_chunk = -1;
+    int max_ray_size = 0;
+    for(int i = 0; i < ps->get_chunk_size(); i++) {
+        if(list_size[i] > max_ray_size && ps->get_proc(i) == -1) {
+            unloaded_chunk = i;  
+            max_ray_size = list_size[i];
+        }
+    }
+    return unloaded_chunk;
+}
+
+void SyncNode::schedule(int * list_size) {
+    int chunk_size = ps->get_chunk_size();
+    int proc_size  = comm->get_size();
+
+    if(proc_size >= chunk_size) 
+        return;
+
+    for(int i = 0; i < chunk_size; i++) {
+         printf(" %d list size %d %d\n", comm->get_rank(), i, list_size[i]);
+         //if proc list empty, assign a new chunk
+         int chunk_proc = ps->get_proc(i);
+         if(list_size[i] == 0 && chunk_proc >= 0) {
+             printf("proc %d need new schedule\n ", comm->get_rank());
+             int unloaded_chunk = get_unloaded_chunk(list_size);
+             if(unloaded_chunk >= 0)
+                 ps->update_chunk(chunk_proc, unloaded_chunk);
+             //proc_[i] load new chunk 
+         } 
+    } 
 }
 
 void SyncNode::synchronize () {
@@ -135,19 +160,21 @@ void SyncNode::synchronize () {
         ps->set_exit(); 
         return;
     }
-
-    //schedule() 静态调度时无用
+    
+    schedule(list_size.data()); //静态调度时无用
+    printf("proc %d chunk %d\n", comm->get_rank(), ps->get_local_chunk());
     //如果proc空了 则给一个chunk并进行gather
     //implement get dst chunk, add proc_chunk_map
     for(int chunk = 0; chunk < chunk_size; chunk++) {
         int owner = ps->get_proc(chunk);
-        if(owner < 0) continue; 
-       
+        if(owner < 0) {
+            //or send to master? 
+            continue; 
+        } 
         //gether all chunk rays 
         gather_rays(chunk, owner, true); 
         gather_rays(chunk, owner, false); 
         rayList[chunk].clear();
-
     }  
     printf("rthread after gather inlist size %d\n", inList.size());
     

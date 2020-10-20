@@ -209,11 +209,11 @@ bool ProcStatus::update_global_rays(int* a) {
     return true;
 }
 
-bool ProcStatus::update_chunk(int* s) {
+bool ProcStatus::update_chunk(int* schedule) {
     for(int i = 0; i < chunk_size; i++) {
-        printf("chunk_size %d chunk_proc[i] %d  s[i] %d\n", chunk_size, chunk_proc[i], s[i]);
-        if(chunk_proc[i] != s[i]) {
-            chunk_proc[i] = s[i];
+        printf("chunk_size %d chunk_proc[i] %d  schedule[i] %d\n", chunk_size, chunk_proc[i], schedule[i]);
+        if(chunk_proc[i] != schedule[i]) {
+            chunk_proc[i] = schedule[i];
             if(chunk_proc[i] == rank) {
                 local_chunk = i;
                 load_new_chunk = true;

@@ -13,26 +13,18 @@ struct mpi_send_buffer {
     int total_size;
 };
 
-struct Communicator {
-    MPI_Status  sta[3];
-    MPI_Request req[3];
-    MPI_Request lrq, rrq;
+class Communicator {
 
-    MPI_Comm Client_Comm;
-    int rank, size, master;
+public:
     std::ofstream os;
-   
-    int send_ray_count, recv_ray_count;
-    int send_msg_count, recv_msg_count;
-        
-    std::vector<mpi_send_buffer*> mpi_in_flight;
 
     Communicator();
     ~Communicator(); 
    
-    int get_comm_size() { return size; } 
-    int get_comm_rank() { return rank; }
+    int get_size() { return size; } 
+    int get_rank() { return rank; }
     int isMaster(){return rank == master;} 
+    int get_master() {return master;}
 
     void reduce(float* film, float *reduce_buffer, int pixel_num);
 
@@ -47,8 +39,19 @@ struct Communicator {
 
     void purge_completed_mpi_buffers(); 
 
-};
+private:
+    MPI_Status  sta[3];
+    MPI_Request req[3];
+    MPI_Request lrq, rrq;
 
+    MPI_Comm Client_Comm;
+    int rank, size, master;
+   
+    int send_ray_count, recv_ray_count;
+    int send_msg_count, recv_msg_count;
+        
+    std::vector<mpi_send_buffer*> mpi_in_flight;
+};
 
 
 Communicator::Communicator() {
@@ -239,10 +242,6 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
                     int * a = ps->get_chunk_proc();
 //                    os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                     if(ps->update_chunk((int*)recv_msg->get_content())) {
-                        for(int i = 0; i < ps->get_chunk_size(); i++) {
-                            List[i].type = "out"; 
-                        }
-                        List[ps->get_local_chunk()].type = "in";
 //                        os<<"mthread new chun k" << ps->get_local_chunk()<<"\n";
                         int * s = (int*)recv_msg->get_content();
 //                        os<<s[0]<<" "<<s[1]<<" "<<s[2]<<" "<<s[3]<<"\n";

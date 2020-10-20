@@ -45,9 +45,11 @@ MWNode::~MWNode() {
 
 int MWNode::get_unloaded_chunk(){
     int unloaded_chunk = -1;
+    int max_ray_size = 0;
     for(int i = 0; i < ps->get_chunk_size(); i++) {
-        if(rayList[i].size() > 0 && ps->get_proc(i) == -1) {
-            unloaded_chunk = i; break; 
+        if(rayList[i].size() > max_ray_size && ps->get_proc(i) == -1) {
+            unloaded_chunk = i;  
+            max_ray_size = rayList[i].size();
         }
     }
     return unloaded_chunk;
@@ -64,10 +66,10 @@ void MWNode::master_send_message() {
     
     if(ps->all_thread_waiting() && inList.empty() && rayList_empty()) {
         comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
-        ps->set_proc_idle(comm->rank);
+        ps->set_proc_idle(comm->get_rank());
     }
     if(ps->all_proc_idle() && ps->all_rays_received() && rayList_empty()) {
-        QuitMsg quit_msg(comm->rank, get_tag()); 
+        QuitMsg quit_msg(comm->get_rank(), get_tag()); 
         comm->send_message(&quit_msg, ps);
         ps->set_exit();
         comm->os<<"set exit\n";
@@ -82,7 +84,7 @@ void MWNode::master_send_message() {
         //find a unloaded chunk contents unprocessed rays
         // if idle proc loaded chunk not empty ???
 
-        if(idle_proc == comm->rank) {
+        if(idle_proc == comm->get_rank()) {
             comm->os<<"master idle\n"; 
         } else {
             int unloaded_chunk = get_unloaded_chunk(); 
@@ -90,13 +92,13 @@ void MWNode::master_send_message() {
             if(unloaded_chunk > -1) {
                 comm->os<<"mthread scheduleMsg"<<"\n";
                 ps->update_chunk(idle_proc, unloaded_chunk);
-                RayMsg ray_msg(rayList[unloaded_chunk], comm->rank, idle_proc, unloaded_chunk, false, get_tag()); 
+                RayMsg ray_msg(rayList[unloaded_chunk], comm->get_rank(), idle_proc, unloaded_chunk, false, get_tag()); 
                 
                 comm->os<<"mthread schedule RayMsg "<<ray_msg.get_chunk()<<"\n";
                 comm->send_message(&ray_msg, ps);
                 ps->set_proc_busy(idle_proc);
                 
-                ScheduleMsg msg(comm->rank, ps->get_chunk_proc(), idle_proc, ps->get_chunk_size(), get_tag()); 
+                ScheduleMsg msg(comm->get_rank(), ps->get_chunk_proc(), idle_proc, ps->get_chunk_size(), get_tag()); 
                 comm->send_message(&msg, ps);
                 
           //      return;//////??
@@ -108,11 +110,11 @@ void MWNode::master_send_message() {
         int cId = get_sent_list();
         if(ps->get_proc(cId) >= 0 ) {
             int dst_proc = ps->get_proc(cId);
-            comm->os<<"mthread master new RayMsg "<<cId<<" size "<<rayList[cId].size()<<" rank "<<comm->rank<<" dst "<<dst_proc<<"\n";
+            comm->os<<"mthread master new RayMsg "<<cId<<" size "<<rayList[cId].size()<<" rank "<<comm->get_rank()<<" dst "<<dst_proc<<"\n";
             
             ps->set_proc_busy(dst_proc);
             
-            RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
+            RayMsg ray_msg(rayList[cId], comm->get_rank(), dst_proc, cId, false, get_tag()); 
             
             comm->os<<"mthread RayMsg "<<ray_msg.get_chunk()<<"\n";
             comm->send_message(&ray_msg, ps);
@@ -132,21 +134,21 @@ void MWNode::worker_send_message() {
             comm->os<< "mthread send status msg\n";
             int * tmp = ps->get_status();
             comm->os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
-            ps->set_proc_idle(comm->rank);
+            ps->set_proc_idle(comm->get_rank());
             comm->os<<"mthread local chunk"<<ps->get_local_chunk()<<"\n";
-            StatusMsg status(comm->rank, comm->master, ps->get_status(), ps->get_local_chunk(), comm->size, get_tag()); 
+            StatusMsg status(comm->get_rank(), comm->get_master(), ps->get_status(), ps->get_local_chunk(), comm->get_size(), get_tag()); 
             comm->send_message(&status, ps);
             comm->os<< "mthread send status msg success\n";
         } else {
             int chunk_size = ps->get_chunk_size();
             for(int i = 0;i < chunk_size; i++)
-                comm->os<<rayList[i].primary_size()<<" "<<rayList[i].secondary_size()<<" "<<rayList[i].type<<" \n";
+                comm->os<<rayList[i].primary_size()<<" "<<rayList[i].secondary_size()<<" \n";
             
             comm->os<<"need another chunk or need send rays\n";
         }
     } else {
       //  comm->os<<"mthread set proc busy\n";
-        ps->set_proc_busy(comm->rank);
+        ps->set_proc_busy(comm->get_rank());
     }
     
     if (ps->has_new_chunk()) {
@@ -164,10 +166,10 @@ void MWNode::worker_send_message() {
             if(ps->get_proc(cId) >= 0) {
                 int dst_proc = ps->get_proc(cId);
                 ps->set_proc_busy(dst_proc);
-                RayMsg ray_msg(rayList[cId], comm->rank, dst_proc, cId, false, get_tag()); 
+                RayMsg ray_msg(rayList[cId], comm->get_rank(), dst_proc, cId, false, get_tag()); 
                 comm->send_message(&ray_msg, ps);
             } else {
-                RayMsg ray_msg(rayList[cId], comm->rank, comm->master, cId, false, get_tag()); 
+                RayMsg ray_msg(rayList[cId], comm->get_rank(), comm->get_master(), cId, false, get_tag()); 
                 comm->send_message(&ray_msg, ps);
             }
         }
@@ -181,7 +183,7 @@ void MWNode::message_thread(void* tmp) {
     Communicator * comm = wk->comm; 
     ProcStatus * ps = wk->ps;
 
-    printf("%d message thread\n", comm->rank);
+    printf("%d message thread\n", comm->get_rank());
 //    comm->os<<"message thread\n";
     int recv_count = 0;
     while (!ps->Exit()) {
@@ -227,7 +229,7 @@ void MWNode::message_thread(void* tmp) {
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
     comm->os <<" inlist "<< wk->inList.size()
-             <<" recv "<<ps->global_rays[comm->rank + comm->size]
+             <<" recv "<<ps->global_rays[comm->get_rank() + comm->get_size()]
              <<std::endl;
     wk->inList_not_empty.notify_all();
     return;
@@ -241,8 +243,8 @@ void MWNode::run(ImageDecomposition * camera) {
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
     std::vector<std::thread> workThread;
-    if(comm->size == 1) {
-        printf("only one worker %d  ", comm->rank);
+    if(comm->get_size() == 1) {
+        printf("only one worker %d  ", comm->get_rank());
         for(int i = 0; i < deviceNum; i++) 
             workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
         
@@ -252,7 +254,7 @@ void MWNode::run(ImageDecomposition * camera) {
         workThread.clear();
     } else {
         comm->os <<"mthread  \n";
-        comm->os <<comm->rank<<" start mthread run\n ";
+        comm->os <<comm->get_rank()<<" start mthread run\n ";
         std::thread mthread(message_thread, this);
         //    all proc start proc 0 send schedule? 
         while(1) {
@@ -269,7 +271,7 @@ void MWNode::run(ImageDecomposition * camera) {
             if(ps->has_new_chunk()) {
                 ps->chunk_loaded();
 
-                comm->os<<comm->rank<<" before set render start"<<"\n";
+                comm->os<<comm->get_rank()<<" before set render start"<<"\n";
                 for(int i = 0; i < deviceNum; i++) 
                     workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0));
                  
@@ -279,7 +281,7 @@ void MWNode::run(ImageDecomposition * camera) {
                 
                 render_start.notify_all(); 
                 comm->os<<" render start notify \n";
-                printf("%d render start notify \n", comm->rank);
+                printf("%d render start notify \n", comm->get_rank());
 
                 for(auto &thread: workThread)
                     thread.join();
@@ -291,7 +293,7 @@ void MWNode::run(ImageDecomposition * camera) {
             }
             iter++;
         }
-        printf("%d worker exit\n", comm->rank);
+        printf("%d worker exit\n", comm->get_rank());
         mthread.join();
     }
     return;

@@ -51,7 +51,7 @@ Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
     sync = false;
     int chunk_size = ps->get_chunk_size();
     for(int i = 0; i < chunk_size; i++) {
-        rayList.emplace_back(RayList("out"));
+        rayList.emplace_back(RayList());
         //rayList[i].set_capacity(1048608, "out");
     }
     inList.set_capacity(ps->get_buffer_size());
@@ -66,7 +66,7 @@ int Node::get_tag(){
 }
 
 Node::~Node() {
-    printf("%d delete Node\n", comm->rank);
+    printf("%d delete Node\n", comm->get_rank());
 }
 
 bool Node::all_queue_empty(){ 
@@ -79,7 +79,7 @@ bool Node::all_queue_empty(){
 bool Node::outList_empty() {  
     int chunk_size = ps->get_chunk_size();
     for(int i = 0; i < chunk_size; i++) {
-        if(rayList[i].type == "out" && !rayList[i].empty() ) {
+        if( !rayList[i].empty() ) {
             return false;
         }
     }
@@ -89,10 +89,8 @@ bool Node::outList_empty() {
 void Node::clear_outlist() {  
     int chunk_size = ps->get_chunk_size();
     for(int i = 0; i < chunk_size; i++) {
-        if(rayList[i].type == "out" ) {
-            rayList[i].primary.clear();
-            rayList[i].secondary.clear();
-        }
+        rayList[i].get_primary().clear();
+        rayList[i].get_secondary().clear();
     }
 }
 
@@ -127,7 +125,7 @@ void Node::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacit
 //        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
 //        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
 //    }
-    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->rank, ps->get_chunk_size());
+    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->get_rank(), ps->get_chunk_size());
     out_mutex.unlock(); 
 }
 
@@ -180,7 +178,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     memcpy(*rays, rays_stream->get_data(), ps->get_buffer_capacity() * width * sizeof(float)); 
     rays_stream->size = 0;
  
-     //printf("%d rays_stream size %d %d %d\n", comm->rank, rays_stream->size, primary, rays_stream->store_width);
+     //printf("%d rays_stream size %d %d %d\n", comm->get_rank(), rays_stream->size, primary, rays_stream->store_width);
     int* ids = (int*)(*rays);
     comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
     for(int i = 0; i < std::min(5, copy_size); i ++) {
@@ -218,7 +216,7 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
     if(preRendering) {
         prerender(&settings);
     } else {
-        int rnd = comm->rank * devNum + devId;
+        int rnd = comm->get_rank() * devNum + devId;
         render(&settings, rnd, devId, ps->get_local_chunk(), generate_rays);
     }
     printf("work thread end\n");

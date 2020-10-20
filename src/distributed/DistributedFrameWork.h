@@ -58,9 +58,9 @@ struct DistributedFrameWork {
     DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
     {
         comm = new Communicator();
-        ps = new ProcStatus(comm->rank, comm->size, chunk, dev);
+        ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev);
         // mpi
-        if(chunk == 1 && comm->size == 1 ) node = new SingleNode(comm, ps);
+        if(chunk == 1 && comm->get_size() == 1 ) node = new SingleNode(comm, ps);
         else if(type == "SyncNode") node = new SyncNode(comm, ps);
         else if(type == "P2PNode") node = new P2PNode(comm, ps);
         else if(type == "MWNode") node = new MWNode(comm, ps);
@@ -81,10 +81,10 @@ struct DistributedFrameWork {
         
         /*block size equels proc size*/
         if(type == "P2PNode" || type == "MWNode" || type == "SyncNode") {
-            camera->decomposition(ps->get_chunk_proc(), comm->size, comm->rank, comm->size); 
+            camera->decomposition(ps->get_chunk_proc(), comm->get_size(), comm->get_rank(), comm->get_size()); 
         } else {
-            int block_count = comm->size == 1 ? 1 : comm->size * 2;
-            camera->decomposition(ps->get_chunk_proc(), block_count, comm->rank, comm->size);
+            int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
+            camera->decomposition(ps->get_chunk_proc(), block_count, comm->get_rank(), comm->get_size());
         } 
         
         for(int i = 0; i < ps->get_chunk_size(); i++) {
@@ -102,19 +102,19 @@ struct DistributedFrameWork {
         ProcStatus * ps = node->get_proc_status();
         
         //film 
-        printf("dfw reduce %d %d %d %d\n", comm->rank, comm->master, width, height); 
+        printf("dfw reduce %d %d %d %d\n", comm->get_rank(), comm->get_master(), width, height); 
         int pixel_num = width * height * 3;
         float *reduce_buffer = new float[pixel_num];
-        printf("%d before reduce\n", comm->rank);
+        printf("%d before reduce\n", comm->get_rank());
         
         comm->reduce(film, reduce_buffer, pixel_num);
         
-        std::string out = "picture/" + out_file + "_f_" + std::to_string(frame) + "_w_" + std::to_string(comm->get_comm_size()) + "_g_" + std::to_string(ps->get_chunk_size());
+        std::string out = "picture/" + out_file + "_f_" + std::to_string(frame) + "_w_" + std::to_string(comm->get_size()) + "_g_" + std::to_string(ps->get_chunk_size());
 
-        save_image(film, out + "_rank_" + std::to_string(comm->rank) + ".png", width, height, 1 /* iter*/ );
-        printf("%d end\n", comm->rank);  
+        save_image(film, out + "_rank_" + std::to_string(comm->get_rank()) + ".png", width, height, 1 /* iter*/ );
+        printf("%d end\n", comm->get_rank());  
 
-        if (comm->rank == 0 && out_file != "") {
+        if (comm->get_rank() == 0 && out_file != "") {
             save_image(reduce_buffer, out + ".png", width, height, 1 /* iter*/ );
         }
     }

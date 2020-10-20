@@ -14,12 +14,8 @@ struct RaysStream {
     float* get_data() {return data.data(); }
 };
 
-struct RayStreamList {
-    std::queue<RaysStream *> primary;
-    std::queue<RaysStream *> secondary;
-    
-    int logic_capacity, store_capacity;  //1048576 1048608 
-    std::string type;
+class RayStreamList {
+public:
     std::mutex mutex;
 
     RayStreamList(){}
@@ -40,6 +36,13 @@ struct RayStreamList {
     int size() { return primary.size() + secondary.size(); }
     void lock() { mutex.lock();}
     void unlock() { mutex.unlock();}
+
+private:
+    std::queue<RaysStream *> primary;
+    std::queue<RaysStream *> secondary;
+    
+    int logic_capacity, store_capacity;  //1048576 1048608 
+
 };
 
 //read from float Array ptr, get device stream rays  capacity = 1048608

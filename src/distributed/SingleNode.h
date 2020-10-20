@@ -24,7 +24,7 @@ void SingleNode::run(ImageDecomposition * camera) {
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
     std::vector<std::thread> workThread;
-    printf("only one worker %d  ", comm->rank);
+    printf("only one worker %d  ", comm->get_rank());
     for(int i = 0; i < deviceNum; i++) 
         workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
     

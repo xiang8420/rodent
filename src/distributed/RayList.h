@@ -12,14 +12,9 @@
 size_t physical_memory_used_by_process(); 
 
 //array of struct ray, used for storage primary or secondary depends on width 
-struct RaysArray {
+class RaysArray {
+public:
     std::vector<float> data;
-    
-    //size capacity are ray size,
-    int size, capacity; 
-
-    int logic_width, store_width;
-    bool mask[30];
 
     RaysArray(){}; 
 
@@ -40,41 +35,52 @@ struct RaysArray {
     bool empty() {return size <= 0;}
     float* get_data() {return data.data(); }
     int get_size() { return size;}
+    void set_size(int n) { size = n;}
     int get_capacity() {return capacity;}
+    int get_store_width(){return store_width;}
+    int get_logic_width(){return logic_width;}
+
+private:
+    
+    //size capacity are ray size,
+    int size, capacity; 
+    int logic_width, store_width;
+    bool mask[30];
+
 };
 
-struct RayList {
-    struct RaysArray primary;
-    struct RaysArray secondary;
-    std::string type;
-    std::mutex mutex;
+class RayList {
 
-    static double time; 
-
-    RayList() {}
-
+public:
     RayList(const RayList& ); 
 
-    RayList(std::string );
+    RayList();
 
-    void set_capacity(std::string); 
+    void set_capacity(); 
     
     void clear();
-    
-    ~RayList() {}
-
-    RaysArray& get_primary() { return primary;}
-    RaysArray& get_secondary() { return secondary;}
-    int primary_size(){ return primary.size;}    
-    int secondary_size(){ return secondary.size;}    
-    int size() { return primary.size + secondary.size; }
-    bool empty() { return primary.empty() && secondary.empty(); } 
-    void lock() {mutex.lock();}
-    void unlock() {mutex.unlock();}
 
     static void read_from_device_buffer(RayList * raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank, int chunk_size);
     
     static void read_from_message(RayList *, char*, int, int);
+
+    RaysArray& get_primary() { return primary;}
+    RaysArray& get_secondary() { return secondary;}
+    int primary_size(){ return primary.get_size();}    
+    int secondary_size(){ return secondary.get_size();}    
+    int primary_store_width() { return primary.get_store_width(); }
+    int secondary_store_width() { return secondary.get_store_width(); }
+    int size() { return primary.get_size() + secondary.get_size(); }
+    bool empty() { return primary.empty() && secondary.empty(); } 
+    void lock() {mutex.lock();}
+    void unlock() {mutex.unlock();}
+
+private:
+    struct RaysArray primary;
+    struct RaysArray secondary;
+    std::mutex mutex;
+
+    static double time; 
 };
 
 //Only works for primary
@@ -184,29 +190,27 @@ inline void swap(float **a, float **b) {
 //存储问题 可能从这里解决
 void RayList::clear() {
     printf("\nraylist clear\n\n");
-    primary.size = 0 ;
-    secondary.size = 0;
+    primary.set_size(0) ;
+    secondary.set_size(0);
 //    primary.clear() ; 
 //    secondary.clear(); 
 }
 
 RayList::RayList(const RayList& a) {
     printf("cant copy construct\n");
-    type = "out";
     RayList::time = 0;
     primary.resize(1048576, 21);
     secondary.resize(1048576, 14);
 }
 
-RayList::RayList(std::string type): type(type) {
+RayList::RayList() {
     RayList::time = 0;
     primary.resize(1048576, 21);
     secondary.resize(1048576, 14);
 }
 
-void RayList::set_capacity(std::string t) {
+void RayList::set_capacity() {
     RayList::time = 0;
-    type = t;
     primary.resize(1048576, 21);
     secondary.resize(1048576, 14);
 }
@@ -254,7 +258,7 @@ void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_siz
     os<<"master read from message: all primary size "<<msg_primary_size<<" secondary "<<msg_secondary_size<<"\n"; 
     if(msg_primary_size > 0) {
         int* id_ptr = (int*) ptr;
-        int width = rayList[0].get_primary().store_width;
+        int width = rayList[0].get_primary().get_store_width();
         int st = 0, ed = 0; 
         int tmp = id_ptr[9] >> 12;
         while(ed < msg_primary_size - 1) {
@@ -271,7 +275,7 @@ void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_siz
     }
     os<<"secondary \n"; 
     if(msg_secondary_size > 0) {
-        int width = rayList[0].get_secondary().store_width;
+        int width = rayList[0].get_secondary().get_store_width();
         int* id_ptr = (int*) ptr;
         int st = 0, ed = 0; 
         int tmp = id_ptr[9] >> 12;;

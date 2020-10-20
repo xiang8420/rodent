@@ -30,7 +30,6 @@ struct MessageHeader {
     }
     
     bool HasContent() { return content_size > 0; }
-    
 };
 
 class Message { 
@@ -43,7 +42,6 @@ public:
     Message();
     
     Message(MessageHeader *h): header(h) { }
-
 
     // write content to a raylists
     int write_raylist(struct RayList *outlist);
@@ -222,7 +220,7 @@ int Message::serialize(struct RayList* outList) {
     RaysArray &secondary = outList->get_secondary();
     
     
-    int width = primary.store_width; 
+    int width = primary.get_store_width(); 
     int* ids = (int*)(primary.get_data());
     for(int i = 0; i < 5; i ++) {
         printf(" %d %d$", ids[i*width], ids[i*width + 9]);
@@ -232,13 +230,13 @@ int Message::serialize(struct RayList* outList) {
     
 
 
-    header->primary = primary.size; 
-    header->secondary = secondary.size; 
+    header->primary = primary.get_size(); 
+    header->secondary = secondary.get_size(); 
 
     printf("serialize size %d %d:", header->primary, header->secondary);
     
-    int primary_length = header->primary * primary.store_width * sizeof(float);
-    int secondary_length = header->secondary * secondary.store_width * sizeof(float);
+    int primary_length = header->primary * primary.get_store_width() * sizeof(float);
+    int secondary_length = header->secondary * secondary.get_store_width() * sizeof(float);
     content.resize(primary_length + secondary_length);
     printf("Semd Message size %ld\n", content.size());  
 
@@ -257,15 +255,13 @@ RayMsg::RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int t
     
     os<<"RayMsg :\n";
     for(int i = 0; i < chunk_size; i++) {
-        if(List[i].type == "out") {
-            header->primary += List[i].primary_size();
-            header->secondary += List[i].secondary_size();
-            os<<"list "<<i<<"primary copy to "<<header->primary<<" secondary"<<header->secondary<<"\n";
-        } 
+        header->primary += List[i].primary_size();
+        header->secondary += List[i].secondary_size();
+        os<<"list "<<i<<"primary copy to "<<header->primary<<" secondary"<<header->secondary<<"\n";
     }
-    int primary_length = header->primary * List[0].get_primary().store_width * sizeof(float);
+    int primary_length = header->primary * List[0].primary_store_width() * sizeof(float);
     printf("new RayMsg primary %d secondary %d\n", header->primary, header->secondary);
-    int secondary_length = header->secondary * List[0].get_secondary().store_width * sizeof(float);
+    int secondary_length = header->secondary * List[0].secondary_store_width() * sizeof(float);
     content.resize(primary_length + secondary_length);
     header->content_size = primary_length + secondary_length; 
     
@@ -273,9 +269,9 @@ RayMsg::RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int t
     char* secondary_ptr = primary_ptr + primary_length;
 
     for(int i = 0; i < chunk_size; i++) {
-        if(List[i].type == "out" && !List[i].empty()) {
+        if(!List[i].empty()) {
             RayList &out = List[i];
-            int length = out.primary_size() * out.get_primary().store_width * sizeof(float);
+            int length = out.primary_size() * out.primary_store_width() * sizeof(float);
             memcpy(primary_ptr,   out.get_primary().get_data(), length);
             
             
@@ -284,7 +280,7 @@ RayMsg::RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int t
 
 
             primary_ptr += length;
-            length = out.secondary_size() * List[i].get_secondary().store_width * sizeof(float);
+            length = out.secondary_size() * List[i].secondary_store_width() * sizeof(float);
             memcpy(secondary_ptr, out.get_secondary().get_data(), length);
             
             i_ptr = (int*)secondary_ptr;
@@ -301,7 +297,7 @@ RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag
     header = new MessageHeader(-1, src, dst, MsgType::Ray, false, 0, idle, chunk, tag);
     
     RaysArray &primary = outList.get_primary(); 
-    int width = primary.store_width; 
+    int width = primary.get_store_width(); 
     int* ids = (int*)(primary.get_data());
     printf(" ray msg raylist primary size %d  ", primary.get_size());
     for(int i = 0; i < std::min(5, primary.get_size()); i ++) {
@@ -311,7 +307,7 @@ RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag
 
     RaysArray &secondary = outList.get_secondary(); 
     printf(" ray msg raylist secondary size %d  ", secondary.get_size());
-    width = secondary.store_width; 
+    width = secondary.get_store_width(); 
     ids = (int*)(secondary.get_data());
     for(int i = 0; i < std::min(5, secondary.get_size()); i ++) {
         printf(" %d %d$", ids[i*width], ids[i*width + 9]);
@@ -319,11 +315,11 @@ RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag
     printf("\n");
 
 
-    header->primary = outList.get_primary().size; 
-    header->secondary = outList.get_secondary().size; 
+    header->primary = primary.get_size(); 
+    header->secondary = secondary.get_size(); 
     
-    int primary_length = header->primary * outList.get_primary().store_width * sizeof(float);
-    int secondary_length = header->secondary * outList.get_secondary().store_width * sizeof(float);
+    int primary_length = header->primary * primary.get_store_width() * sizeof(float);
+    int secondary_length = header->secondary * secondary.get_store_width() * sizeof(float);
     content.resize(primary_length + secondary_length);
     printf("Semd Message size %ld  dst %d primary %d secondary %d\n", content.size(), dst, header->primary, header->secondary);  
 
