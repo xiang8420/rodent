@@ -59,9 +59,6 @@ void MWNode::master_send_message() {
     //master idle
     //printf("master all status all thread wait %d inlist %d %d %d %d\n", 
     //        ps->all_thread_waiting(), inList.size(), ps->all_proc_idle(), ps->all_rays_received(), rayList_empty());
-    for(int i = 0; i < ps->get_chunk_size(); i++)
-        printf("M %d ",rayList[i].size());
-    printf("\n");
     comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
     
     if(ps->all_thread_waiting() && inList.empty() && rayList_empty()) {

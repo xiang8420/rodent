@@ -23,8 +23,6 @@ struct SyncNode : public Node{
     
     void run(ImageDecomposition * camera);
     
-    int load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait);
-    
 };
 //每一轮光线全部给master然后 master发送调度消息给各个节点 各个节点读取新场景， 接受光线
 SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -165,44 +163,24 @@ void SyncNode::synchronize () {
     printf("proc %d chunk %d\n", comm->get_rank(), ps->get_local_chunk());
     //如果proc空了 则给一个chunk并进行gather
     //implement get dst chunk, add proc_chunk_map
+    comm->os<<"proc raylist : ";
+    for(int chunk = 0; chunk < chunk_size; chunk++) {
+        comm->os<<"( "<<chunk<<" "<<rayList[chunk].size()<<" ) | ";
+    }
+    comm->os<<"\n";
+
     for(int chunk = 0; chunk < chunk_size; chunk++) {
         int owner = ps->get_proc(chunk);
         if(owner < 0) {
             //or send to master? 
             continue; 
-        } 
+        }
         //gether all chunk rays 
         gather_rays(chunk, owner, true); 
         gather_rays(chunk, owner, false); 
         rayList[chunk].clear();
     }  
-    printf("rthread after gather inlist size %d\n", inList.size());
-    
-
-//    for()
-//
-}
-
-//void SyncNode::worker_synchronize () {
-//    
-//    int chunk_size =  ps->get_chunk_size();
-//    std::vector<int> list_tmp_size(chunk_size); 
-//    printf("worker sync\n");
-//    for(int i = 0; i < rayList.size(); i ++)
-//        printf("list tmp size %d\n", list_tmp_size[i]);
-//
-//    std::vector<int> list_size(chunk_size); 
-//    comm->reduce((float*)list_tmp_size.data(), (float*)list_size.data(), chunk_size); 
-////    for(dd) 
-////    
-////    if(recv exit)
-////        ps->set_working();
-//    
-//}
-
-int SyncNode::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
-    printf("syn load incoming buffer\n");
-    return -1;
+    printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), inList.size());
 }
 
 void SyncNode::run(ImageDecomposition * camera) {
@@ -217,8 +195,9 @@ void SyncNode::run(ImageDecomposition * camera) {
         comm->os<<"run while\n";
         ps->chunk_loaded();
 
-        for(int i = 0; i < deviceNum; i++) 
-            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0));
+        std::cout<<"rthread rank " <<comm->get_rank()<<" generate rays "<<ps->generate_rays()<<"\n";
+        for(int i = 0; i < deviceNum; i++)
+            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0 && ps->generate_rays()));
         
         render_start.notify_all(); 
         for(auto &thread: workThread)
@@ -233,6 +212,23 @@ void SyncNode::run(ImageDecomposition * camera) {
         iter++;
 
     }
+    //
+
+    int chunk_size = ps->get_chunk_size();
+    printf("proc %d left rays :", comm->get_rank());
+    for(int i = 0; i < chunk_size; i++) 
+        printf(" %d || ", rayList[i].size()); 
+    printf("\n");
+
+    std::cout<<" chunk size "<<chunk_size<<" ray left "<<rayList[chunk_size - 1].size()<<"\n";      
+//    if(rayList[chunk_size - 1].empty()) {
+//        
+//    }
+//    assert(chunk_size % 2 == 1 || );
+    if(chunk_size % 2 == 1 && rayList[chunk_size].size() > 0 ) {
+        comm->os<<"proc "<<comm->get_rank()<<" bounce ray left "<<rayList[chunk_size - 1].size()<<"\n";      
+    }
+
     return;
 }
 

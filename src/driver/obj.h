@@ -72,6 +72,16 @@ struct TriMesh {
     std::vector<float2>   texcoords;
 };
 
+struct Light {
+    // Lights global data
+    std::vector<rgb>           colors;
+    std::vector<float3>        verts;
+    std::vector<float3>        norms;
+    std::vector<float>         areas;
+    std::vector<Material>      mats;
+};
+
+
 bool load_obj(const std::string, File&, MaterialLib&);
 bool load_mtl(const FilePath&, MaterialLib&);
 void write_obj(const TriMesh&, const MaterialLib&, int);

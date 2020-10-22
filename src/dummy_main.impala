@@ -8,7 +8,8 @@ struct Settings {
     width: f32,
     height: f32,
     image_region: Vec4_i32,
-    spp_cur: i32
+    spp_cur: i32,
+    proc_size: i32
 }
 
 extern fn get_spp() -> i32 { 1 }

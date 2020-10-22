@@ -18,7 +18,6 @@
 #include <vector>
 #include <string>
 #include <math.h>
-#include "symetricmatrix.h"
 #define loopi(start_l,end_l) for ( int i=start_l;i<end_l;++i )
 #define loopi(start_l,end_l) for ( int i=start_l;i<end_l;++i )
 #define loopj(start_l,end_l) for ( int j=start_l;j<end_l;++j )
@@ -54,6 +53,64 @@ float min(float v1, float v2) {
 	return fmin(v1,v2);
 }
 
+
+class SymetricMatrix {
+
+	public:
+
+	// Constructor
+
+	SymetricMatrix(double c=0) { for(int i = 0; i < 10; i++) m[i] = c;  }
+	SymetricMatrix(	double m11, double m12, double m13, double m14,
+			            double m22, double m23, double m24,
+			                        double m33, double m34,
+			                                    double m44) {
+			 m[0] = m11;  m[1] = m12;  m[2] = m13;  m[3] = m14;
+			              m[4] = m22;  m[5] = m23;  m[6] = m24;
+			                           m[7] = m33;  m[8] = m34;
+			                                        m[9] = m44;
+	}
+
+	// Make plane
+	SymetricMatrix(double a,double b,double c,double d)
+	{
+		m[0] = a*a;  m[1] = a*b;  m[2] = a*c;  m[3] = a*d;
+		             m[4] = b*b;  m[5] = b*c;  m[6] = b*d;
+		                          m[7 ] =c*c; m[8 ] = c*d;
+		                                       m[9 ] = d*d;
+	}
+
+	double operator[](int c) const { return m[c]; }
+
+	// Determinant
+
+	double det(	int a11, int a12, int a13,
+				int a21, int a22, int a23,
+				int a31, int a32, int a33)
+	{
+		double det =  m[a11]*m[a22]*m[a33] + m[a13]*m[a21]*m[a32] + m[a12]*m[a23]*m[a31]
+					- m[a13]*m[a22]*m[a31] - m[a11]*m[a23]*m[a32]- m[a12]*m[a21]*m[a33];
+		return det;
+	}
+
+	const SymetricMatrix operator+(const SymetricMatrix& n) const
+	{
+		return SymetricMatrix( m[0]+n[0],   m[1]+n[1],   m[2]+n[2],   m[3]+n[3],
+						                    m[4]+n[4],   m[5]+n[5],   m[6]+n[6],
+						                                 m[ 7]+n[ 7], m[ 8]+n[8 ],
+						                                              m[ 9]+n[9 ]);
+	}
+
+	SymetricMatrix& operator+=(const SymetricMatrix& n)
+	{
+		 m[0]+=n[0];   m[1]+=n[1];   m[2]+=n[2];   m[3]+=n[3];
+		 m[4]+=n[4];   m[5]+=n[5];   m[6]+=n[6];   m[7]+=n[7];
+		 m[8]+=n[8];   m[9]+=n[9];
+		return *this;
+	}
+
+	double m[10];
+};
 ///////////////////////////////////////////
 
 namespace Simplify
@@ -68,7 +125,7 @@ namespace Simplify
 	struct Triangle { 
 		int v[4];
 		float err[4];
-		int deleted,dirty;
+		int deleted,dirty,attr;
 		float3 n;
 		float3 uvs[3];
 	};
@@ -109,22 +166,8 @@ namespace Simplify
 	    refs.clear();
         materials.clear();
     }
-	obj::TriMesh simplify_TriMesh(obj::TriMesh *tri_mesh, int target_count, float agressiveness=7, bool verbose=false) {
-		int tri_size = tri_mesh->indices.size() / 4;
-		for(int i = 0; i < tri_size; i++) {
-			Triangle t;
-			for(int k = 0; k < 4; k++)
-				t.v[k] = tri_mesh->indices[i * 4 + k]; 
 
-            t.deleted=0;
-			triangles.emplace_back(t);
-		}
-		int vtx_size = tri_mesh->vertices.size();
-		for(int i = 0; i < vtx_size; i++) {
-			struct Vertex v;
-			v.p = tri_mesh->vertices[i];
-			vertices.push_back(v);
-		}
+	obj::TriMesh simplify(int target_count, float agressiveness=7, bool verbose=false) {
 
 		printf("Input: %zu vertices, %zu triangles (target %d)\n", Simplify::vertices.size(), Simplify::triangles.size(), target_count);
 		
@@ -192,7 +235,8 @@ namespace Simplify
 			// The following numbers works well for most models.
 			// If it does not, try to adjust the 3 parameters
 			//
-			float threshold = 0.000000001*pow(float(iteration+3),agressiveness);
+			double threshold = 0.000000001*pow(double(iteration+3),agressiveness);
+
 			// target number of triangles reached ? Then break
 			if ((verbose) && (iteration%5==0)) {
 				printf("iteration %d - triangles %d threshold %g\n",iteration,triangle_count-deleted_triangles, threshold);
@@ -279,14 +323,8 @@ namespace Simplify
 				deleted[k]=1;
 				continue;
 			}
-			float3 aa = vertices[id1].p;
-			float3 d1 = vertices[id1].p-p; 
-
-			d1 = normalize(d1);
-			float3 d2 = vertices[id2].p-p; 
-			d2 = normalize(d2);
-//			printf("%f %f %f |%lf %lf %lf \n", d1.x, d1.y, d1.z, v0.p.x, v0.p.y, v0.p.z);
-
+			float3 d1 = vertices[id1].p-p; d1 = normalize(d1);
+			float3 d2 = vertices[id2].p-p; d2 = normalize(d2);
 			if(fabs(dot(d1, d2))>0.999) return true;
 			float3 n;
 			n = cross(d1,d2);
@@ -537,5 +575,171 @@ namespace Simplify
 		}
 		return error;
 	}
+
+	char *trimwhitespace(char *str)
+	{
+		char *end;
+
+		// Trim leading space
+		while(isspace((unsigned char)*str)) str++;
+
+		if(*str == 0)  // All spaces?
+		return str;
+
+		// Trim trailing space
+		end = str + strlen(str) - 1;
+		while(end > str && isspace((unsigned char)*end)) end--;
+
+		// Write new null terminator
+		*(end+1) = 0;
+
+		return str;
+	}
+
+	//Option : Load OBJ
+	bool load_obj(const char* filename, obj::MaterialLib &mtl_lib, bool process_uv=false){
+		vertices.clear();
+		triangles.clear();
+		//printf ( "Loading Objects %s ... \n",filename);
+		FILE* fn;
+		if(filename==NULL)		return -1;
+		if((char)filename[0]==0)	return -1;
+		if ((fn = fopen(filename, "rb")) == NULL)
+		{
+			printf ( "File %s not found!\n" ,filename );
+			return 0;
+		}
+		char line[1000];
+		memset ( line,0,1000 );
+		int vertex_cnt = 0;
+		//int material = -1;
+        int cur_mtl = 0;
+		std::map<std::string, int> material_map;
+		std::vector<float3> uvs;
+		std::vector<std::vector<int> > uvMap;
+
+		while(fgets( line, 1000, fn ) != NULL)
+		{
+			Vertex v;
+			float3 uv;
+
+			if (strncmp(line, "mtllib", 6) == 0)
+			{
+				mtllib = trimwhitespace(&line[7]);
+			}
+			if (strncmp(line, "usemtl", 6) == 0)
+			{
+			//	std::string usemtl = trimwhitespace(&line[7]);
+			//	if (material_map.find(usemtl) == material_map.end())
+			//	{
+			//		material_map[usemtl] = materials.size();
+			//		materials.push_back(usemtl);
+			//	}
+		    //	material = material_map[usemtl];
+				std::string mtl_name = trimwhitespace(&line[7]);
+                cur_mtl = mtl_lib.ids.find(mtl_name)->second;
+			}
+
+			if ( line[0] == 'v' && line[1] == 't' )
+			{
+				if ( line[2] == ' ' )
+				if(sscanf(line,"vt %f %f",
+					&uv.x,&uv.y)==2)
+				{
+					uv.z = 0;
+					uvs.push_back(uv);
+				} else
+				if(sscanf(line,"vt %f %f %f",
+					&uv.x,&uv.y,&uv.z)==3)
+				{
+					uvs.push_back(uv);
+				}
+			}
+			else if ( line[0] == 'v' )
+			{
+				if ( line[1] == ' ' )
+				if(sscanf(line,"v %f %f %f",
+					&v.p.x,	&v.p.y,	&v.p.z)==3)
+				{
+					vertices.push_back(v);
+				}
+			}
+			int integers[9];
+			if ( line[0] == 'f' )
+			{
+				Triangle t;
+				bool tri_ok = false;
+                bool has_uv = false;
+
+				if(sscanf(line,"f %d %d %d",
+					&integers[0],&integers[1],&integers[2])==3)
+				{
+					tri_ok = true;
+				}else
+				if(sscanf(line,"f %d// %d// %d//",
+					&integers[0],&integers[1],&integers[2])==3)
+				{
+					tri_ok = true;
+				}else
+				if(sscanf(line,"f %d//%d %d//%d %d//%d",
+					&integers[0],&integers[3],
+					&integers[1],&integers[4],
+					&integers[2],&integers[5])==6)
+				{
+					tri_ok = true;
+				}else
+				if(sscanf(line,"f %d/%d/%d %d/%d/%d %d/%d/%d",
+					&integers[0],&integers[6],&integers[3],
+					&integers[1],&integers[7],&integers[4],
+					&integers[2],&integers[8],&integers[5])==9)
+				{
+					tri_ok = true;
+					has_uv = true;
+				}
+				else
+				{
+					printf("unrecognized sequence\n");
+					printf("%s\n",line);
+					while(1);
+				}
+				if ( tri_ok )
+				{
+					t.v[0] = integers[0]-1-vertex_cnt;
+					t.v[1] = integers[1]-1-vertex_cnt;
+					t.v[2] = integers[2]-1-vertex_cnt;
+					t.attr = 0;
+
+					if ( process_uv && has_uv )
+					{
+						std::vector<int> indices;
+						indices.push_back(integers[6]-1-vertex_cnt);
+						indices.push_back(integers[7]-1-vertex_cnt);
+						indices.push_back(integers[8]-1-vertex_cnt);
+						uvMap.push_back(indices);
+						t.attr |= TEXCOORD;
+					}
+
+					t.v[4] = cur_mtl;
+					//geo.triangles.push_back ( tri );
+					triangles.push_back(t);
+					//state_before = state;
+					//state ='f';
+				}
+			}
+		}
+
+		if ( process_uv && uvs.size() )
+		{
+			loopi(0,triangles.size())
+			{
+				loopj(0,3)
+				triangles[i].uvs[j] = uvs[uvMap[i][j]];
+			}
+		}
+
+		fclose(fn);
+        return 1;
+		//printf("load_obj: vertices = %lu, triangles = %lu, uvs = %lu\n", vertices.size(), triangles.size(), uvs.size() );
+	} // load_obj()
 
 };

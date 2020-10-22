@@ -60,10 +60,6 @@ Communicator::Communicator() {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     master = size - 1;
     
-    if(size % 2 == 1 && size != 1) {
-        error("Can't use odd number nodes.");
-    }
-    
     printf("comm rank %d \n", rank);
     os     = std::ofstream("out/proc_" + std::to_string(rank));
     send_ray_count = 0; recv_ray_count = 0;

@@ -464,24 +464,29 @@ fn @cpu_primary_transfer( primary: PrimaryStream
     for src_id, _ in vectorized_range(vector_width, 0, primary.size) {
         let ray = ray_reader(src_id, 0);
         if ray_ids(src_id) != -1 {
-            if chunk_ids(src_id) == 1022  {
-                if inside_point_bbox(bbox, ray.org){
-                    let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
-                    write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
-                } else {
-                    let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
-                    if t0 <= t1 {
-                        let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
-                        let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
+            // if 3 4 bounce write to chunk n
+            if rough_bounce && depth(src_id) > 1 {
+                write_chunk(src_id, 0, num_chunks << 12);
+            } else {     
+                if chunk_ids(src_id) == 1022  {
+                    if inside_point_bbox(bbox, ray.org){
+                        let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
                         write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
                     } else {
-                        write_chunk(src_id, 0, -1000);
+                        let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
+                        if t0 <= t1 {
+                            let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
+                            let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
+                            write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
+                        } else {
+                            write_chunk(src_id, 0, -1000);
+                        }
                     }
+                } else {
+                    let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
+                    let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
+                    write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
                 }
-            } else {
-                let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
-                let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
-                write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
             }
         }
     }
@@ -558,33 +563,35 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
 }
 
 fn @check_secondary_chunk_id(primary: SecondaryStream, chunk: i32, pos: i32) -> () {
-//    if chunk == 0 {
-        let mut ray_id = 0;
-        let mut prim_0 = 0;
-        let mut prim_1000 = 0;
-        let mut prim_4352 = 0;
-        let mut prim_1022 = 0;    
-     
-        let ray_ids     = primary.rays.id;
-        let chunk_ids    = primary.chunk_id;
-        for i in range(0, primary.size) {
-            if ray_ids(i) == -1 {ray_id ++; }
-            if chunk_ids(i) == 0 {prim_0 ++; }
-            if chunk_ids(i) == 4352 {prim_4352 ++; }
-            if chunk_ids(i) == -1000 {prim_1000 ++; }
-            if chunk_ids(i) == 1022 {prim_1022 ++;}
-        }
-        print_string("chunk:");
-        print_i32(chunk);
-        print_string("|");
-        print_i32(pos);
-        print_string(" ray id -1: "); print_i32(ray_id); 
-        print_string(" | prim 1022: "); print_i32(prim_1022); 
-        print_string(" | 0: "); print_i32(prim_0); 
-        print_string(" |  4352: "); print_i32(prim_4352); 
-        print_string(" | -1000: "); print_i32(prim_1000);
-        print_string("\n"); 
-//    }
+    let mut ray_id = 0;
+    let mut prim_0 = 0;
+    let mut prim_1000 = 0;
+    let mut prim_4352 = 0;
+    let mut prim_1022 = 0;    
+ 
+    let ray_ids     = primary.rays.id;
+    let chunk_ids    = primary.chunk_id;
+    for i in range(0, primary.size) {
+        if ray_ids(i) == -1 {ray_id ++; continue() }
+        if chunk_ids(i) == 0 {prim_0 ++; continue() }
+        if chunk_ids(i) == 4352 {prim_4352 ++; continue() }
+        if chunk_ids(i) == -1000 {prim_1000 ++; continue() }
+        if chunk_ids(i) == -2000 {prim_2000 ++; continue() }
+        if chunk_ids(i) == 1022 {prim_1022 ++; continue() }
+        print_string(" unknow chunk ");
+        print_i32(chunk_ids(i))
+        
+    }
+    print_string("chunk:");
+    print_i32(chunk);
+    print_string("|");
+    print_i32(pos);
+    print_string(" ray id -1: "); print_i32(ray_id); 
+    print_string(" | prim 1022: "); print_i32(prim_1022); 
+    print_string(" | 0: "); print_i32(prim_0); 
+    print_string(" |  4352: "); print_i32(prim_4352); 
+    print_string(" | -1000: "); print_i32(prim_1000);
+    print_string("\n"); 
 }
 fn @check_primary_chunk_id(primary: PrimaryStream, chunk: i32, pos: i32) -> () {
 //    if chunk == 0 {
@@ -659,7 +666,6 @@ fn @cpu_dis_trace( scene: Scene
             let mut id = 0;
             if !valid_camera { id = num_rays; }
             
-            let mut idle = false;
             let last_tile = false;
             print_size("thread render start ", tid, "\n");
             while true {
@@ -677,12 +683,15 @@ fn @cpu_dis_trace( scene: Scene
                     out_primary.size = out_primary_size; 
                     
                     if primary.size == 0  && secondary.size ==0 && id == num_rays  {
-                        idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
                         if(out_primary.size > 0) {
                             rodent_worker_primary_send(-1, out_primary.size);
                             out_primary.size = 0;
                         }
-                        primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, idle); 
+                        if out_secondary.size > 0 {
+                            rodent_worker_secondary_send(-1, out_secondary.size);
+                            out_secondary.size = 0;
+                        }
+                        primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, true); 
              //           rodent_first_primary_check(-1, primary.size, 1, true);                
                     }
                     if(primary.size < 0) {
@@ -718,20 +727,22 @@ fn @cpu_dis_trace( scene: Scene
                 
                 with cpu_profile(&mut transfer_counter) {
                     if primary.size ==0 && secondary.size == 0 && id == num_rays {
-                        idle = (id == num_rays && primary.size == 0 && secondary.size == 0 && out_primary.size == 0 && out_secondary.size == 0); 
                         print_size("chunk ", scene.chunk_id, "\n");
                         print_size("save out going buffer ", out_secondary.size, "\n");
                         print_size("secondary ", secondary.size, "\n");
+                        if(out_primary.size > 0) {
+                            rodent_worker_primary_send(-1, out_primary.size);
+                            out_primary.size = 0;
+                        }
                         if out_secondary.size > 0 {
                             rodent_worker_secondary_send(-1, out_secondary.size);
                             out_secondary.size = 0;
                         }
-                        secondary.size = rodent_worker_secondary_recv(-1, secondary.size, true, tid, idle); 
+                        secondary.size = rodent_worker_secondary_recv(-1, secondary.size, true, tid, true); 
                     }
                 }
-                if secondary.size < 0 {
-                    break()
-                }
+                if secondary.size < 0 { break() }
+                if secondary.size == 0 { continue()}
                 // Compact and trace secondary rays
                 if likely(secondary.size > 0) {
                     with cpu_profile(&mut shadow_counter) {

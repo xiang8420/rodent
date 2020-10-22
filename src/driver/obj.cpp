@@ -68,12 +68,9 @@ inline char* strip_spaces(char* ptr) {
 
 inline int find(char * ptr, char t) {
     int i = 0;
-    printf("find :");
     while(ptr[i] != t && ptr[i] != ' ' && ptr[i] != '\0') {
         i++;
-        printf("%c ", ptr[i]);
     }
-    printf("end find\n");
     return i;
 }
 
@@ -391,6 +388,7 @@ bool load_obj(const std::string path, obj::File& obj_file, obj::MaterialLib& mtl
     // Parse the OBJ file
     std::ifstream stream(path);
     bool res = stream && parse_obj(stream, obj_file, mtl_lib);
+    printf("load obj  vertices %d face %d \n", obj_file.vertices.size());
     return res;
 }
 
@@ -403,7 +401,7 @@ bool load_mtl(const FilePath& path, obj::MaterialLib& mtl_lib) {
 void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 	std::ofstream outfile;
     printf("write obj %d \n", c);
-	outfile.open("simple_models/chunk_" + std::to_string(c) + ".obj");	
+	outfile.open("obj_chunk_" + std::to_string(c) + ".obj");	
 
 	int trx_size = tri_mesh.indices.size() / 4;
 	int vtx_size = tri_mesh.vertices.size();
@@ -640,20 +638,18 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
                     }
                 }
 
-                for(int i = 0; i < face.indices.size() - 2; i++) {
-                    auto p0 = obj_file.vertices[face.indices[i].v];
-                    bool in = bbox.is_inside(p0);
-                    for(int j = i + 1; j < face.indices.size() - 1; j++) {
-                        auto p1 = obj_file.vertices[face.indices[j].v];
-                        in = in || bbox.is_inside(p1) || bbox.line_intersect(p0, p1);
-                        for(int k = j + 1; k <  face.indices.size(); k++) { 
-                            auto p2 = obj_file.vertices[face.indices[k].v];
-                            if(in || bbox.is_inside(p2) || bbox.line_intersect(p0, p2) || bbox.line_intersect(p1, p2))
-                            {
-                                triangles.emplace_back(mapping[face.indices[i]], mapping[face.indices[j]], mapping[face.indices[k]], face.material + mtl_offset);
-                            }
-                        }
-                    }
+                auto v0        = mapping[face.indices[0]];
+                auto prev      = mapping[face.indices[1]];
+                bool v0_inside = bbox.is_inside(obj_file.vertices[face.indices[0].v]);
+                bool vp_inside = bbox.is_inside(obj_file.vertices[face.indices[1].v]);
+
+                for (size_t i = 1; i < face.indices.size() - 1; i++) {
+                    auto next = mapping[face.indices[i + 1]];
+                    bool vn_inside = bbox.is_inside(obj_file.vertices[face.indices[i + 1].v]);
+                    if(v0_inside || vp_inside || vn_inside) 
+                        triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
+                    prev = next;
+                    vp_inside = vn_inside;
                 }
             }
         }

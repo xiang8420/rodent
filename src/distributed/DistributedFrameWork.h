@@ -6,12 +6,12 @@
 #include <sys/file.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "communicator.h"
 #include "decomposition.h"
 #include "ProcStatus.h"
 
-#include <assert.h>
 #include "Node.h"
 #include "SingleNode.h"
 #include "SyncNode.h"

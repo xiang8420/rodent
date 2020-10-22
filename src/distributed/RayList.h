@@ -109,7 +109,6 @@ void RaysArray::resize(int cap, int width)
     data.resize(capacity * store_width);
 
     size_t memory = physical_memory_used_by_process();
-    printf("1new rays resize cap %d %ld kb %ld mb, data.size %ld, capacity %ld\n", capacity, memory, memory / 1024, data.size(), data.capacity());
 
     size = 0;
 }
@@ -125,28 +124,20 @@ int RaysArray::clear()
 }
 
 int RaysArray::check_capacity(int num) {
-    printf("check size %d num %d capacity %d data size %ld data capacity%ld\n", size, num, capacity, data.size(), data.capacity());
     if(num + size >= capacity) {
         size_t memory = physical_memory_used_by_process();
-        printf("rays resize %ld kb %ld mb\n", memory, memory / 1024);
-        printf("put resize %ld capacity%ld\n", data.size(), data.capacity());
         capacity += std::max(num, 1024);
         data.resize(capacity * store_width);
-        printf("store width %d capacity %d\n", capacity, store_width);
-        printf("after put resize %ld capacity%ld\n", data.size(), data.capacity());
-        printf("after rays resize %ld kb %ld mb\n", memory, memory / 1024);
     }
     return capacity;
 }
 
 void RaysArray::read_device_buffer(float *rays, int src, int num, int rays_capacity, int rank) {
-//    printf("read device buffer %d, ray capacity %d num %d\n", rank, num, rays_capacity);
     int* iptr = (int *) data.data();
     for(int i = 0; i < num; i++) {
         int k = 0;
         for(int j = 0; j < logic_width; j++) {
             if(mask[j]) {
-                //printf("| %d %d %d %d", rank, (size + i) * store_width + k, (src + i) * logic_width + j, data.size(), num);
                 data[(size + i) * store_width + k]  = rays[(src + i) * logic_width + j];
                 k++; 
             }
@@ -156,14 +147,12 @@ void RaysArray::read_device_buffer(float *rays, int src, int num, int rays_capac
 }
 
 void RaysArray::read_from_ptr(char *src_ptr, int copy_size) {
-    printf("read frome ptr\n");
     if(check_capacity(copy_size)==0) return;
 
     char* dst_ptr = (char*)get_data() + size * store_width * sizeof(float);
     int copy_length = copy_size * store_width * sizeof(float);
     memcpy(dst_ptr, src_ptr, copy_length);
     size += copy_size; 
-    printf("end read frome ptr\n");
 }
 
 inline void swap(struct RaysArray* &a, struct RaysArray* &b) {
@@ -189,7 +178,6 @@ inline void swap(float **a, float **b) {
 
 //存储问题 可能从这里解决
 void RayList::clear() {
-    printf("\nraylist clear\n\n");
     primary.set_size(0) ;
     secondary.set_size(0);
 //    primary.clear() ; 
@@ -197,7 +185,6 @@ void RayList::clear() {
 }
 
 RayList::RayList(const RayList& a) {
-    printf("cant copy construct\n");
     RayList::time = 0;
     primary.resize(1048576, 21);
     secondary.resize(1048576, 14);
@@ -223,7 +210,6 @@ void RayList::read_from_device_buffer(RayList * raylist, float *out_buffer,  siz
 
     int st = 0, num = 0; 
     int tmp = chunkIds[9] >> 12;
-    printf("read frome divice buffer %ld\n", size);
     auto ticks = std::chrono::high_resolution_clock::now();
     for(int i = 0; i < chunk_size; i++) { 
         if(raylist[i].primary.check_capacity(size) == 0) return;
@@ -249,7 +235,6 @@ void RayList::read_from_device_buffer(RayList * raylist, float *out_buffer,  siz
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
     
     time += elapsed_ms; 
-    printf("read device time cost %lf ms", time);
 }
 
 void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {

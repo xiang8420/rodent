@@ -139,8 +139,8 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
             return -1;
         }
     } 
-    if(inList.empty() && ps->Exit())
-        error();
+    if(!inList.empty() && ps->Exit())
+        error("inlist not empty but prepared to exit\n");
 
     std::unique_lock <std::mutex> lock(inList.mutex); 
     if(!sync) {
@@ -201,8 +201,6 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
     int sppProc = camera->get_spp(); 
     int sppDev = sppProc / devNum;
     
-    printf("width %d height%d spp %d dev id %d local chunk %d\n", camera->width, camera->height, sppDev, devId, ps->get_local_chunk() );
-    printf("work thread region %d %d %d %d\n", region[0], region[1], region[2], region[3]);
     
     Settings settings {
         Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
@@ -211,7 +209,8 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
         Vec3 { camera->right.x, camera->right.y, camera->right.z },
         camera->w, camera->h,
         Vec4_i32 { region[0], region[1], region[2], region[3]},
-        sppDev
+        sppDev,
+        comm->get_size()
     };
     if(preRendering) {
         prerender(&settings);

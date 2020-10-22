@@ -9,7 +9,8 @@ struct Scene {
     bvh:        Bvh,    
     bbox:       BBox,
     chunk:      Vec3,
-    chunk_id: i32
+    chunk_id:   i32,
+    proc_size:  i32 
 }
 
 struct Domain {
