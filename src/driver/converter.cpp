@@ -814,14 +814,15 @@ bool convert_simple_mesh(const std::string& file_name, obj::MaterialLib &mtl_lib
             error("Invalid OBJ file '", file_name, "'");
             return false;
         }
-        int target_count = round((float)Simplify::triangles.size() * 0.01);
+        /*only for cbox debug*/
+        if(Simplify::triangles.size() < 100)
+            return false;
         if(j == 0) {
-            simple_mesh = Simplify::simplify(target_count, 7, false);
+            simple_mesh = Simplify::simplify(7, false);
         } else {
-            auto sub_mesh = Simplify::simplify(target_count, 7, false);
+            auto sub_mesh = Simplify::simplify(7, false);
             obj::mesh_add(simple_mesh, sub_mesh);
         }
-        
     }
     float elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
     // only proc 0 process the left part
@@ -869,6 +870,7 @@ bool convert_simple_mesh(const std::string& file_name, obj::MaterialLib &mtl_lib
     printf("convert simplify time %f\n", elapsed_ms);
 
 //      obj::write_obj(simple_mesh, mtl_lib, chunk_size); //
+    return true;
 }
 
 static bool convert_obj(const std::string& file_name, size_t dev_num, Target* target_list, size_t* dev_list, 
@@ -1102,7 +1104,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "    height: f32,\n"
        << "    image_region: Vec4_i32,\n"
        << "    spp: i32,\n"
-       << "    proc_size: i32\n" 
+       << "    rough_trace: bool\n" 
        << "};\n";
     os << "\nextern fn get_spp() -> i32 { " << spp << " } \n"
        << "extern fn get_dev_num() -> i32{ " << dev_num << " }\n"
@@ -1295,7 +1297,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                                                          << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
        << "        chunk:          make_vec3("<< chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f),\n"     
        << "        chunk_id:       chunk, \n"
-       << "        proc_size:      settings.proc_size\n"
+       << "        rough_trace:    settings.rough_trace\n"
        << "    }\n"
        << "}\n\n";
     

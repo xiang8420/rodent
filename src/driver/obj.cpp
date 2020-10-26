@@ -640,16 +640,20 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
 
                 auto v0        = mapping[face.indices[0]];
                 auto prev      = mapping[face.indices[1]];
-                bool v0_inside = bbox.is_inside(obj_file.vertices[face.indices[0].v]);
-                bool vp_inside = bbox.is_inside(obj_file.vertices[face.indices[1].v]);
+                
+                auto p0        = obj_file.vertices[face.indices[0].v];
+                auto pprev     = obj_file.vertices[face.indices[1].v];
 
+                bool v0vp   = bbox.line_intersect(p0, pprev);
                 for (size_t i = 1; i < face.indices.size() - 1; i++) {
-                    auto next = mapping[face.indices[i + 1]];
-                    bool vn_inside = bbox.is_inside(obj_file.vertices[face.indices[i + 1].v]);
-                    if(v0_inside || vp_inside || vn_inside) 
+                    auto next  = mapping[face.indices[i + 1]];
+                    auto pnext = obj_file.vertices[face.indices[i + 1].v];
+                    bool v0vn  = bbox.line_intersect(p0, pnext); 
+                    if(v0vp || v0vn || bbox.line_intersect(pnext, pprev)) 
                         triangles.emplace_back(v0, prev, next, face.material + mtl_offset);
                     prev = next;
-                    vp_inside = vn_inside;
+                    v0vp = v0vn;
+                    pprev = pnext;
                 }
             }
         }

@@ -139,23 +139,26 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
             return -1;
         }
     } 
+    statistics.start("run => work_thread => load_incoming_buffer-wait");
     if(!inList.empty() && ps->Exit())
         error("inlist not empty but prepared to exit\n");
 
     std::unique_lock <std::mutex> lock(inList.mutex); 
     if(!sync) {
-        ps->set_thread_idle(thread_id, thread_wait);
+        ps->set_thread_idle(thread_id, true);
         
-        std::cout<<"rthread "<<thread_wait<< " inlist priamry " <<inList.primary_size()<<" secondary "<<inList.secondary_size()<<"\n";
-        while (thread_wait && inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
+        std::cout<<"rthread  inlist priamry " <<inList.primary_size()<<" secondary "<<inList.secondary_size()<<"\n";
+        while (inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
             comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
             inList_not_empty.wait(lock);
-            comm->os<<"rthread get condition" <<thread_wait<<" "<<ps->Exit()<<"\n";
+            comm->os<<"rthread get condition  "<<ps->Exit()<<"\n";
         }
         if(ps->Exit() || ps->has_new_chunk()) {  
+            statistics.end("run => work_thread => load_incoming_buffer-wait");
             return -1;
         }
     }
+    statistics.end("run => work_thread => load_incoming_buffer-wait");
 
     std::cout<<"primary ? "<<primary<<" primary size "<<inList.primary_size()<<" secondary size "<<inList.secondary_size()<<"\n";
 
@@ -169,6 +172,8 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     }
 
     lock.unlock();
+
+    statistics.start("run => work_thread => load_incoming_buffer-copy");
 
     ps->set_thread_idle(thread_id, false);
     int copy_size = rays_stream->size;
@@ -186,6 +191,8 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     }
     comm->os<<"\n";
     delete rays_stream;
+
+    statistics.end("run => work_thread => load_incoming_buffer-copy");
     return copy_size + rays_size;
         
 }
@@ -201,7 +208,14 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
     int sppProc = camera->get_spp(); 
     int sppDev = sppProc / devNum;
     
-    
+    printf("width %d height%d spp %d dev id %d local chunk %d\n", camera->width, camera->height, sppDev, devId, ps->get_local_chunk() );
+    printf("work thread rank %d region %d %d %d %d local chunk %d\n", comm->get_rank(), region[0], region[1], region[2], region[3], ps->get_local_chunk());
+    if(generate_rays)
+        printf("generate_rays\n");
+    else 
+        printf("no ray generate\n");
+
+    statistics.start("run => work_thread");
     Settings settings {
         Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
         Vec3 { camera->dir.x, camera->dir.y, camera->dir.z },
@@ -210,7 +224,7 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
         camera->w, camera->h,
         Vec4_i32 { region[0], region[1], region[2], region[3]},
         sppDev,
-        comm->get_size()
+        ps->get_rough_trace()
     };
     if(preRendering) {
         prerender(&settings);
@@ -219,6 +233,7 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
         render(&settings, rnd, devId, ps->get_local_chunk(), generate_rays);
     }
     printf("work thread end\n");
+    statistics.end("run => work_thread");
 }
 
 // get chunk retun chunk id

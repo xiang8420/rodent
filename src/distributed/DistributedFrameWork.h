@@ -9,6 +9,7 @@
 #include <assert.h>
 
 #include "communicator.h"
+#include "statistic.h"
 #include "decomposition.h"
 #include "ProcStatus.h"
 
@@ -52,13 +53,15 @@ struct DistributedFrameWork {
     Node *node;
     Communicator *comm;
     ProcStatus *ps;
+    bool rough_trace;
 
     std::string type;
 
     DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
     {
         comm = new Communicator();
-        ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev);
+        rough_trace = false; //true || (comm->get_size() % 2 == 1 && comm->get_size() > 1);
+        ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev, rough_trace);
         // mpi
         if(chunk == 1 && comm->get_size() == 1 ) node = new SingleNode(comm, ps);
         else if(type == "SyncNode") node = new SyncNode(comm, ps);
@@ -77,14 +80,16 @@ struct DistributedFrameWork {
     }
     
     void run(ImageDecomposition *camera) {
+        statistics.start("run");
+
         printf("dis frame worker run\n");
         
         /*block size equels proc size*/
         if(type == "P2PNode" || type == "MWNode" || type == "SyncNode") {
-            camera->decomposition(ps->get_chunk_proc(), comm->get_size(), comm->get_rank(), comm->get_size()); 
+            camera->decomposition(ps->get_chunk_proc(), comm->get_size(), comm->get_rank(), comm->get_size(), rough_trace); 
         } else {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
-            camera->decomposition(ps->get_chunk_proc(), block_count, comm->get_rank(), comm->get_size());
+            camera->decomposition(ps->get_chunk_proc(), block_count, comm->get_rank(), comm->get_size(), rough_trace);
         } 
         
         for(int i = 0; i < ps->get_chunk_size(); i++) {
@@ -94,6 +99,8 @@ struct DistributedFrameWork {
         ps->updata_local_chunk();
         node->run(camera);
         
+        statistics.end("run");
+        statistics.print(comm->os);
     }
 
     void gather_image(const std::string& out_file, float* film, int frame, int width, int height) {
@@ -139,11 +146,16 @@ void dfw_save_image(const std::string& out_file, float* film, int frame, int wid
 }
 
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
+    statistics.start("run => work_thread => send");
     dfw->node->save_outgoing_buffer(rays, size, capacity, isPrimary);
+    statistics.end("run => work_thread => send");
 }
 
 int recv_rays(float **rays, size_t size, bool isPrimary, int thread_id, bool thread_wait){
-    return dfw->node->load_incoming_buffer(rays, size, isPrimary, thread_id, thread_wait);
+    statistics.start("run => work_thread => load_incoming_buffer");
+    int res = dfw->node->load_incoming_buffer(rays, size, isPrimary, thread_id, thread_wait);
+    statistics.end("run => work_thread => load_incoming_buffer");
+    return res;
 }
 
 void master_save_ray_batches(float *rays, size_t size, size_t capacity, size_t thread_id) {

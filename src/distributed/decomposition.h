@@ -326,21 +326,13 @@ struct ImageDecomposition {
         //write_project_result(width, height, domain.data()); 
     }
 
-    void decomposition(int* chunk_map, int block, int rank, int size) {
+    void decomposition(int* chunk_map, int block, int rank, int size, bool rough_trace) {
         block_count = block;
         int chunk_size = get_chunk_num();
-        if(size % 2 == 1 && size > 1) {
-            //use simple mesh 
-            size -= 1;
-            block_count -= 1;
-            chunk_map[chunk_size] = size;
-        }
         if(block_count == size) {
             image_domain_decomposition(ImageBlock(width, height), chunk_map, rank, size);
-            if(rank == size) {   //master
-                render_block = ImageBlock(0, 0, width, height);
-                spp = 4;
-            }
+            if(rough_trace)
+                chunk_map[chunk_size] = -1;
         } else if (block_count == 1) {
             MeshChunk chunks;
             spp = spp / size;

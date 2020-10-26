@@ -70,6 +70,10 @@ struct BBox {
     }
 
     bool line_intersect(const float3& v0, const float3& v1){
+
+        if(is_inside(v0) || is_inside(v1))
+            return true;
+
         float3 dir = v1 - v0;
         float3 t0  = (min - v0) / dir;
         float3 t1  = (max - v0) / dir;

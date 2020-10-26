@@ -23,14 +23,14 @@ private:
     int proc_size, proc_rank;
     std::vector<bool> proc_idle;
 
-    bool simple_trace;
+    bool rough_trace;
 public:    
     ImageDecomposition *camera;   
     std::vector<int>  global_rays;
     
     ~ProcStatus(); 
 
-    ProcStatus(int proc_rank, int proc_size, int cSize, int dev); 
+    ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool); 
 
     void thread_reset(); 
     
@@ -66,8 +66,8 @@ public:
     int get_chunk_size(){return chunk_size;}
 
     int get_local_chunk(){ return local_chunk;}
-  
-    bool generate_rays(){ return !simple_trace || proc_rank != proc_size - 1;}
+ 
+    bool generate_rays(){ return !(rough_trace && local_chunk == chunk_size - 1);}
 
     int get_proc(int c); 
 
@@ -103,11 +103,13 @@ public:
     
     void set_working() {exit = false;}
     
+    bool get_rough_trace() {return rough_trace;}
+
     bool Exit() {return exit;}
 };
 
-ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev) 
-    : proc_rank(proc_rank), proc_size(proc_size), dev_num(dev)
+ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool rough_trace) 
+    : proc_rank(proc_rank), proc_size(proc_size), dev_num(dev), rough_trace(rough_trace)
 {
     
     cpu_thread_num = 1;//std::thread::hardware_concurrency();
@@ -116,8 +118,8 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev)
     proc_reset();
      
     exit = false;
-    simple_trace = proc_size % 2 == 1 && proc_size > 1; 
-    chunk_size = simple_trace ? cSize + 1 : cSize;
+    //include simple mesh
+    chunk_size = rough_trace ? cSize + 1 : cSize;
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
     //inital chunk map , +1 for simple mesh
     
@@ -128,6 +130,7 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev)
     global_rays.resize(proc_size * proc_size);
     local_chunk = 0;
 }
+
 
 ProcStatus::~ProcStatus() {
     proc_idle.clear();

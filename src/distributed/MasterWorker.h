@@ -1,5 +1,5 @@
 // Original Master-Worker mode 
-struct MWNode : public Node{
+struct MWNode : public Node {
     double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
     MWNode(struct Communicator *comm, struct ProcStatus *ps);
@@ -105,7 +105,7 @@ void MWNode::master_send_message() {
     if(!outList_empty()) {
 
         int cId = get_sent_list();
-        if(ps->get_proc(cId) >= 0 ) {
+        if(cId >= 0 && ps->get_proc(cId) >= 0 ) {
             int dst_proc = ps->get_proc(cId);
             comm->os<<"mthread master new RayMsg "<<cId<<" size "<<rayList[cId].size()<<" rank "<<comm->get_rank()<<" dst "<<dst_proc<<"\n";
             
@@ -190,14 +190,18 @@ void MWNode::message_thread(void* tmp) {
        //     printf("master before recv thread wait %d inlist %d %d %d %d\n", 
        //        ps->all_thread_waiting(), wk->inList.size(), ps->all_proc_idle(), ps->all_rays_received(), wk->rayList_empty());
        // }
+       
+        statistics.start("run => message_thread => recv_message");
         do {
       //     if(comm->isMaster()) 
       //         comm->os<<"master wait recv\n";
             recv = comm->recv_message(wk->rayList.data(), &(wk->inList),  ps);
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
+        statistics.end("run => message_thread => recv_message");
          
         if(ps->Exit()) break;
         
+        statistics.start("run => message_thread => send_message");
         //if new chunk havent loaded, render thread havent start, mthread wait
         std::unique_lock <std::mutex> lock(wk->thread_mutex); 
         if(!wk->inList.empty()) {
@@ -211,6 +215,7 @@ void MWNode::message_thread(void* tmp) {
             wk->inList_not_empty.notify_one();
         }
         lock.unlock(); 
+        statistics.end("run => message_thread => send_message");
 
         if(ps->Exit()) break;
         
@@ -240,59 +245,47 @@ void MWNode::run(ImageDecomposition * camera) {
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
     std::vector<std::thread> workThread;
-    if(comm->get_size() == 1) {
-        printf("only one worker %d  ", comm->get_rank());
-        for(int i = 0; i < deviceNum; i++) 
-            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-        
-        for( auto &thread: workThread) 
-            thread.join();
+    
+    std::thread mthread(message_thread, this);
+    //    all proc start proc 0 send schedule? 
+    while(1) {
+        comm->os<<"new chunk raylist local chunk "<<ps->get_local_chunk()<<"\n";
+        for(int i = 0; i < ps->get_chunk_size(); i++)
+            comm->os<< rayList[i].size()<<"  ";
+        comm->os<<"\n";
 
-        workThread.clear();
-    } else {
-        comm->os <<"mthread  \n";
-        comm->os <<comm->get_rank()<<" start mthread run\n ";
-        std::thread mthread(message_thread, this);
-        //    all proc start proc 0 send schedule? 
-        while(1) {
-            comm->os<<"new chunk raylist local chunk "<<ps->get_local_chunk()<<"\n";
-            for(int i = 0; i < ps->get_chunk_size(); i++)
-                comm->os<< rayList[i].size()<<"  ";
-            comm->os<<"\n";
+        comm->os<<"                                   new chunk raylist left chunk " << ps->get_local_chunk()<<" ";
+        for(int i = 0; i < ps->get_chunk_size(); i++)
+            comm->os<<" "<<rayList[i].size();
+        comm->os<<"\n";
 
-            comm->os<<"                                   new chunk raylist left chunk " << ps->get_local_chunk()<<" ";
-            for(int i = 0; i < ps->get_chunk_size(); i++)
-                comm->os<<" "<<rayList[i].size();
-            comm->os<<"\n";
+        if(ps->has_new_chunk()) {
+            ps->chunk_loaded();
 
-            if(ps->has_new_chunk()) {
-                ps->chunk_loaded();
+            comm->os<<comm->get_rank()<<" before set render start"<<"\n";
+            for(int i = 0; i < deviceNum; i++) 
+                workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0));
+             
+            //set chunk loaded
+            comm->os<<" set render start "<<"\n";
+            comm->os<<" set render start \n";
+            
+            render_start.notify_all(); 
+            comm->os<<" render start notify \n";
+            printf("%d render start notify \n", comm->get_rank());
 
-                comm->os<<comm->get_rank()<<" before set render start"<<"\n";
-                for(int i = 0; i < deviceNum; i++) 
-                    workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0));
-                 
-                //set chunk loaded
-                comm->os<<" set render start "<<"\n";
-                comm->os<<" set render start \n";
-                
-                render_start.notify_all(); 
-                comm->os<<" render start notify \n";
-                printf("%d render start notify \n", comm->get_rank());
+            for(auto &thread: workThread)
+                thread.join();
 
-                for(auto &thread: workThread)
-                    thread.join();
-
-                workThread.clear();
-            } else {
-                ps->set_exit();
-                break;
-            }
-            iter++;
+            workThread.clear();
+        } else {
+            ps->set_exit();
+            break;
         }
-        printf("%d worker exit\n", comm->get_rank());
-        mthread.join();
+        iter++;
     }
+    printf("%d worker exit\n", comm->get_rank());
+    mthread.join();
     return;
     printf("run MWNode\n");
 }

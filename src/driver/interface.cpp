@@ -872,7 +872,7 @@ void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mar
         get_primary_stream(primary, array.data(), array.size() / 21);
     } else {
         int capacity = is_first_primary? interface->save_first_primary(dev) / 21 : interface->save_second_primary(dev) / 21;
-        auto&  array = interface->host_primary;
+        auto& array = interface->host_primary;
         get_primary_stream(primary, array.data(), capacity);
     }
     for(int i = 0; i < 5; i++) {

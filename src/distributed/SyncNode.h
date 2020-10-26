@@ -110,12 +110,21 @@ void SyncNode::gather_rays(int chunk, int owner, bool primary) {
 int SyncNode::get_unloaded_chunk(int* list_size) {
     int unloaded_chunk = -1;
     int max_ray_size = 0;
-    for(int i = 0; i < ps->get_chunk_size(); i++) {
+    int chunk_size = ps->get_chunk_size();
+  
+    int simple_mesh = chunk_size - 1; 
+    if(ps->get_rough_trace() && list_size[simple_mesh] > max_ray_size ) { 
+        unloaded_chunk = simple_mesh;
+        max_ray_size   = list_size[simple_mesh] / 2;
+    }
+
+    for(int i = 0; i < chunk_size - 1; i++) {
         if(list_size[i] > max_ray_size && ps->get_proc(i) == -1) {
             unloaded_chunk = i;  
             max_ray_size = list_size[i];
         }
     }
+
     return unloaded_chunk;
 }
 
@@ -142,6 +151,7 @@ void SyncNode::schedule(int * list_size) {
 
 void SyncNode::synchronize () {
   
+    statistics.start("run => synchronize => MPI_Allreduce");
     printf("master sync raylist size %d\n", rayList.size());
     int chunk_size =  ps->get_chunk_size();
     std::vector<int> list_size(chunk_size); 
@@ -149,6 +159,8 @@ void SyncNode::synchronize () {
     get_raylist_size(rayList, list_size);
     MPI_Allreduce(list_size.data(), list_size.data(), chunk_size, MPI_INT, MPI_SUM, MPI_COMM_WORLD); 
     
+    statistics.end("run => synchronize => MPI_Allreduce");
+
     //exit
     int all_rays = 0;
     for(int i = 0; i < chunk_size; i++) {
@@ -169,6 +181,7 @@ void SyncNode::synchronize () {
     }
     comm->os<<"\n";
 
+    statistics.start("run => synchronize => gather_rays");
     for(int chunk = 0; chunk < chunk_size; chunk++) {
         int owner = ps->get_proc(chunk);
         if(owner < 0) {
@@ -180,6 +193,7 @@ void SyncNode::synchronize () {
         gather_rays(chunk, owner, false); 
         rayList[chunk].clear();
     }  
+    statistics.end("run => synchronize => gather_rays");
     printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), inList.size());
 }
 
@@ -195,7 +209,7 @@ void SyncNode::run(ImageDecomposition * camera) {
         comm->os<<"run while\n";
         ps->chunk_loaded();
 
-        std::cout<<"rthread rank " <<comm->get_rank()<<" generate rays "<<ps->generate_rays()<<"\n";
+        std::cout<<"rthread rank " << comm->get_rank()<<" generate rays "<<ps->generate_rays()<<"\n";
         for(int i = 0; i < deviceNum; i++)
             workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0 && ps->generate_rays()));
         
@@ -206,11 +220,10 @@ void SyncNode::run(ImageDecomposition * camera) {
         comm->os<<"rthread end thread\n";
 
         workThread.clear();
-        
+        statistics.start("run => synchronize");
         synchronize();
-    
+        statistics.end("run => synchronize");
         iter++;
-
     }
     //
 
@@ -222,7 +235,21 @@ void SyncNode::run(ImageDecomposition * camera) {
 
     std::cout<<" chunk size "<<chunk_size<<" ray left "<<rayList[chunk_size - 1].size()<<"\n";      
 //    if(rayList[chunk_size - 1].empty()) {
+//        //load rayList[chunk_size - 1] to liststream
+//        ps->update_chunk(comm->get_rank(), chunk_size - 1);
+//        RaysArray &primary   = rayList[chunk_size - 1].get_primary(); 
+//        RaysArray &secondary = rayList[chunk_size - 1].get_secondary(); 
+//
+//        inList.read_from_ptr((char*)primary.get_data(), primary.get_size(), true, comm->get_rank());
+//        inList.read_from_ptr((char*)secondary.get_data(), secondary.get_size(), false, comm->get_rank());
+//        rayList[chunk_size - 1].clear();
 //        
+//        for(int i = 0; i < deviceNum; i++)
+//            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, false/*no new rays*/));
+//        
+//        for(auto &thread: workThread)
+//            thread.join();
+//         
 //    }
 //    assert(chunk_size % 2 == 1 || );
     if(chunk_size % 2 == 1 && rayList[chunk_size].size() > 0 ) {

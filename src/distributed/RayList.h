@@ -60,7 +60,9 @@ public:
     
     void clear();
 
-    static void read_from_device_buffer(RayList * raylists, float *raybuffer, size_t size, size_t capacity, bool primary, int rank, int chunk_size);
+    void read_from_message(char* , int, int);
+    
+    static void read_from_device_buffer(RayList * , float *, size_t , size_t , bool , int , int);
     
     static void read_from_message(RayList *, char*, int, int);
 
@@ -237,13 +239,17 @@ void RayList::read_from_device_buffer(RayList * raylist, float *out_buffer,  siz
     time += elapsed_ms; 
 }
 
+void RayList::read_from_message(char* ptr, int msg_primary_size, int msg_secondary_size) {
+
+}
+
 void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {
     std::ofstream os; 
     os.open("out/proc_buffer_master", std::ios::out | std::ios::app ); 
     os<<"master read from message: all primary size "<<msg_primary_size<<" secondary "<<msg_secondary_size<<"\n"; 
     if(msg_primary_size > 0) {
         int* id_ptr = (int*) ptr;
-        int width = rayList[0].get_primary().get_store_width();
+        int width = RAY_COMPACT ? 16 : 21;
         int st = 0, ed = 0; 
         int tmp = id_ptr[9] >> 12;
         while(ed < msg_primary_size - 1) {
@@ -260,7 +266,7 @@ void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_siz
     }
     os<<"secondary \n"; 
     if(msg_secondary_size > 0) {
-        int width = rayList[0].get_secondary().get_store_width();
+        int width = 14;// rayList[0].get_secondary().get_store_width();
         int* id_ptr = (int*) ptr;
         int st = 0, ed = 0; 
         int tmp = id_ptr[9] >> 12;;

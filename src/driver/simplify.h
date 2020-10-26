@@ -167,10 +167,16 @@ namespace Simplify
         materials.clear();
     }
 
-	obj::TriMesh simplify(int target_count, float agressiveness=7, bool verbose=false) {
+	obj::TriMesh simplify(float agressiveness=7, bool verbose=false) {
+
+        int target_count; 
+        if(triangles.size() < 10000) {
+            target_count = round((float)triangles.size() * 0.1);
+        } else {
+            target_count = round((float)triangles.size() * 0.01);
+        } 
 
 		printf("Input: %zu vertices, %zu triangles (target %d)\n", Simplify::vertices.size(), Simplify::triangles.size(), target_count);
-		
 		simplify_mesh(target_count, agressiveness, verbose);
 		
 		obj::TriMesh simple_mesh;
@@ -611,7 +617,6 @@ namespace Simplify
 		}
 		char line[1000];
 		memset ( line,0,1000 );
-		int vertex_cnt = 0;
 		//int material = -1;
         int cur_mtl = 0;
 		std::map<std::string, int> material_map;
@@ -704,17 +709,16 @@ namespace Simplify
 				}
 				if ( tri_ok )
 				{
-					t.v[0] = integers[0]-1-vertex_cnt;
-					t.v[1] = integers[1]-1-vertex_cnt;
-					t.v[2] = integers[2]-1-vertex_cnt;
+                    for(int i = 0; i < 3; i ++)     
+					    t.v[i] = integers[i]-1;
 					t.attr = 0;
 
 					if ( process_uv && has_uv )
 					{
 						std::vector<int> indices;
-						indices.push_back(integers[6]-1-vertex_cnt);
-						indices.push_back(integers[7]-1-vertex_cnt);
-						indices.push_back(integers[8]-1-vertex_cnt);
+						indices.push_back(integers[6]-1);
+						indices.push_back(integers[7]-1);
+						indices.push_back(integers[8]-1);
 						uvMap.push_back(indices);
 						t.attr |= TEXCOORD;
 					}
