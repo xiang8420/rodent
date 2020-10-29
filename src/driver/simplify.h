@@ -177,11 +177,12 @@ namespace Simplify
         } 
 
 		printf("Input: %zu vertices, %zu triangles (target %d)\n", Simplify::vertices.size(), Simplify::triangles.size(), target_count);
+	
 		simplify_mesh(target_count, agressiveness, verbose);
 		
 		obj::TriMesh simple_mesh;
-		simple_mesh.indices.resize(4 * triangles.size()); 
-		simple_mesh.texcoords.resize(vertices.size()); 
+		simple_mesh.indices.resize(4 * triangles.size());
+		simple_mesh.texcoords.resize(vertices.size());
 
 		for(int i = 0; i < triangles.size(); i++) {
 			Triangle &t = triangles[i];

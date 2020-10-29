@@ -1,4 +1,5 @@
 #include <chrono>
+#include <fstream>
 
 using namespace std::chrono;
 struct TimeStatistics {
@@ -39,7 +40,7 @@ struct TimeStatistics {
             int pos        = distance(func_name.begin(), iter);
             func_time[pos] += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func_st[pos]).count();
         } else {
-            error("Time statistics: should start before end");
+            error(name);
         }
     }
     

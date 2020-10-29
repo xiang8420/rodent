@@ -1,12 +1,23 @@
 // Original Master-Worker mode 
 struct MWNode : public Node {
-    double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
 
     MWNode(struct Communicator *comm, struct ProcStatus *ps);
     
     ~MWNode();
 
     int get_unloaded_chunk();
+    
+    bool rayList_empty();
+    
+    bool all_queue_empty();
+
+    bool outList_empty();
+    
+    void clear_outlist();
+    
+    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
+
+    int get_sent_list(); 
     
     void master_send_message();
     
@@ -16,6 +27,8 @@ struct MWNode : public Node {
     
     void run(ImageDecomposition * camera);
     
+    std::vector <RayList> rayList;
+    
 };
 
 MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -23,19 +36,10 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
 {
     printf("new MWNode\n");
     int chunk_size = ps->get_chunk_size();
-//    comm->os<< "master chunk size"<<chunk_size<<"\n";
-  
-    size_t memory[4];
-    memory[0] = physical_memory_used_by_process();
-    comm->os<<"master set up\n";
-    
-    memory[1] = physical_memory_used_by_process();
-    printf("Memory %ld kb in list %ld\n", memory[0], memory[1] - memory[0]);
-    
-    st = clock();
-    recv_t = 0; wait_t = 0;
-    send_t = 0; total_t = 0;
-    write_t = 0; read_t = 0;
+    for(int i = 0; i < chunk_size; i++) {
+        rayList.emplace_back(RayList());
+    }
+    inList.set_capacity(ps->get_buffer_size());
 }
 
 MWNode::~MWNode() {
@@ -55,11 +59,111 @@ int MWNode::get_unloaded_chunk(){
     return unloaded_chunk;
 }
 
+bool MWNode::outList_empty() {  
+    int chunk_size = ps->get_chunk_size();
+    for(int i = 0; i < chunk_size; i++) {
+        if( !rayList[i].empty() ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool MWNode::all_queue_empty() { 
+    for(int i = 0; i < ps->get_chunk_size(); i++) {
+        if(!rayList[i].empty()) {return false;}
+    }
+    return true;
+}
+
+bool MWNode::rayList_empty() {  
+//    printf("if raylist empty\n");
+    int chunk_size = ps->get_chunk_size();
+    bool res = true;
+    out_mutex.lock();
+    for(int i = 0;i < chunk_size; i++)
+        if(!rayList[i].empty()) { res = false; break; }
+    out_mutex.unlock();
+    in_mutex.lock();
+    res &= inList.empty();
+    in_mutex.unlock();
+    return res;
+}
+
+
+void MWNode::clear_outlist() {  
+    int chunk_size = ps->get_chunk_size();
+    for(int i = 0; i < chunk_size; i++) {
+        rayList[i].get_primary().clear();
+        rayList[i].get_secondary().clear();
+    }
+}
+
+void MWNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
+    out_mutex.lock(); 
+    int width = primary?21:14; 
+    comm->os<<"rthread save outgoing buffer "<< size <<" width "<<width<<"\n"; 
+    int* ids = (int*)(retired_rays);
+    for(int i = 0; i < 5; i ++) {
+        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
+    }
+    comm->os<<"\n";
+//    for(int i = 0; i < ps->get_chunk_size(); i++) { 
+//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
+//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
+//    }
+    //RayStreamList::read_from_device_buffer(rayList.data(), retired_rays, size, primary, comm->get_rank());
+    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->get_rank(), ps->get_chunk_size());
+    out_mutex.unlock(); 
+//    for(int i = 0; i < ps->get_chunk_size(); i++)
+//        printf("Node.h raylist primary size %d width %d : ", rayList[i].get_primary().get_size(), rayList[i].get_primary().get_store_width());
+}
+
+// get chunk retun chunk id
+int MWNode::get_sent_list() {
+    int chunk_size = ps->get_chunk_size();
+    int dst_loaded = -1, dst_unloaded = -1;
+    int max_loaded = 0,  max_unloaded = 0; 
+   
+ //   if(comm->get_rank() == 1) { 
+ //       printf("proc %d raylist status: ", comm->get_rank());
+ //       for(int i = 0; i < chunk_size; i++)
+ //           printf("|chunk %d  proc %d rays %d ", i, ps->get_proc(i), rayList[i].get_primary().get_size());
+ //       printf("| \n");
+ //   }
+    for(int i = 0; i < chunk_size; i++) {
+        if(i == ps->get_local_chunk()) continue;
+
+        if(ps->get_proc(i) >= 0 && rayList[i].size() > max_loaded) {
+            max_loaded = rayList[i].size();
+            dst_loaded = i;
+        }
+        if(ps->get_proc(i) < 0 && rayList[i].size() > max_unloaded) {
+            max_unloaded = rayList[i].size();
+            dst_unloaded = i;
+        }
+    }
+    if(comm->isMaster()) {
+        return dst_loaded;
+    } else {
+        if(dst_loaded >= 0 ) {
+            if(ps->all_thread_waiting() || max_loaded > 0.4 * ps->get_buffer_size()) 
+                 return dst_loaded;
+            return -1;
+        } 
+        else 
+           return dst_unloaded; 
+    }
+}
+
 void MWNode::master_send_message() {
     //master idle
     //printf("master all status all thread wait %d inlist %d %d %d %d\n", 
     //        ps->all_thread_waiting(), inList.size(), ps->all_proc_idle(), ps->all_rays_received(), rayList_empty());
-    comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
+//    for(int i = 0; i < ps->get_chunk_size(); i++)
+//        printf("M %d ",rayList[i].size());
+//    printf("\n");
+//    comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
     
     if(ps->all_thread_waiting() && inList.empty() && rayList_empty()) {
         comm->os<< "mthread if all thread idle all queue empty, set itself idle\n";
@@ -111,6 +215,8 @@ void MWNode::master_send_message() {
             
             ps->set_proc_busy(dst_proc);
             
+            //printf("MasterWorker.h raylist chunk id %d dst %d  primary size %d width %d : ", 
+            //          cId, ps->get_proc(cId), rayList[cId].get_primary().get_size(), rayList[cId].get_primary().get_store_width());
             RayMsg ray_msg(rayList[cId], comm->get_rank(), dst_proc, cId, false, get_tag()); 
             
             comm->os<<"mthread RayMsg "<<ray_msg.get_chunk()<<"\n";
@@ -156,7 +262,7 @@ void MWNode::worker_send_message() {
         comm->os<<"\n";
     }
     if (!outList_empty()) {
-        comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
+        //comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
         out_mutex.lock();
         int cId = get_sent_list();
         if(cId >= 0) {
@@ -180,17 +286,20 @@ void MWNode::message_thread(void* tmp) {
     Communicator * comm = wk->comm; 
     ProcStatus * ps = wk->ps;
 
+    statistics.start("run => message_thread");
     printf("%d message thread\n", comm->get_rank());
 //    comm->os<<"message thread\n";
     int recv_count = 0;
     while (!ps->Exit()) {
        
+        statistics.start("run => message_thread => loop");
         bool recv = false;
        // if(comm->isMaster()){ 
        //     printf("master before recv thread wait %d inlist %d %d %d %d\n", 
        //        ps->all_thread_waiting(), wk->inList.size(), ps->all_proc_idle(), ps->all_rays_received(), wk->rayList_empty());
        // }
-       
+        
+        //if send list empty also stay here 
         statistics.start("run => message_thread => recv_message");
         do {
       //     if(comm->isMaster()) 
@@ -199,9 +308,12 @@ void MWNode::message_thread(void* tmp) {
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
         statistics.end("run => message_thread => recv_message");
          
-        if(ps->Exit()) break;
+        if(ps->Exit()) {
+            statistics.end("run => message_thread => loop");
+            break;
+        }
         
-        statistics.start("run => message_thread => send_message");
+        statistics.start("run => message_thread => inlist not empty");
         //if new chunk havent loaded, render thread havent start, mthread wait
         std::unique_lock <std::mutex> lock(wk->thread_mutex); 
         if(!wk->inList.empty()) {
@@ -215,10 +327,14 @@ void MWNode::message_thread(void* tmp) {
             wk->inList_not_empty.notify_one();
         }
         lock.unlock(); 
-        statistics.end("run => message_thread => send_message");
+        statistics.end("run => message_thread => inlist not empty");
 
-        if(ps->Exit()) break;
+        if(ps->Exit()) {
+            statistics.end("run => message_thread => loop");
+            break;
+        }
         
+        statistics.start("run => message_thread => send_message");
         //clear_outlist();
         if(comm->isMaster())
             wk->master_send_message(); 
@@ -226,14 +342,19 @@ void MWNode::message_thread(void* tmp) {
             wk->worker_send_message();
         
         comm->purge_completed_mpi_buffers();
+        statistics.end("run => message_thread => send_message");
         
-        usleep(50);
+        statistics.start("run => message_thread => sleep");
+        usleep(500);
+        statistics.end("run => message_thread => sleep");
+            statistics.end("run => message_thread => loop");
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
     comm->os <<" inlist "<< wk->inList.size()
              <<" recv "<<ps->global_rays[comm->get_rank() + comm->get_size()]
              <<std::endl;
     wk->inList_not_empty.notify_all();
+    statistics.end("run => message_thread");
     return;
 } 
 

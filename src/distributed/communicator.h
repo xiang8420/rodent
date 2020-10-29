@@ -132,13 +132,15 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 	// on the broadcast root, the rank and the size.  Otherwise, just ship it.
     
 	struct mpi_send_buffer *msb = new mpi_send_buffer;
-    
+   
+    statistics.start("run => message_thread => send_message => export");
     msb->total_size = m->get_header_size() + (m->has_content() ? m->get_size() : 0);
     msb->send_buffer = (char *)malloc(msb->total_size);
     memcpy(msb->send_buffer, m->get_header(), m->get_header_size());
 //    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size()<<"broadcast"<<m->is_broadcast()<<std::endl;
     if (m->has_content())
         memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_size());
+    statistics.end("run => message_thread => send_message => export");
      
     if (m->is_broadcast()) {
         os<<"mthread broadcast\n";
@@ -181,7 +183,12 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
 //        os<<"mthread recv msg "<<count<<"\n ";
         printf("%d before recv rays\n", rank);
+        
+        statistics.start("run => message_thread => recv_message => RecvMsg");
+        
         Message *recv_msg = new RecvMsg(List, inList, ps->get_local_chunk(), status, MPI_COMM_WORLD); 
+        statistics.end("run => message_thread => recv_message => RecvMsg");
+        
         os<<"m<"<<status.MPI_SOURCE/*recv_msg->get_sender()*/<<" "<<recv_msg->get_tag() <<"\n";
 //        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" tag "<<recv_msg->get_tag()<<" size "<<recv_msg->get_ray_size() 
 //            <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
@@ -203,6 +210,7 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
                 }
             case Status: 
                 {
+                    statistics.start("run => message_thread => recv_message => StatusMsg");
                     if(isMaster()) 
                         printf("master recv status\n");
                     int sender = std::max(recv_msg->get_sender(), recv_msg->get_root()); 
@@ -216,6 +224,7 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
                     int *s = ps->get_status();
                     printf("recv status %d %d %d %d\n", s[0], s[1], s[2], s[3]);
 //                    os<< "update all rays received "<< s[0] <<" "<< s[1] <<" "<<s[2]<<" "<<s[3]<<"\n";
+                    statistics.end("run => message_thread => recv_message => StatusMsg");
                     return true;
                 } 
             case Ray: 

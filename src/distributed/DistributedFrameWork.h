@@ -8,20 +8,21 @@
 #include <unistd.h>
 #include <assert.h>
 
-#include "communicator.h"
+#include "MemoryPool.h"
 #include "statistic.h"
-#include "decomposition.h"
 #include "ProcStatus.h"
+#include "communicator.h"
+#include "decomposition.h"
 
 #include "Node.h"
 #include "SingleNode.h"
 #include "SyncNode.h"
-#include "P2PNode.h"
 #include "AllCopyNode.h"
 #include "MasterWorker.h"
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
+
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
@@ -65,7 +66,6 @@ struct DistributedFrameWork {
         // mpi
         if(chunk == 1 && comm->get_size() == 1 ) node = new SingleNode(comm, ps);
         else if(type == "SyncNode") node = new SyncNode(comm, ps);
-        else if(type == "P2PNode") node = new P2PNode(comm, ps);
         else if(type == "MWNode") node = new MWNode(comm, ps);
         else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
         else error("Unknown node type");
@@ -85,7 +85,7 @@ struct DistributedFrameWork {
         printf("dis frame worker run\n");
         
         /*block size equels proc size*/
-        if(type == "P2PNode" || type == "MWNode" || type == "SyncNode") {
+        if( type == "MWNode" || type == "SyncNode") {
             camera->decomposition(ps->get_chunk_proc(), comm->get_size(), comm->get_rank(), comm->get_size(), rough_trace); 
         } else {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;

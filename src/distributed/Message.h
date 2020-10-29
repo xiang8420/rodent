@@ -117,6 +117,7 @@ class RayMsg : public Message{
 public:
     RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag);
     RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int tag);
+    RayMsg(RayStreamList List, int src, int dst, int chunk_size, bool idle, int tag);
 };
 
 class RecvMsg : public Message {
@@ -203,14 +204,16 @@ RecvMsg::RecvMsg(RayList* List, RayStreamList *inList, int local_chunk, MPI_Stat
 //                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
                 if(header->chunk < 0) 
                     error("header chunk < 0 ", header->chunk);
-                List[header->chunk].read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
-
+                //List[header->chunk].read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
+                
                 //RayList::read_from_message(List, (char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
             } else {
 //                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
+                statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
                 inList->lock();
                 inList->read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
                 inList->unlock();
+                statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
             }
         }
         free(buffer);
@@ -303,7 +306,7 @@ RayMsg::RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag
     RaysArray &primary = outList.get_primary(); 
     int width = primary.get_store_width(); 
     int* ids = (int*)(primary.get_data());
-    printf(" ray msg raylist primary size %d  ", primary.get_size());
+    printf(" dst %d ray msg raylist primary size %d width %d %d : ", dst, primary.get_size(), width, primary.get_store_width());
     for(int i = 0; i < std::min(5, primary.get_size()); i ++) {
         printf(" %d %d$", ids[i*width], ids[i*width + 9]);
     }

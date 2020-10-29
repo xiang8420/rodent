@@ -828,7 +828,7 @@ bool convert_simple_mesh(const std::string& file_name, obj::MaterialLib &mtl_lib
     // only proc 0 process the left part
     printf("simplify time %f\n", elapsed_ms);
 
-    obj::write_obj(simple_mesh, mtl_lib, 99); //
+    //obj::write_obj(simple_mesh, mtl_lib, 99); //
 
     ticks = std::chrono::high_resolution_clock::now();
 
@@ -869,7 +869,7 @@ bool convert_simple_mesh(const std::string& file_name, obj::MaterialLib &mtl_lib
     // only proc 0 process the left part
     printf("convert simplify time %f\n", elapsed_ms);
 
-//      obj::write_obj(simple_mesh, mtl_lib, chunk_size); //
+    //obj::write_obj(simple_mesh, mtl_lib, chunk_size); 
     return true;
 }
 
@@ -1059,7 +1059,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light.colors.emplace_back(mat.ke);
             }
         }
-//        obj::write_obj(tri_mesh, mtl_lib, i);
+        //obj::write_obj(tri_mesh, mtl_lib, i);
         chunk_num_tris = tri_mesh.indices.size() / 4;
     }
     mpi_gather_light(tri_lights, num_lights, num_tris, light.verts, light.norms, light.areas, light.colors, proc_rank, proc_size);

@@ -1,14 +1,16 @@
 // Synchronize Dynamic  
 struct SyncNode : public Node{
 
-    double recv_t, wait_t, send_t, total_t, read_t, write_t, st, ed;
-
     SyncNode(struct Communicator *comm, struct ProcStatus *ps);
     
     ~SyncNode();
     
     int get_unloaded_chunk(int *);
     
+    bool all_queue_empty();
+
+    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
+
     void send_message();
 
     void gather_rays(int, int, bool);
@@ -22,6 +24,8 @@ struct SyncNode : public Node{
     static void message_thread(void* tmp);
     
     void run(ImageDecomposition * camera);
+   
+    std::vector <RayList> rayList;
     
 };
 //每一轮光线全部给master然后 master发送调度消息给各个节点 各个节点读取新场景， 接受光线
@@ -31,19 +35,18 @@ SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps)
     sync = true;
     printf("new SyncNode\n");
     int chunk_size = ps->get_chunk_size();
-//    comm->os<< "master chunk size"<<chunk_size<<"\n";
+    for(int i = 0; i < chunk_size; i++) {
+        rayList.emplace_back(RayList());
+    }
+    inList.set_capacity(ps->get_buffer_size());
   
-    size_t memory[4];
-    memory[0] = physical_memory_used_by_process();
-    comm->os<<"master set up\n";
-    
-    memory[1] = physical_memory_used_by_process();
-    printf("Memory %ld kb in list %ld\n", memory[0], memory[1] - memory[0]);
-    
-    st = clock();
-    recv_t = 0; wait_t = 0;
-    send_t = 0; total_t = 0;
-    write_t = 0; read_t = 0;
+}
+
+bool SyncNode::all_queue_empty() { 
+    for(int i = 0; i < ps->get_chunk_size(); i++) {
+        if(!rayList[i].empty()) {return false;}
+    }
+    return true;
 }
 
 SyncNode::~SyncNode() {
@@ -53,6 +56,26 @@ SyncNode::~SyncNode() {
 void get_raylist_size(std::vector <RayList> &rayList, std::vector <int> &list_size) { 
     for(int i = 0; i < rayList.size(); i ++)
         list_size[i] = rayList[i].size();
+}
+
+void SyncNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
+    out_mutex.lock(); 
+    int width = primary?21:14; 
+    comm->os<<"rthread save outgoing buffer "<< size <<" width "<<width<<"\n"; 
+    int* ids = (int*)(retired_rays);
+    for(int i = 0; i < 5; i ++) {
+        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
+    }
+    comm->os<<"\n";
+//    for(int i = 0; i < ps->get_chunk_size(); i++) { 
+//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
+//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
+//    }
+    //RayStreamList::read_from_device_buffer(rayList.data(), retired_rays, size, primary, comm->get_rank());
+    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->get_rank(), ps->get_chunk_size());
+    out_mutex.unlock(); 
+//    for(int i = 0; i < ps->get_chunk_size(); i++)
+//        printf("Node.h raylist primary size %d width %d : ", rayList[i].get_primary().get_size(), rayList[i].get_primary().get_store_width());
 }
 
 void SyncNode::gather_rays(int chunk, int owner, bool primary) {
@@ -100,7 +123,7 @@ void SyncNode::gather_rays(int chunk, int owner, bool primary) {
         }
         comm->os<<"\n";
 
-        inList.read_from_ptr((char*)recv_buffer.data(), all_rays_size, primary, owner);
+        inList.read_from_ptr(recv_buffer.data(), 0, all_rays_size, primary, owner);
     }
      
     comm->os<<" raylist "<<chunk<<" size "<< rays.data.size()<<" capacity "<<rays.data.capacity()<<"\n";
@@ -131,7 +154,7 @@ int SyncNode::get_unloaded_chunk(int* list_size) {
 void SyncNode::schedule(int * list_size) {
     int chunk_size = ps->get_chunk_size();
     int proc_size  = comm->get_size();
-
+    printf("proc_size %d > chunk size %d\n", proc_size, chunk_size);
     if(proc_size >= chunk_size) 
         return;
 
@@ -147,6 +170,10 @@ void SyncNode::schedule(int * list_size) {
              //proc_[i] load new chunk 
          } 
     } 
+    printf("schedule : ");
+    for(int i = 0; i < chunk_size; i++) {
+        printf("|c %d p %d ", i, ps->get_proc(i));
+    }printf("\n");
 }
 
 void SyncNode::synchronize () {
@@ -218,7 +245,6 @@ void SyncNode::run(ImageDecomposition * camera) {
             thread.join();
     
         comm->os<<"rthread end thread\n";
-
         workThread.clear();
         statistics.start("run => synchronize");
         synchronize();
@@ -233,7 +259,7 @@ void SyncNode::run(ImageDecomposition * camera) {
         printf(" %d || ", rayList[i].size()); 
     printf("\n");
 
-    std::cout<<" chunk size "<<chunk_size<<" ray left "<<rayList[chunk_size - 1].size()<<"\n";      
+    std::cout<<" chunk size "<<chunk_size<<" ray left "<<rayList[chunk_size - 1].size()<<"\n";
 //    if(rayList[chunk_size - 1].empty()) {
 //        //load rayList[chunk_size - 1] to liststream
 //        ps->update_chunk(comm->get_rank(), chunk_size - 1);
@@ -255,7 +281,7 @@ void SyncNode::run(ImageDecomposition * camera) {
     if(chunk_size % 2 == 1 && rayList[chunk_size].size() > 0 ) {
         comm->os<<"proc "<<comm->get_rank()<<" bounce ray left "<<rayList[chunk_size - 1].size()<<"\n";      
     }
-
+    
     return;
 }
 
