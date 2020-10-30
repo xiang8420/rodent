@@ -587,20 +587,21 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let image = scene.camera.tile;
     let spp = image.spp;
     let num_rays = spp * (image.ymax - image.ymin) * (image.xmax - image.xmin);
-    let capacity = rodent_thread_buffer_size();
+    let logic_capcacity = rodent_stream_size();
+    let store_capcacity = rodent_stream_capacity();
     
     let mut primary   : PrimaryStream;
     let mut other_primary : PrimaryStream;
     let mut secondary : SecondaryStream;
     rodent_initial_gpu_host_data(film_width * film_height);
-    rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
-    rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, capacity);
-    rodent_gpu_get_first_secondary_stream(dev_id, &mut secondary, capacity);
+    rodent_gpu_get_first_primary_stream(dev_id, &mut primary, store_capcacity);
+    rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, store_capcacity);
+    rodent_gpu_get_first_secondary_stream(dev_id, &mut secondary, store_capcacity);
 
     let mut out_primary     : OutRayStream;
     let mut out_secondary   : OutRayStream;
-    rodent_gpu_get_out_ray_stream(dev_id, &mut out_primary,   capacity, true);
-    rodent_gpu_get_out_ray_stream(dev_id, &mut out_secondary, capacity, false);
+    rodent_gpu_get_out_ray_stream(dev_id, &mut out_primary,   store_capcacity, true);
+    rodent_gpu_get_out_ray_stream(dev_id, &mut out_secondary, store_capcacity, false);
 
     let mut gpu_tmp : &mut [i32];
     rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
@@ -615,12 +616,12 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     print_size("start rendering\n", num_rays, "\n");
     while true {
         // Regenerate rays
-        if primary.size < capacity && id < num_rays {
-             primary.size = gpu_generate_rays(primary, capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
+        if primary.size < logic_capcacity && id < num_rays {
+             primary.size = gpu_generate_rays(primary, logic_capcacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
         }
 //        rodent_first_primary_check(1, primary.size, 1, true);     
         gpu_primary_chunk(primary, acc, intrinsics, atomics, min_max, scene); 
-        let (primary_size, out_primary_size) = gpu_primary_transfer(primary, other_primary, out_primary, scene.chunk_id, capacity, acc, intrinsics,
+        let (primary_size, out_primary_size) = gpu_primary_transfer(primary, other_primary, out_primary, scene.chunk_id, logic_capcacity, acc, intrinsics,
                                                                 atomics, dev_id, gpu_tmp, first_primary, id == num_rays);
         gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         primary.size = primary_size; 
@@ -681,7 +682,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
             // Trace secondary rays
             gpu_traverse_secondary(secondary, acc, intrinsics, atomics, min_max, scene, film_pixels, spp);
             gpu_secondary_chunk(secondary, acc, intrinsics, atomics, min_max, scene); 
-            let (secondary_size, out_secondary_size) = gpu_secondary_transfer(secondary, out_secondary, scene.chunk_id, capacity, acc, intrinsics,
+            let (secondary_size, out_secondary_size) = gpu_secondary_transfer(secondary, out_secondary, scene.chunk_id, logic_capcacity, acc, intrinsics,
                                                                     atomics, dev_id, gpu_tmp, true, id == num_rays);
             secondary.size = secondary_size; 
             out_secondary.size = out_secondary_size;
@@ -706,7 +707,7 @@ fn @gpu_streaming_trace( dev_id: i32
                        ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
 
-    let capacity = rodent_thread_buffer_size(); 
+    let capacity = rodent_stream_size(); 
     let mut primary;
     let mut other_primary;
     let mut secondary;
@@ -886,7 +887,7 @@ fn @gpu_ray_batching( dev_id: i32
                      ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
 
-    let capacity = rodent_thread_buffer_size(); 
+    let capacity = rodent_stream_size(); 
     let mut primary;
     rodent_gpu_get_first_primary_stream(dev_id, &mut primary, capacity);
     

@@ -26,16 +26,19 @@ extern "C" {
     fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
 
+    fn rodent_cpu_thread_num() -> i32;
+    fn rodent_stream_size() -> i32;
+    fn rodent_stream_capacity() -> i32;
+    fn rodent_out_stream_size() -> i32;
+
     fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
     fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();
-    fn rodent_thread_buffer_size() ->i32;
-    fn rodent_cpu_get_thread_num() -> i32; 
+
     fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
     fn rodent_worker_primary_send(i32, i32) -> ();    
     fn rodent_worker_secondary_send(i32, i32) -> ();    
     fn rodent_worker_primary_recv(i32, i32, bool, i32, bool) -> i32;
     fn rodent_worker_secondary_recv(i32, i32, bool, i32, bool) -> i32;
-    fn rodent_master_save_ray_batches(i32, i32, i32) -> ();
 }
 
 // Ray streams ---------------------------------------------------------------------

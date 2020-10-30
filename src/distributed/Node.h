@@ -29,7 +29,7 @@ public:
 
     virtual void run(ImageDecomposition * camera) = 0;
 
-    virtual void save_outgoing_buffer(float *, size_t, size_t, bool) = 0;
+    virtual void save_outgoing_buffer(float *, size_t, bool) = 0;
     
     int get_tag();
     
@@ -99,7 +99,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     int width = rays_stream->width;
     printf("copy primary size %d\n", copy_size);
  //   comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
-    memcpy(*rays, rays_stream->get_data(), ps->get_buffer_capacity() * width * sizeof(float)); 
+    memcpy(*rays, rays_stream->get_data(), ps->get_stream_capacity() * width * sizeof(float)); 
  
 //     //printf("%d rays_stream size %d %d %d\n", comm->get_rank(), rays_stream->size, primary, rays_stream->store_width);
 //    int* ids = (int*)(*rays);

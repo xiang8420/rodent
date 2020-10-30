@@ -1,3 +1,22 @@
+struct RetiredRays {
+    float* data;
+    int size;
+    int width;
+    bool primary;
+    RetiredRays(float* rays, int size, int width)
+        :size(size), width(width) 
+    {
+        primary = width == 21;
+        int capacity = size * width;
+        data = new float[capacity]; 
+        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
+    }
+
+    ~RetiredRays(){
+        delete[] data;
+    }
+};
+
 // Original Master-Worker mode 
 struct MWNode : public Node {
 
@@ -15,7 +34,7 @@ struct MWNode : public Node {
     
     void clear_outlist();
     
-    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
+    void save_outgoing_buffer(float *rays, size_t size, bool primary);
 
     int get_sent_list(); 
     
@@ -27,8 +46,10 @@ struct MWNode : public Node {
     
     void run(ImageDecomposition * camera);
     
-    std::vector <RayList> rayList;
-    
+    RayList *rayList;
+
+        
+    std::vector<RetiredRays*> retiredRays; 
 };
 
 MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -36,10 +57,8 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
 {
     printf("new MWNode\n");
     int chunk_size = ps->get_chunk_size();
-    for(int i = 0; i < chunk_size; i++) {
-        rayList.emplace_back(RayList());
-    }
-    inList.set_capacity(ps->get_buffer_size());
+    rayList = new RayList[chunk_size];
+    inList.set_capacity(ps->get_stream_size());
 }
 
 MWNode::~MWNode() {
@@ -99,24 +118,14 @@ void MWNode::clear_outlist() {
     }
 }
 
-void MWNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
+void MWNode::save_outgoing_buffer(float *rays, size_t size, bool primary){
     out_mutex.lock(); 
     int width = primary?21:14; 
-    comm->os<<"rthread save outgoing buffer "<< size <<" width "<<width<<"\n"; 
-    int* ids = (int*)(retired_rays);
-    for(int i = 0; i < 5; i ++) {
-        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
-    }
-    comm->os<<"\n";
-//    for(int i = 0; i < ps->get_chunk_size(); i++) { 
-//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].secondary.data.size(), rayList[i].secondary.data.capacity());
-//        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
-//    }
-    //RayStreamList::read_from_device_buffer(rayList.data(), retired_rays, size, primary, comm->get_rank());
-    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->get_rank(), ps->get_chunk_size());
+    
+    RetiredRays *retired_rays = new RetiredRays(rays, size, width);
+    retiredRays.emplace_back(retired_rays);
+        
     out_mutex.unlock(); 
-//    for(int i = 0; i < ps->get_chunk_size(); i++)
-//        printf("Node.h raylist primary size %d width %d : ", rayList[i].get_primary().get_size(), rayList[i].get_primary().get_store_width());
 }
 
 // get chunk retun chunk id
@@ -147,7 +156,7 @@ int MWNode::get_sent_list() {
         return dst_loaded;
     } else {
         if(dst_loaded >= 0 ) {
-            if(ps->all_thread_waiting() || max_loaded > 0.4 * ps->get_buffer_size()) 
+            if(ps->all_thread_waiting() || max_loaded > 0.4 * ps->get_stream_size()) 
                  return dst_loaded;
             return -1;
         } 
@@ -180,7 +189,6 @@ void MWNode::master_send_message() {
 
     //proc idle
     int idle_proc = ps->get_idle_proc();
-    out_mutex.lock();
     if(idle_proc >= 0 && ps->all_rays_received()) {
         //find a unloaded chunk contents unprocessed rays
         // if idle proc loaded chunk not empty ???
@@ -223,7 +231,6 @@ void MWNode::master_send_message() {
             comm->send_message(&ray_msg, ps);
         }
     }
-    out_mutex.unlock(); 
 }
 
 void MWNode::worker_send_message() {
@@ -263,7 +270,6 @@ void MWNode::worker_send_message() {
     }
     if (!outList_empty()) {
         //comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
-        out_mutex.lock();
         int cId = get_sent_list();
         if(cId >= 0) {
             if(ps->get_proc(cId) >= 0) {
@@ -276,7 +282,6 @@ void MWNode::worker_send_message() {
                 comm->send_message(&ray_msg, ps);
             }
         }
-        out_mutex.unlock(); 
     }
 }
 
@@ -304,13 +309,23 @@ void MWNode::message_thread(void* tmp) {
         do {
       //     if(comm->isMaster()) 
       //         comm->os<<"master wait recv\n";
-            recv = comm->recv_message(wk->rayList.data(), &(wk->inList),  ps);
+            recv = comm->recv_message(wk->rayList, &(wk->inList),  ps);
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
         statistics.end("run => message_thread => recv_message");
          
         if(ps->Exit()) {
             statistics.end("run => message_thread => loop");
             break;
+        }
+
+        if(!wk->retiredRays.empty()) {
+            wk->out_mutex.lock();
+            while(!wk->retiredRays.empty()) {
+                RetiredRays* rays = wk->retiredRays.back();
+                wk->retiredRays.pop_back();
+                RayList::read_from_device_buffer(wk->rayList, rays->data, rays->size, rays->primary, comm->get_rank(), ps->get_chunk_size());
+            }
+            wk->out_mutex.unlock();
         }
         
         statistics.start("run => message_thread => inlist not empty");

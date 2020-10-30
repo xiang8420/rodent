@@ -15,7 +15,7 @@ struct AllCopyNode : public Node{
     
     void run(ImageDecomposition * camera);
     
-    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
+    void save_outgoing_buffer(float *rays, size_t size, bool primary);
 
 };
 
@@ -39,7 +39,7 @@ AllCopyNode::~AllCopyNode() {
     printf("delete AllCopyNode\n");
 }
 
-void AllCopyNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){ 
+void AllCopyNode::save_outgoing_buffer(float *retired_rays, size_t size, bool primary){ 
     error("Allcopynode don't need save outgoing");
 }
 

@@ -9,7 +9,7 @@ struct SyncNode : public Node{
     
     bool all_queue_empty();
 
-    void save_outgoing_buffer(float *rays, size_t size, size_t capacity, bool primary);
+    void save_outgoing_buffer(float *rays, size_t size, bool primary);
 
     void send_message();
 
@@ -38,7 +38,7 @@ SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps)
     for(int i = 0; i < chunk_size; i++) {
         rayList.emplace_back(RayList());
     }
-    inList.set_capacity(ps->get_buffer_size());
+    inList.set_capacity(ps->get_stream_size());
   
 }
 
@@ -58,7 +58,7 @@ void get_raylist_size(std::vector <RayList> &rayList, std::vector <int> &list_si
         list_size[i] = rayList[i].size();
 }
 
-void SyncNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){
+void SyncNode::save_outgoing_buffer(float *retired_rays, size_t size, bool primary){
     out_mutex.lock(); 
     int width = primary?21:14; 
     comm->os<<"rthread save outgoing buffer "<< size <<" width "<<width<<"\n"; 
@@ -72,7 +72,7 @@ void SyncNode::save_outgoing_buffer(float *retired_rays, size_t size, size_t cap
 //        printf("save out going ray data size %ld capacity %ld\n",rayList[i].primary.data.size(), rayList[i].primary.data.capacity());
 //    }
     //RayStreamList::read_from_device_buffer(rayList.data(), retired_rays, size, primary, comm->get_rank());
-    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, capacity, primary, comm->get_rank(), ps->get_chunk_size());
+    RayList::read_from_device_buffer(rayList.data(), retired_rays, size, primary, comm->get_rank(), ps->get_chunk_size());
     out_mutex.unlock(); 
 //    for(int i = 0; i < ps->get_chunk_size(); i++)
 //        printf("Node.h raylist primary size %d width %d : ", rayList[i].get_primary().get_size(), rayList[i].get_primary().get_store_width());
@@ -125,8 +125,6 @@ void SyncNode::gather_rays(int chunk, int owner, bool primary) {
 
         inList.read_from_ptr(recv_buffer.data(), 0, all_rays_size, primary, owner);
     }
-     
-    comm->os<<" raylist "<<chunk<<" size "<< rays.data.size()<<" capacity "<<rays.data.capacity()<<"\n";
 
 }
 

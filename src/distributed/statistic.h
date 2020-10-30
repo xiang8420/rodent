@@ -9,9 +9,12 @@ struct TimeStatistics {
     std::vector<float>                             func_time;
     std::vector<int>                               func_num_run;
 
+    std::mutex  mtx;
+
     TimeStatistics(){}
 
     void start(const std::string &name) {
+        std::unique_lock <std::mutex> lock(mtx); 
         std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), name);
         if( iter != func_name.end() ) {
             int pos = distance(func_name.begin(), iter);
@@ -30,18 +33,20 @@ struct TimeStatistics {
        //         break;
        //     }
        // }
-
        // if()
     }
 
     void end(const std::string &name) {
+        std::unique_lock <std::mutex> lock(mtx); 
         std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), name);
-        if( iter != func_name.end() ) {
-            int pos        = distance(func_name.begin(), iter);
-            func_time[pos] += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func_st[pos]).count();
-        } else {
-            error(name);
+        for(int i = 0; i < func_name.size(); i++) {
+            if(func_name[i] == name) {
+                func_time[i] += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func_st[i]).count();
+                return ;
+            }
         }
+        warn("cant find func name\n");
+        warn(name);
     }
     
     void print(std::ofstream &os) {

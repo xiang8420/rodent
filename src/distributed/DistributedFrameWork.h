@@ -147,7 +147,7 @@ void dfw_save_image(const std::string& out_file, float* film, int frame, int wid
 
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
     statistics.start("run => work_thread => send");
-    dfw->node->save_outgoing_buffer(rays, size, capacity, isPrimary);
+    dfw->node->save_outgoing_buffer(rays, size, isPrimary);
     statistics.end("run => work_thread => send");
 }
 
@@ -158,10 +158,24 @@ int recv_rays(float **rays, size_t size, bool isPrimary, int thread_id, bool thr
     return res;
 }
 
-void master_save_ray_batches(float *rays, size_t size, size_t capacity, size_t thread_id) {
-//    dfw->worker->save_ray_batches(rays, size, capacity, thread_id);
+int32_t dfw_stream_size() {
+    return dfw->ps->get_stream_size();
 }
 
-int32_t thread_buffer_size() {
-    return dfw->node->get_proc_status()->get_buffer_size();
+int32_t dfw_stream_capacity() {
+    return dfw->ps->get_stream_capacity();
 }
+
+int32_t dfw_out_stream_size() {
+    return dfw->ps->get_out_stream_size();
+}
+
+int32_t dfw_out_stream_capacity() {
+    return dfw->ps->get_out_stream_capacity();
+}
+
+int32_t dfw_thread_num() {
+    return dfw->ps->get_thread_num(); 
+}
+
+

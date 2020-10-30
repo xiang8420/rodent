@@ -8,7 +8,7 @@ class ProcStatus {
 private:
     //thread 
     std::vector<bool> thread_idle;
-    int cpu_thread_num;
+    int work_thread_num;
     int dev_num;
 
     //domain settings
@@ -18,7 +18,8 @@ private:
     //decomposition
     std::mutex mutex;
    
-    int buffer_size, buffer_capacity; 
+    int stream_size, stream_capacity;
+    int out_stream_size, out_stream_capacity; 
     bool exit, load_new_chunk;
     int proc_size, proc_rank;
     std::vector<bool> proc_idle;
@@ -74,12 +75,14 @@ public:
     void set_thread_idle(int id, bool wait) { thread_idle[id] = wait;}
     
     bool is_thread_idle(int id) { return thread_idle[id]; }
-    
-    int get_buffer_capacity(){return buffer_capacity;}
 
-    void set_buffer_capacity(int n){buffer_capacity = n;}
+    void set_stream_capacity(int n){stream_capacity = n;}
     
-    int get_buffer_size(){return buffer_size;}
+    int get_stream_size(){return stream_size; }
+    int get_stream_capacity(){return stream_capacity; }
+    int get_out_stream_size(){return out_stream_size; }
+    int get_out_stream_capacity(){return out_stream_capacity; }
+    int get_thread_num() {return work_thread_num; }
 
     void accumulate_sent(int n) { global_rays[proc_rank] += n; }
     
@@ -112,20 +115,22 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     : proc_rank(proc_rank), proc_size(proc_size), dev_num(dev), rough_trace(rough_trace)
 {
     
-    cpu_thread_num = 1;//std::thread::hardware_concurrency();
-    thread_idle.resize(cpu_thread_num);
+    work_thread_num = 8;//std::thread::hardware_concurrency();
+    thread_idle.resize(work_thread_num);
     thread_reset(); 
     proc_reset();
      
     exit = false;
-    //include simple mesh
+    //including simple mesh
     chunk_size = rough_trace ? cSize + 1 : cSize;
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
-    //inital chunk map , +1 for simple mesh
     
     chunk_proc.resize(chunk_size); 
-    buffer_size = 1024 * 1024 / cpu_thread_num;
-    buffer_capacity = (buffer_size & ~((1 << 5) - 1)) + 32; // round to 32
+    stream_size     = 1024 * 1024 / work_thread_num;
+    stream_capacity = (stream_size & ~((1 << 5) - 1)) + 32; // round to 32
+    
+    out_stream_size     = stream_size; 
+    out_stream_capacity = stream_capacity; 
     
     global_rays.resize(proc_size * proc_size);
     local_chunk = 0;
@@ -154,7 +159,7 @@ void ProcStatus::updata_local_chunk() {
 }
 
 bool ProcStatus::all_thread_waiting() {
-    for(int i = 0; i < cpu_thread_num; i++) {
+    for(int i = 0; i < work_thread_num; i++) {
         if(!thread_idle[i]) 
             return false;
     }
@@ -162,8 +167,8 @@ bool ProcStatus::all_thread_waiting() {
 }
 
 void ProcStatus::thread_reset() {
-    printf("\ncpu thread num %d\n", cpu_thread_num);
-    for(int i = 0; i < cpu_thread_num; i++) 
+    printf("\ncpu thread num %d\n", work_thread_num);
+    for(int i = 0; i < work_thread_num; i++) 
         thread_idle[i] = false;
 }
 

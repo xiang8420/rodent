@@ -5,7 +5,7 @@ struct SingleNode : public Node{
     
     void run(ImageDecomposition * camera);
 
-    void save_outgoing_buffer(float *retired_rays, size_t size, size_t capacity, bool primary){ }
+    void save_outgoing_buffer(float *retired_rays, size_t size, bool primary){ }
     
 };
 
