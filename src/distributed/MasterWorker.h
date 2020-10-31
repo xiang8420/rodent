@@ -58,7 +58,8 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
     printf("new MWNode\n");
     int chunk_size = ps->get_chunk_size();
     rayList = new RayList[chunk_size];
-    inList.set_capacity(ps->get_stream_size());
+    inList.set_capacity(ps->get_stream_logic_capacity(),
+                        ps->get_stream_store_capacity());
 }
 
 MWNode::~MWNode() {
@@ -99,13 +100,9 @@ bool MWNode::rayList_empty() {
 //    printf("if raylist empty\n");
     int chunk_size = ps->get_chunk_size();
     bool res = true;
-    out_mutex.lock();
     for(int i = 0;i < chunk_size; i++)
         if(!rayList[i].empty()) { res = false; break; }
-    out_mutex.unlock();
-    in_mutex.lock();
     res &= inList.empty();
-    in_mutex.unlock();
     return res;
 }
 
@@ -119,13 +116,11 @@ void MWNode::clear_outlist() {
 }
 
 void MWNode::save_outgoing_buffer(float *rays, size_t size, bool primary){
-    out_mutex.lock(); 
+    std::lock_guard <std::mutex> lock(out_mutex); 
+
     int width = primary?21:14; 
-    
     RetiredRays *retired_rays = new RetiredRays(rays, size, width);
     retiredRays.emplace_back(retired_rays);
-        
-    out_mutex.unlock(); 
 }
 
 // get chunk retun chunk id
@@ -156,7 +151,7 @@ int MWNode::get_sent_list() {
         return dst_loaded;
     } else {
         if(dst_loaded >= 0 ) {
-            if(ps->all_thread_waiting() || max_loaded > 0.4 * ps->get_stream_size()) 
+            if(ps->all_thread_waiting() || max_loaded > 0.4 * ps->get_stream_logic_capacity()) 
                  return dst_loaded;
             return -1;
         } 
@@ -319,29 +314,30 @@ void MWNode::message_thread(void* tmp) {
         }
 
         if(!wk->retiredRays.empty()) {
-            wk->out_mutex.lock();
+            std::lock_guard <std::mutex> lock(wk->out_mutex); 
             while(!wk->retiredRays.empty()) {
                 RetiredRays* rays = wk->retiredRays.back();
                 wk->retiredRays.pop_back();
                 RayList::read_from_device_buffer(wk->rayList, rays->data, rays->size, rays->primary, comm->get_rank(), ps->get_chunk_size());
             }
-            wk->out_mutex.unlock();
         }
         
         statistics.start("run => message_thread => inlist not empty");
         //if new chunk havent loaded, render thread havent start, mthread wait
-        std::unique_lock <std::mutex> lock(wk->thread_mutex); 
-        if(!wk->inList.empty()) {
-            if(ps->has_new_chunk() ) {
-//                comm->os<<"wait new chunk\n";
-                while( ps->has_new_chunk()) {
-//                    comm->os<<"wait rthread launch\n";
-                    wk->render_start.wait(lock); 
-                }
-            } 
-            wk->inList_not_empty.notify_one();
+        
+        {
+            std::unique_lock <std::mutex> lock(wk->thread_mutex); 
+            if(!wk->inList.empty()) {
+                if(ps->has_new_chunk() ) {
+    //                comm->os<<"wait new chunk\n";
+                    while( ps->has_new_chunk()) {
+    //                    comm->os<<"wait rthread launch\n";
+                        wk->render_start.wait(lock); 
+                    }
+                } 
+                wk->inList_not_empty.notify_one();
+            }
         }
-        lock.unlock(); 
         statistics.end("run => message_thread => inlist not empty");
 
         if(ps->Exit()) {

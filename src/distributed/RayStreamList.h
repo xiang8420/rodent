@@ -23,7 +23,7 @@ public:
 
     RayStreamList(){}
 
-    void set_capacity (int );
+    void set_capacity (int, int);
     
     //别忘了delete rays
     RaysStream* get_primary();
@@ -95,9 +95,9 @@ RaysStream::RaysStream(float * ptr, int capacity, int width, int copy_size)
     statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => copy");
 }
 
-void RayStreamList::set_capacity (int capacity) {
-    logic_capacity = capacity;
-    store_capacity = (capacity & ~((1 << 5) - 1)) + 32; // round to 32
+void RayStreamList::set_capacity (int logic, int store) {
+    logic_capacity = logic;
+    store_capacity = store;
 }
 
 RaysStream* RayStreamList::get_primary() {

@@ -38,7 +38,8 @@ SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps)
     for(int i = 0; i < chunk_size; i++) {
         rayList.emplace_back(RayList());
     }
-    inList.set_capacity(ps->get_stream_size());
+    inList.set_capacity(ps->get_stream_logic_capacity(), 
+                        ps->get_stream_store_capacity());
   
 }
 

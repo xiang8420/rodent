@@ -398,6 +398,8 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
     cpu_shade_specialized(primary, secondary, begin, end);
 }
 
+
+
 fn @cpu_get_film_data() -> (&mut [f32], i32, i32) {
     let mut film_pixels : &mut [f32];
     let mut film_width  : i32;
@@ -514,15 +516,15 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
                           , scene: Scene
                           ) -> (i32, i32) {
     let bbox        = scene.bbox;
-    let chunk_scale  = make_vec3_i32(scene.chunk.x as i32, scene.chunk.y as i32, scene.chunk.z as i32);
+    let chunk_scale = make_vec3_i32(scene.chunk.x as i32, scene.chunk.y as i32, scene.chunk.z as i32);
     let scale       = vec3_sub(bbox.max, bbox.min);
     let step        = vec3_div(scale, scene.chunk);
     let inv_step    = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
-    let num_chunks   = chunk_scale.x * chunk_scale.y * chunk_scale.z;
+    let num_chunks  = chunk_scale.x * chunk_scale.y * chunk_scale.z;
 
-    let chunk_ids    = secondary.chunk_id;
+    let chunk_ids   = secondary.chunk_id;
     let prim_ids    = secondary.prim_id;
-    let write_chunk  = @ |i, _, id| secondary.chunk_id(i) = id;
+    let write_chunk = @ |i, _, id| secondary.chunk_id(i) = id;
     let ray_reader  = make_ray_stream_reader(secondary.rays, 1);
     let ray_ids     = secondary.rays.id;
     let scene_chunk = scene.chunk_id;
@@ -653,18 +655,19 @@ fn @cpu_dis_trace( scene: Scene
     for xmin, ymin, xmax, ymax, spp_thread, tid in cpu_parallel_tiles(scene.camera.tile, 0, false) {
         with cpu_profile(&mut total_counter) {
             // Get ray streams/states from the CPU driver
-            let logic_capacity = rodent_stream_size();
-            let store_capacity = rodent_stream_capacity();
+            let logic_capacity = rodent_stream_logic_capacity();
+            let store_capacity = rodent_stream_store_capacity();
             let mut primary   : PrimaryStream;
             let mut secondary : SecondaryStream;
             rodent_cpu_get_primary_stream(&mut primary,     store_capacity);
             rodent_cpu_get_secondary_stream(&mut secondary, store_capacity);
             let num_rays = spp_thread * (ymax - ymin) * (xmax - xmin);
 
+            let out_stream_capacity = rodent_out_stream_capacity();
             let mut out_primary     : OutRayStream;
             let mut out_secondary   : OutRayStream;
-            rodent_cpu_get_out_ray_stream(&mut out_primary,   logic_capacity, true);
-            rodent_cpu_get_out_ray_stream(&mut out_secondary, logic_capacity, false);
+            rodent_cpu_get_out_ray_stream(&mut out_primary,   out_stream_capacity, true);
+            rodent_cpu_get_out_ray_stream(&mut out_secondary, out_stream_capacity, false);
             let mut id = 0;
             if !valid_camera { id = num_rays; }
             

@@ -20,9 +20,8 @@ int  recv_rays(float **, size_t, bool, int, bool);
 void master_save_ray_batches(float*, size_t, size_t, size_t);
 
 int dfw_thread_num();
-int dfw_stream_size(); 
-int dfw_stream_capacity();
-int dfw_out_stream_size(); 
+int dfw_stream_logic_capacity(); 
+int dfw_stream_store_capacity();
 int dfw_out_stream_capacity();
 
 template <typename Node, typename Tri>
@@ -901,17 +900,12 @@ int32_t rodent_cpu_thread_num() {
     return dfw_thread_num();
 }
 
-int32_t rodent_stream_size() {
-    return dfw_stream_size(); 
+int32_t rodent_stream_logic_capacity() {
+    return dfw_stream_logic_capacity(); 
 }
 
-int32_t rodent_stream_capacity() {
-    return dfw_stream_capacity(); 
-}
-
-
-int32_t rodent_out_stream_size() {
-    return dfw_out_stream_size(); 
+int32_t rodent_stream_store_capacity() {
+    return dfw_stream_store_capacity(); 
 }
 
 int32_t rodent_out_stream_capacity() {

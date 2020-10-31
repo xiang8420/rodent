@@ -27,9 +27,9 @@ extern "C" {
     fn rodent_present(i32) -> ();
 
     fn rodent_cpu_thread_num() -> i32;
-    fn rodent_stream_size() -> i32;
-    fn rodent_stream_capacity() -> i32;
-    fn rodent_out_stream_size() -> i32;
+    fn rodent_stream_logic_capacity() -> i32;
+    fn rodent_stream_store_capacity() -> i32;
+    fn rodent_out_stream_capacity() -> i32;
 
     fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
     fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();

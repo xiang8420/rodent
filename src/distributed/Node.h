@@ -6,8 +6,7 @@ protected:
     ProcStatus *ps;
     
     RayStreamList inList;  
-     
-    std::mutex  out_mutex, buffer_mutex, in_mutex, thread_mutex;
+    std::mutex  out_mutex, thread_mutex;
     
     std::condition_variable inList_not_empty; //
     std::condition_variable render_start; //
@@ -99,7 +98,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     int width = rays_stream->width;
     printf("copy primary size %d\n", copy_size);
  //   comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
-    memcpy(*rays, rays_stream->get_data(), ps->get_stream_capacity() * width * sizeof(float)); 
+    memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
  
 //     //printf("%d rays_stream size %d %d %d\n", comm->get_rank(), rays_stream->size, primary, rays_stream->store_width);
 //    int* ids = (int*)(*rays);

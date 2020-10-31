@@ -18,8 +18,8 @@ private:
     //decomposition
     std::mutex mutex;
    
-    int stream_size, stream_capacity;
-    int out_stream_size, out_stream_capacity; 
+    int stream_logic_capacity, stream_store_capacity;
+    int out_stream_capacity; 
     bool exit, load_new_chunk;
     int proc_size, proc_rank;
     std::vector<bool> proc_idle;
@@ -76,11 +76,10 @@ public:
     
     bool is_thread_idle(int id) { return thread_idle[id]; }
 
-    void set_stream_capacity(int n){stream_capacity = n;}
+    void set_stream_store_capacity(int n){stream_store_capacity = n;}
     
-    int get_stream_size(){return stream_size; }
-    int get_stream_capacity(){return stream_capacity; }
-    int get_out_stream_size(){return out_stream_size; }
+    int get_stream_logic_capacity(){return stream_logic_capacity; }
+    int get_stream_store_capacity(){return stream_store_capacity; }
     int get_out_stream_capacity(){return out_stream_capacity; }
     int get_thread_num() {return work_thread_num; }
 
@@ -126,11 +125,10 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
     
     chunk_proc.resize(chunk_size); 
-    stream_size     = 1024 * 1024 / work_thread_num;
-    stream_capacity = (stream_size & ~((1 << 5) - 1)) + 32; // round to 32
+    stream_logic_capacity = 1024 * 1024 / work_thread_num;
+    stream_store_capacity = (stream_logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
     
-    out_stream_size     = stream_size; 
-    out_stream_capacity = stream_capacity; 
+    out_stream_capacity = stream_logic_capacity; 
     
     global_rays.resize(proc_size * proc_size);
     local_chunk = 0;

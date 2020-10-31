@@ -158,16 +158,12 @@ int recv_rays(float **rays, size_t size, bool isPrimary, int thread_id, bool thr
     return res;
 }
 
-int32_t dfw_stream_size() {
-    return dfw->ps->get_stream_size();
+int32_t dfw_stream_logic_capacity() {
+    return dfw->ps->get_stream_logic_capacity();
 }
 
-int32_t dfw_stream_capacity() {
-    return dfw->ps->get_stream_capacity();
-}
-
-int32_t dfw_out_stream_size() {
-    return dfw->ps->get_out_stream_size();
+int32_t dfw_stream_store_capacity() {
+    return dfw->ps->get_stream_store_capacity();
 }
 
 int32_t dfw_out_stream_capacity() {
