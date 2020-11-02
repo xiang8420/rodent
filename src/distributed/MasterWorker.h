@@ -1,22 +1,3 @@
-struct RetiredRays {
-    float* data;
-    int size;
-    int width;
-    bool primary;
-    RetiredRays(float* rays, int size, int width)
-        :size(size), width(width) 
-    {
-        primary = width == 21;
-        int capacity = size * width;
-        data = new float[capacity]; 
-        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
-    }
-
-    ~RetiredRays(){
-        delete[] data;
-    }
-};
-
 // Original Master-Worker mode 
 struct MWNode : public Node {
 
@@ -65,7 +46,6 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
 MWNode::~MWNode() {
     printf("delete MWNode\n");
 }
-
 
 int MWNode::get_unloaded_chunk(){
     int unloaded_chunk = -1;
@@ -129,14 +109,8 @@ int MWNode::get_sent_list() {
     int dst_loaded = -1, dst_unloaded = -1;
     int max_loaded = 0,  max_unloaded = 0; 
    
- //   if(comm->get_rank() == 1) { 
- //       printf("proc %d raylist status: ", comm->get_rank());
- //       for(int i = 0; i < chunk_size; i++)
- //           printf("|chunk %d  proc %d rays %d ", i, ps->get_proc(i), rayList[i].get_primary().get_size());
- //       printf("| \n");
- //   }
     for(int i = 0; i < chunk_size; i++) {
-        if(i == ps->get_local_chunk()) continue;
+        if(i == ps->get_current_chunk()) continue;
 
         if(ps->get_proc(i) >= 0 && rayList[i].size() > max_loaded) {
             max_loaded = rayList[i].size();
@@ -229,19 +203,10 @@ void MWNode::master_send_message() {
 }
 
 void MWNode::worker_send_message() {
- // printf("master after proc status\n");
-//    comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
-//    for(int i = 0; i < ps->get_chunk_size(); i++)
-//        printf("w %d ",rayList[i].size());
-//    printf("\n");
     if (ps->all_thread_waiting() && inList.empty()) {
         if(rayList_empty()) {
-            comm->os<< "mthread send status msg\n";
-            int * tmp = ps->get_status();
-            comm->os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
             ps->set_proc_idle(comm->get_rank());
-            comm->os<<"mthread local chunk"<<ps->get_local_chunk()<<"\n";
-            StatusMsg status(comm->get_rank(), comm->get_master(), ps->get_status(), ps->get_local_chunk(), comm->get_size(), get_tag()); 
+            StatusMsg status(comm->get_rank(), comm->get_master(), ps->get_status(), ps->get_current_chunk(), comm->get_size(), get_tag()); 
             comm->send_message(&status, ps);
             comm->os<< "mthread send status msg success\n";
         } else {
@@ -264,7 +229,6 @@ void MWNode::worker_send_message() {
         comm->os<<"\n";
     }
     if (!outList_empty()) {
-        //comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
         int cId = get_sent_list();
         if(cId >= 0) {
             if(ps->get_proc(cId) >= 0) {
@@ -304,7 +268,7 @@ void MWNode::message_thread(void* tmp) {
         do {
       //     if(comm->isMaster()) 
       //         comm->os<<"master wait recv\n";
-            recv = comm->recv_message(wk->rayList, &(wk->inList),  ps);
+            recv = comm->recv_message(wk->rayList, &(wk->inList),  ps, false);
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
         statistics.end("run => message_thread => recv_message");
          
@@ -326,8 +290,8 @@ void MWNode::message_thread(void* tmp) {
         //if new chunk havent loaded, render thread havent start, mthread wait
         
         {
-            std::unique_lock <std::mutex> lock(wk->thread_mutex); 
             if(!wk->inList.empty()) {
+                std::unique_lock <std::mutex> lock(wk->thread_mutex); 
                 if(ps->has_new_chunk() ) {
     //                comm->os<<"wait new chunk\n";
                     while( ps->has_new_chunk()) {
@@ -380,13 +344,13 @@ void MWNode::run(ImageDecomposition * camera) {
     
     std::thread mthread(message_thread, this);
     //    all proc start proc 0 send schedule? 
-    while(1) {
-        comm->os<<"new chunk raylist local chunk "<<ps->get_local_chunk()<<"\n";
+    while(!ps->Exit()) {
+        comm->os<<"new chunk raylist local chunk "<<ps->get_current_chunk()<<"\n";
         for(int i = 0; i < ps->get_chunk_size(); i++)
             comm->os<< rayList[i].size()<<"  ";
         comm->os<<"\n";
 
-        comm->os<<"                                   new chunk raylist left chunk " << ps->get_local_chunk()<<" ";
+        comm->os<<"                                   new chunk raylist left chunk " << ps->get_current_chunk()<<" ";
         for(int i = 0; i < ps->get_chunk_size(); i++)
             comm->os<<" "<<rayList[i].size();
         comm->os<<"\n";
@@ -410,9 +374,6 @@ void MWNode::run(ImageDecomposition * camera) {
                 thread.join();
 
             workThread.clear();
-        } else {
-            ps->set_exit();
-            break;
         }
         iter++;
     }

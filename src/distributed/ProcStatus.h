@@ -4,6 +4,9 @@
 #include <thread>
 #include "decomposition.h"
 
+#define MAX_CHUNK 3
+#define MAX_PROC  128
+
 class ProcStatus {
 private:
     //thread 
@@ -12,8 +15,9 @@ private:
     int dev_num;
 
     //domain settings
-    std::vector<int> chunk_proc;
-    int chunk_size, local_chunk;
+    int chunk_proc[MAX_CHUNK * MAX_PROC];
+    std::vector<int> local_chunks;
+    int chunk_size, current_chunk;
 
     //decomposition
     std::mutex mutex;
@@ -53,6 +57,8 @@ public:
     bool all_thread_waiting(); 
     
     void updata_local_chunk(); 
+    
+    bool is_local_chunk(int c); 
 
     void chunk_loaded() { thread_reset(); load_new_chunk = false; }
 
@@ -62,13 +68,13 @@ public:
     
     void unlock(){mutex.unlock();}
     
-    int* get_chunk_proc(){return chunk_proc.data();}
+    int* get_chunk_proc(){return &chunk_proc[0];}
     
     int get_chunk_size(){return chunk_size;}
 
-    int get_local_chunk(){ return local_chunk;}
+    int get_current_chunk(){ return current_chunk;}
  
-    bool generate_rays(){ return !(rough_trace && local_chunk == chunk_size - 1);}
+    bool generate_rays(){ return !(rough_trace && current_chunk == chunk_size - 1);}
 
     int get_proc(int c); 
 
@@ -100,6 +106,8 @@ public:
     ImageDecomposition* get_camera() { return camera; } 
     
     void set_new_chunk(){load_new_chunk = true;}
+    
+    void switch_current_chunk();
 
     void set_exit() {exit = true;}
     
@@ -124,14 +132,12 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     chunk_size = rough_trace ? cSize + 1 : cSize;
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
     
-    chunk_proc.resize(chunk_size); 
     stream_logic_capacity = 1024 * 1024 / work_thread_num;
     stream_store_capacity = (stream_logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
     
     out_stream_capacity = stream_logic_capacity; 
     
     global_rays.resize(proc_size * proc_size);
-    local_chunk = 0;
 }
 
 
@@ -142,16 +148,32 @@ ProcStatus::~ProcStatus() {
     printf("procstatus delete\n");
 }
 
-void ProcStatus::updata_local_chunk() {
-    printf("update_local_chunk rank %d chunk size%d\n", proc_rank, chunk_size);
-
-    local_chunk = 0;
-    for(int i = 0; i < chunk_size; i++) {
-        if(chunk_proc[i] == proc_rank) {
-            local_chunk = i;  
+void ProcStatus::switch_current_chunk() {
+    int local_size = local_chunks.size();
+    for(int i = 0; i < local_size; i++) {
+        if(local_chunks[i] == current_chunk) {
+            printf("load new chunk old chunk %d || ", current_chunk);
+            current_chunk = local_chunks[(i + 1) % local_size];
             load_new_chunk = true;
-            break;
+            printf("new chunk %d\n", current_chunk);
+            return;
+        }    
+    }
+    error("load invalid chunk");
+}
+
+void ProcStatus::updata_local_chunk() {
+
+    current_chunk = -1;
+    int i = 0;
+    while(chunk_proc[i * 2] != -1) {
+        printf("update chunk proc %d %d \n", chunk_proc[i * 2], chunk_proc[i * 2 + 1]);
+        if(chunk_proc[i * 2 + 1] == proc_rank) {
+            current_chunk = chunk_proc[i * 2];  
+            local_chunks.emplace_back(chunk_proc[i * 2]);
+            load_new_chunk = true;
         }
+        i++;
     }
     assert(load_new_chunk);
 }
@@ -187,8 +209,31 @@ bool ProcStatus::all_proc_idle() {
 }
     
 int ProcStatus::get_proc(int c) {
-    return chunk_proc[c];
+    int i = 0;
+    while(chunk_proc[i * 2] != -1) {
+        //printf("get proc %d %d\n", );
+        if(chunk_proc[i * 2] == c) {
+            return chunk_proc[i * 2 + 1];
+        }
+        i++;
+    }
+    return -1;
 }
+
+bool ProcStatus::is_local_chunk(int c) {
+
+
+//    return current_chunk == c;
+    int local_size = local_chunks.size();
+//    printf("is local chunk proc %d chunk %d %d\n", proc_rank, local_chunks[0], local_chunks[1]);
+    for(int i = 0; i < local_size; i++) {
+        if(local_chunks[i] == c) {
+            return true;
+        }    
+    }
+    return false;
+}
+
 
 int ProcStatus::get_idle_proc() {
     for(int i = 0; i < proc_size; i++){
@@ -233,7 +278,7 @@ bool ProcStatus::update_chunk(int* schedule) {
         if(chunk_proc[i] != schedule[i]) {
             chunk_proc[i] = schedule[i];
             if(chunk_proc[i] == proc_rank) {
-                local_chunk = i;
+                current_chunk = i;
                 load_new_chunk = true;
                 printf("update chunk true\n");
             }  
@@ -252,7 +297,7 @@ bool ProcStatus::update_chunk(int candidate_proc, int candidate_chunk) {
     chunk_proc[candidate_chunk] = candidate_proc;
     printf("candidate chunk %d canidate proc %d\n", candidate_chunk, candidate_proc);
     if(candidate_proc == proc_rank) {
-         local_chunk = candidate_chunk;
+         current_chunk = candidate_chunk;
          load_new_chunk = true;
          return true;
     } 

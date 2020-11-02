@@ -8,10 +8,13 @@ struct TimeStatistics {
     std::vector<high_resolution_clock::time_point> func_st;
     std::vector<float>                             func_time;
     std::vector<int>                               func_num_run;
+    high_resolution_clock::time_point              app_st;
 
     std::mutex  mtx;
 
-    TimeStatistics(){}
+    TimeStatistics(){
+        app_st = std::chrono::high_resolution_clock::now(); 
+    }
 
     void start(const std::string &name) {
         std::unique_lock <std::mutex> lock(mtx); 
@@ -50,9 +53,10 @@ struct TimeStatistics {
     }
     
     void print(std::ofstream &os) {
+        float all_time = duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - app_st).count();
         os<<"| Statistic : numbers of call, time \n";
         for(int i = 0; i < func_name.size(); i++) {
-            os<<"| "<<func_name[i]<<"  ( "<<func_num_run[i]<<" , "<<func_time[i]<<" )\n";
+            os<<"| "<<func_name[i]<<"  ( "<<func_num_run[i]<<" , "<<func_time[i] / all_time * 100<<"% )\n";
         }     
     
     } 

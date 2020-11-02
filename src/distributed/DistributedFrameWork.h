@@ -19,6 +19,7 @@
 #include "SyncNode.h"
 #include "AllCopyNode.h"
 #include "MasterWorker.h"
+#include "AsyncNode.h"
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
@@ -51,6 +52,7 @@ static void save_image(float *result, const std::string& out_file, size_t width,
 //
 
 struct DistributedFrameWork {
+    ImageDecomposition *splitter;
     Node *node;
     Communicator *comm;
     ProcStatus *ps;
@@ -58,8 +60,9 @@ struct DistributedFrameWork {
 
     std::string type;
 
-    DistributedFrameWork(std::string type, int chunk, int dev):  type(type) 
+    DistributedFrameWork(std::string type, int chunk, int dev, int width, int height, int spp):  type(type) 
     {
+        splitter = new ImageDecomposition(width, height, spp);
         comm = new Communicator();
         rough_trace = false; //true || (comm->get_size() % 2 == 1 && comm->get_size() > 1);
         ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev, rough_trace);
@@ -67,6 +70,7 @@ struct DistributedFrameWork {
         if(chunk == 1 && comm->get_size() == 1 ) node = new SingleNode(comm, ps);
         else if(type == "SyncNode") node = new SyncNode(comm, ps);
         else if(type == "MWNode") node = new MWNode(comm, ps);
+        else if(type == "Async") node = new AsyncNode(comm, ps);
         else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
         else error("Unknown node type");
         
@@ -79,25 +83,28 @@ struct DistributedFrameWork {
         delete comm;
     }
     
-    void run(ImageDecomposition *camera) {
+    void run(Camera *camera) {
         statistics.start("run");
 
         printf("dis frame worker run\n");
-        
+        int proc_rank = comm->get_rank();
+        int proc_size = comm->get_size(); 
         /*block size equels proc size*/
-        if( type == "MWNode" || type == "SyncNode") {
-            camera->decomposition(ps->get_chunk_proc(), comm->get_size(), comm->get_rank(), comm->get_size(), rough_trace); 
+        if( type == "MWNode" || type == "Async" || type == "SyncNode") {
+            //xxproc_updata_local_chunk();
+            int block_count = comm->get_size();
+            splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace);
         } else {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
-            camera->decomposition(ps->get_chunk_proc(), block_count, comm->get_rank(), comm->get_size(), rough_trace);
-        } 
-        
-        for(int i = 0; i < ps->get_chunk_size(); i++) {
-            printf("| %d", ps->get_chunk_proc()[i]);
+            splitter->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
         }
-        printf("\n");
+        splitter->write_chunk_proc(ps->get_chunk_proc());
+        int * chunk_proc = ps->get_chunk_proc();
+        for(int j = 0; j < 5; j++) 
+            printf("Distributed chunk map  %d %d\n", chunk_proc[j * 2], chunk_proc[j * 2 + 1]);
+        
         ps->updata_local_chunk();
-        node->run(camera);
+        node->run(splitter);
         
         statistics.end("run");
         statistics.print(comm->os);
@@ -129,15 +136,15 @@ struct DistributedFrameWork {
 
 static std::unique_ptr<DistributedFrameWork> dfw;
 
-void setup_distributed_framework(std::string type, int chunk, int dev) {
-    dfw.reset(new DistributedFrameWork(type, chunk, dev));
+void setup_distributed_framework(std::string type, int chunk, int dev, int w, int h, int spp) {
+    dfw.reset(new DistributedFrameWork(type, chunk, dev, w, h, spp));
 }
 
 void cleanup_distributed_framework() {
     dfw.reset();
 }
 
-void dfw_run(ImageDecomposition *camera) {
+void dfw_run(Camera *camera) {
     dfw->run(camera);
 }
 

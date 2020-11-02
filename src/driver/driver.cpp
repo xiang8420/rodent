@@ -124,13 +124,13 @@ int main(int argc, char** argv) {
     
     // inital process setting and status  
     printf("after construct rendersettings \n "); 
-    setup_distributed_framework(distributedMode, get_chunk_num(), get_dev_num()); 
+    setup_distributed_framework(distributedMode, get_chunk_num(), get_dev_num(), width, height, spp); 
     
-    ImageDecomposition camera(eye, dir, up, fov, width, height, spp);
+    Camera camera(eye, dir, up, fov, width, height);
     // time statistic 
     std::vector<double> samples_sec;
     float elapsed_ms = 1;  //avoid div 0
-   
+    
     int frame = 0;
     while(frame < 1) {
         clear_pixels();

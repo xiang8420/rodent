@@ -1,3 +1,22 @@
+struct RetiredRays {
+    float* data;
+    int size;
+    int width;
+    bool primary;
+    RetiredRays(float* rays, int size, int width)
+        :size(size), width(width) 
+    {
+        primary = width == 21;
+        int capacity = size * width;
+        data = new float[capacity]; 
+        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
+    }
+
+    ~RetiredRays(){
+        delete[] data;
+    }
+};
+
 class Node {
 
 protected:
@@ -32,6 +51,7 @@ public:
     
     int get_tag();
     
+    void loop_check(float i); 
 };
 
 Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
@@ -53,7 +73,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
         if(sync)
             return -1;
         if(ps->Exit() || ps->has_new_chunk() || ps->get_chunk_size() == 1) {
-            comm->os << "rthread exit new chunk \n";
+            comm->os << "rthread exit new chunk exit : "<< ps->Exit() << " new chunk " << ps->has_new_chunk() <<"\n";
             return -1;
         }
     } 
@@ -97,16 +117,8 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     int copy_size = rays_stream->size;
     int width = rays_stream->width;
     printf("copy primary size %d\n", copy_size);
- //   comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
     memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
  
-//     //printf("%d rays_stream size %d %d %d\n", comm->get_rank(), rays_stream->size, primary, rays_stream->store_width);
-//    int* ids = (int*)(*rays);
-//    comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
-//    for(int i = 0; i < std::min(5, copy_size); i ++) {
-//        comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_buffer_capacity() * 9];
-//    }
-//    comm->os<<"\n";
     delete rays_stream;
 
     statistics.end("run => work_thread => load_incoming_buffer-copy");
@@ -114,19 +126,17 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
         
 }
 
-void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preRendering, bool generate_rays) {
+void Node::work_thread(void* tmp, ImageDecomposition * splitter, int devId, int devNum, bool preRendering, bool generate_rays) {
     printf("work threadstart\n");
 
     Node * wk = (Node*)tmp;
     Communicator * comm = wk->comm; 
     ProcStatus *ps = wk->ps;
     
-    int* region = camera->get_render_block();
-    int sppProc = camera->get_spp(); 
+    Camera *camera = splitter->camera;
+    int* region = splitter->get_render_block();
+    int sppProc = splitter->get_spp(); 
     int sppDev = sppProc / devNum;
-    
-    printf("width %d height%d spp %d dev id %d local chunk %d\n", camera->width, camera->height, sppDev, devId, ps->get_local_chunk() );
-    printf("work thread rank %d region %d %d %d %d local chunk %d\n", comm->get_rank(), region[0], region[1], region[2], region[3], ps->get_local_chunk());
     if(generate_rays)
         printf("generate_rays\n");
     else 
@@ -147,8 +157,16 @@ void Node::work_thread(void* tmp, ImageDecomposition * camera, int devId, int de
         prerender(&settings);
     } else {
         int rnd = comm->get_rank() * devNum + devId;
-        render(&settings, rnd, devId, ps->get_local_chunk(), generate_rays);
+        render(&settings, rnd, devId, ps->get_current_chunk(), generate_rays);
     }
     printf("work thread end\n");
     statistics.end("run => work_thread");
 }
+
+void Node::loop_check(float i) {
+    if(0) {    
+        comm->os<<"mark "<<i<<"\n"; 
+        printf("%d mark %f\n", comm->get_rank(), i);
+    }
+}
+

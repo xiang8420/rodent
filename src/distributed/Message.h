@@ -204,9 +204,10 @@ RecvMsg::RecvMsg(RayList* List, RayStreamList *inList, int local_chunk, MPI_Stat
 //                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
                 if(header->chunk < 0) 
                     error("header chunk < 0 ", header->chunk);
-                //List[header->chunk].read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
                 
-                RayList::read_from_message(List, (char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
+                List[header->chunk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
+                char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * 21 * sizeof(float); 
+                List[header->chunk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
             } else {
 //                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
                 statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");

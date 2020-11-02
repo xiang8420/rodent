@@ -198,7 +198,6 @@ void SyncNode::synchronize () {
     }
     
     schedule(list_size.data()); //静态调度时无用
-    printf("proc %d chunk %d\n", comm->get_rank(), ps->get_local_chunk());
     //如果proc空了 则给一个chunk并进行gather
     //implement get dst chunk, add proc_chunk_map
     comm->os<<"proc raylist : ";
