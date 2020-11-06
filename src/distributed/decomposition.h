@@ -2,6 +2,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include "../driver/float3.h"
 #include "../driver/bbox.h"
 #include "../driver/obj.h"

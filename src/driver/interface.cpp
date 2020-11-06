@@ -10,6 +10,7 @@
 #include <x86intrin.h>
 #endif
 
+#include "common.h"
 #include "interface.h"
 #include "bvh.h"
 #include "obj.h"
@@ -269,6 +270,8 @@ struct Interface {
     size_t film_width;
     size_t film_height;
     
+    std::ofstream os;
+
     Interface(size_t width, size_t height)
         : film_width(width)
         , film_height(height)
@@ -280,6 +283,7 @@ struct Interface {
         host_primary_num      = anydsl::Array<int32_t>(128);
         host_prerender        = anydsl::Array<int32_t>(width * height * 8/*maxlength*/);
 
+        os = std::ofstream("mem_check");
     }
 
     template <typename T>
@@ -326,10 +330,6 @@ struct Interface {
         return resize_array(dev, devices[dev].second_primary, size, 21);
     }
     
-    anydsl::Array<float>& gpu_primary_buffer_stream(int32_t dev, size_t size) {
-        return resize_array(dev, devices[dev].outgoing_primary, size, 21);
-    }
-
     anydsl::Array<float>& gpu_outgoing_primary_stream(int32_t dev, size_t size) {
         return resize_array(dev, devices[dev].outgoing_primary, size, 21);
     }
@@ -342,10 +342,6 @@ struct Interface {
         return resize_array(dev, devices[dev].second_secondary, size, 14);
     }
 
-    anydsl::Array<float>& gpu_secondary_buffer_stream(int32_t dev, size_t size) {
-        return resize_array(dev, devices[dev].outgoing_secondary, size, 14);
-    }
-    
     anydsl::Array<float>& gpu_outgoing_secondary_stream(int32_t dev, size_t size) {
         return resize_array(dev, devices[dev].outgoing_secondary, size, 14);
     }
@@ -380,8 +376,21 @@ struct Interface {
         if (it != bvh8_tri4.end())
             return it->second;
         printf("before bvh std::move\n");
+
         return bvh8_tri4[filename] = std::move(load_bvh<Node8, Tri4>(dev, filename));
     }
+   
+    void unload_bvh8_tri4(int32_t dev) {
+        printf("unload bvh\n");
+        auto iter = devices[dev].bvh8_tri4.begin();
+        while(iter != devices[dev].bvh8_tri4.end()) {
+           iter->second.nodes = std::move(anydsl::Array<Node8>(dev, reinterpret_cast<Node8*>(anydsl_alloc(dev, 0)), 0));
+           iter->second.tris  = std::move(anydsl::Array<Tri4>(dev, reinterpret_cast<Tri4*>(anydsl_alloc(dev, 0)), 0));
+           iter++;     
+        }
+        devices[dev].bvh8_tri4.clear();
+    }
+
 
     template <typename T>
     anydsl::Array<T> copy_to_device(int32_t dev, const T* data, size_t n) {
@@ -413,11 +422,8 @@ struct Interface {
                 info("Loaded BVH file '", filename, "'");
                 std::vector<Node> nodes;
                 std::vector<Tri>  tris;
-                printf("before read nodes\n");
                 read_buffer(is, nodes);
-                printf("before read tris\n");
                 read_buffer(is, tris);
-                printf("before move copy to device\n");
                 return Bvh<Node, Tri> { std::move(copy_to_device(dev, nodes)), std::move(copy_to_device(dev, tris)) };
             }
             skip_buffer(is);
@@ -634,7 +640,7 @@ inline void copy_primary_ray(PrimaryStream a, PrimaryStream b, int src_id, int d
    b.rays.dir_z[dst_id] = a.rays.dir_z[src_id];
    b.rays.tmin[dst_id]  = a.rays.tmin[src_id];
    b.rays.tmax[dst_id]  = a.rays.tmax[src_id];
-   b.chunk_id[dst_id]    = a.chunk_id[src_id];
+   b.chunk_id[dst_id]   = a.chunk_id[src_id];
    if (keep_hit) {
        b.geom_id[dst_id] = a.geom_id[src_id];
        b.prim_id[dst_id] = a.prim_id[src_id];
@@ -760,11 +766,12 @@ void rodent_cpu_get_primary_stream(PrimaryStream* primary, int32_t size) {
 }
 
 void rodent_cpu_get_out_ray_stream(OutRayStream * stream, int32_t capacity, bool primary) {
+    int store_capacity = (capacity & ~((1 << 5) - 1)) + 32; // round to 32
     if(primary) {
-        auto& array = interface->cpu_primary_outgoing_stream(capacity);
+        auto& array = interface->cpu_primary_outgoing_stream(store_capacity);
         get_out_ray_stream(*stream, array.data(), capacity, 21);
     } else {
-        auto& array = interface->cpu_secondary_outgoing_stream(capacity);
+        auto& array = interface->cpu_secondary_outgoing_stream(store_capacity);
         get_out_ray_stream(*stream, array.data(), capacity, 14);
     }
 }
@@ -798,12 +805,6 @@ void rodent_gpu_get_second_primary_stream(int32_t dev, PrimaryStream* primary, i
     get_primary_stream(*primary, array.data(), array.size() / 21);
 }
 
-void rodent_gpu_get_primary_buffer_stream(int32_t dev, PrimaryStream* primary, int32_t size) {
-    auto& array = interface->gpu_primary_buffer_stream(dev, size);
-    get_primary_stream(*primary, array.data(), array.size() / 21);
-}
-
-
 void rodent_gpu_get_first_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
     auto& array = interface->gpu_first_secondary_stream(dev, size);
     get_secondary_stream(*secondary, array.data(), array.size() / 14);
@@ -811,11 +812,6 @@ void rodent_gpu_get_first_secondary_stream(int32_t dev, SecondaryStream* seconda
 
 void rodent_gpu_get_second_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
     auto& array = interface->gpu_second_secondary_stream(dev, size);
-    get_secondary_stream(*secondary, array.data(), array.size() / 14);
-}
-
-void rodent_gpu_get_secondary_buffer_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
-    auto& array = interface->gpu_secondary_buffer_stream(dev, size);
     get_secondary_stream(*secondary, array.data(), array.size() / 14);
 }
 
@@ -953,6 +949,10 @@ int32_t rodent_worker_primary_recv(int32_t dev, int32_t rays_size, bool isFirst,
     return size_new;
 }
 
+void rodent_memory_check(int32_t tag) {
+    interface->os<<tag<<" "<<physical_memory_used_by_process()<<"mb \n";
+}
+
 int32_t rodent_worker_secondary_recv(int32_t dev, int32_t rays_size, bool isFirst, int32_t thread_id, bool thread_wait) {
     int size_new = 0;
     if(dev == -1){
@@ -974,6 +974,11 @@ void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t 
     get_primary_stream(*primary, array.data(), size);
 }
 
+void rodent_unload_bvh(int32_t dev ) {
+    printf("rodent unload \n");
+    interface->unload_bvh8_tri4(dev);
+}
+
 void rodent_present(int32_t dev) {
     if (dev != 0)
         interface->present(dev);
@@ -990,4 +995,3 @@ int64_t clock_us() {
 }
 
 } // extern "C"
-

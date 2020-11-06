@@ -200,9 +200,6 @@ bool Communicator::process_message(Message *recv_msg, RayList* List, ProcStatus 
             if(isMaster()) 
                 printf("master recv status\n");
             int sender = std::max(recv_msg->get_sender(), recv_msg->get_root()); 
-//                        os << "mthread| recv status set proc " <<sender << "idle \n";
-            int * tmp = ps->get_status();
-//                        os <<tmp[0]<<" "<<tmp[1] <<" "<<tmp[2]<<" "<<tmp[3]<<"\n";
             if(List[recv_msg->get_chunk()].empty())
                 ps->set_proc_idle(sender);
             
@@ -216,7 +213,6 @@ bool Communicator::process_message(Message *recv_msg, RayList* List, ProcStatus 
         case Ray: {
             if(isMaster()) 
                 printf("master recv ray\n");
-//                    os << "mthread| ray recv \n";
             
             ps->accumulate_recv(recv_msg->get_ray_size());
             //set itself busy
@@ -264,7 +260,6 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
     if (recv_ready || block) {
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
-//        os<<"mthread recv msg "<<count<<"\n ";
         printf("%d before recv rays\n", rank);
         
         statistics.start("run => message_thread => recv_message => RecvMsg");

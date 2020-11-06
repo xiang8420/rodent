@@ -173,7 +173,7 @@ void AsyncNode::send_message() {
             }
         }
     }
-    
+
 }
 
 void AsyncNode::message_thread(void* tmp) {
@@ -244,9 +244,7 @@ void AsyncNode::message_thread(void* tmp) {
         }
         wk->loop_check(5);
 
-        statistics.start("run => message_thread => sleep");
         usleep(500);
-        statistics.end("run => message_thread => sleep");
         statistics.end("run => message_thread => loop");
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
@@ -309,6 +307,8 @@ void AsyncNode::run(ImageDecomposition * camera) {
             thread.join();
 
         workThread.clear();
+
+        rodent_unload_bvh(0); 
 
         iter++;
     } while(!ps->Exit());

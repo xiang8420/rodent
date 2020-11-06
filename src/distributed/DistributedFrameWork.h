@@ -8,6 +8,11 @@
 #include <unistd.h>
 #include <assert.h>
 
+extern "C" {
+void rodent_present(int32_t dev);
+void rodent_unload_bvh(int32_t dev ); 
+}
+
 #include "MemoryPool.h"
 #include "statistic.h"
 #include "ProcStatus.h"
@@ -19,11 +24,11 @@
 #include "SyncNode.h"
 #include "AllCopyNode.h"
 #include "MasterWorker.h"
-#include "AsyncNode.h"
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
 
+#include "AsyncNode.h"
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
     ImageRgba32 img;
@@ -60,16 +65,20 @@ struct DistributedFrameWork {
 
     std::string type;
 
-    DistributedFrameWork(std::string type, int chunk, int dev, int width, int height, int spp):  type(type) 
+    DistributedFrameWork(std::string dis_type, int chunk, int dev, int width, int height, int spp):  type(dis_type) 
     {
         splitter = new ImageDecomposition(width, height, spp);
         comm = new Communicator();
         rough_trace = false; //true || (comm->get_size() % 2 == 1 && comm->get_size() > 1);
         ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev, rough_trace);
         // mpi
-        if(chunk == 1 && comm->get_size() == 1 ) node = new SingleNode(comm, ps);
-        else if(type == "SyncNode") node = new SyncNode(comm, ps);
-        else if(type == "MWNode") node = new MWNode(comm, ps);
+        if(chunk == 1 && comm->get_size() == 1 ) 
+            type = "Single";
+        std::cout<<"new type "<<type<<" "<<chunk<<" "<<comm->get_size()<<"\n";
+
+        if(type == "Single") node = new SingleNode(comm, ps);
+        else if(type == "Sync") node = new SyncNode(comm, ps);
+        else if(type == "MasterWorker") node = new MWNode(comm, ps);
         else if(type == "Async") node = new AsyncNode(comm, ps);
         else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
         else error("Unknown node type");
@@ -90,22 +99,22 @@ struct DistributedFrameWork {
         int proc_rank = comm->get_rank();
         int proc_size = comm->get_size(); 
         /*block size equels proc size*/
-        if( type == "MWNode" || type == "Async" || type == "SyncNode") {
-            //xxproc_updata_local_chunk();
-            int block_count = comm->get_size();
-            splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace);
-        } else {
+        if( type == "AllCopy" || type == "Single") {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
             splitter->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
+        } else {
+            int block_count = comm->get_size();
+            splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace);
         }
         splitter->write_chunk_proc(ps->get_chunk_proc());
         int * chunk_proc = ps->get_chunk_proc();
-        for(int j = 0; j < 5; j++) 
-            printf("Distributed chunk map  %d %d\n", chunk_proc[j * 2], chunk_proc[j * 2 + 1]);
         
         ps->updata_local_chunk();
         node->run(splitter);
         
+        for(int i = 0; i < ps->get_dev_num(); i++) 
+            rodent_present(i);
+
         statistics.end("run");
         statistics.print(comm->os);
     }

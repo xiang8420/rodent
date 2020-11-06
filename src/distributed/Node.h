@@ -164,9 +164,10 @@ void Node::work_thread(void* tmp, ImageDecomposition * splitter, int devId, int 
 }
 
 void Node::loop_check(float i) {
-    if(0) {    
-        comm->os<<"mark "<<i<<"\n"; 
-        printf("%d mark %f\n", comm->get_rank(), i);
+    if(1) {    
+        //comm->os<<"mark "<<i<<"\n"; 
+        comm->os<<i<<" memory use "<<physical_memory_used_by_process()<<"\n"; 
+        //printf("%d mark %f\n", comm->get_rank(), i);
     }
 }
 

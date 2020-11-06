@@ -221,11 +221,7 @@ int ProcStatus::get_proc(int c) {
 }
 
 bool ProcStatus::is_local_chunk(int c) {
-
-
-//    return current_chunk == c;
     int local_size = local_chunks.size();
-//    printf("is local chunk proc %d chunk %d %d\n", proc_rank, local_chunks[0], local_chunks[1]);
     for(int i = 0; i < local_size; i++) {
         if(local_chunks[i] == c) {
             return true;
@@ -273,6 +269,7 @@ bool ProcStatus::update_global_rays(int* a) {
 }
 
 bool ProcStatus::update_chunk(int* schedule) {
+    error("update chunk 1");
     for(int i = 0; i < chunk_size; i++) {
         printf("chunk_size %d chunk_proc[i] %d  schedule[i] %d\n", chunk_size, chunk_proc[i], schedule[i]);
         if(chunk_proc[i] != schedule[i]) {

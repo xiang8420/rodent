@@ -13,8 +13,6 @@ extern "C" {
     fn rodent_gpu_get_second_secondary_stream(i32, &mut SecondaryStream, i32) -> ();
     fn rodent_gpu_get_tmp_buffer(i32, &mut &mut [i32], i32) -> ();
     fn rodent_first_primary_save(i32, i32, i32, bool) -> i32;
-    fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
-    fn rodent_secondary_check(i32, i32, i32, i32, bool) -> ();
     fn rodent_gpu_first_primary_load(i32, &mut PrimaryStream, i32) -> i32;
     fn rodent_load_buffer(i32, &[u8]) -> &[i8];
     fn rodent_load_bvh2_tri1(i32, &[u8], &mut &[Node2], &mut &[Tri1]) -> ();
@@ -25,6 +23,10 @@ extern "C" {
     fn rodent_cpu_intersect_primary_embree(&PrimaryStream, i32, i32) -> ();
     fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
+
+    fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
+    fn rodent_secondary_check(i32, i32, i32, i32, bool) -> ();
+    fn rodent_memory_check(i32) -> ();
 
     fn rodent_cpu_thread_num() -> i32;
     fn rodent_stream_logic_capacity() -> i32;
@@ -105,22 +107,23 @@ fn @write_out_primary( primary: PrimaryStream
                      , keep_hit: bool
                      ) -> () {
     let width = out_buffer.width;
-    out_buffer.iptr(dst * width)     = primary.rays.id(src);
-    out_buffer.fptr(dst * width + 1) = primary.rays.org_x(src);
-    out_buffer.fptr(dst * width + 2) = primary.rays.org_y(src);
-    out_buffer.fptr(dst * width + 3) = primary.rays.org_z(src);
-    out_buffer.fptr(dst * width + 4) = primary.rays.dir_x(src);
-    out_buffer.fptr(dst * width + 5) = primary.rays.dir_y(src);
-    out_buffer.fptr(dst * width + 6) = primary.rays.dir_z(src);
-    out_buffer.fptr(dst * width + 7) = primary.rays.tmin(src);
-    out_buffer.fptr(dst * width + 8) = primary.rays.tmax(src);
-    out_buffer.iptr(dst * width + 9) = primary.chunk_id(src);
-    out_buffer.uiptr(dst * width + 15) = primary.rnd(src);
-    out_buffer.fptr(dst * width + 16) = primary.mis(src);
-    out_buffer.fptr(dst * width + 17) = primary.contrib_r(src);
-    out_buffer.fptr(dst * width + 18) = primary.contrib_g(src);
-    out_buffer.fptr(dst * width + 19) = primary.contrib_b(src);
-    out_buffer.iptr(dst * width + 20) = primary.depth(src);
+    let dst_p = dst * width;
+    out_buffer.iptr(dst_p)     = primary.rays.id(src);
+    out_buffer.fptr(dst_p  + 1) = primary.rays.org_x(src);
+    out_buffer.fptr(dst_p  + 2) = primary.rays.org_y(src);
+    out_buffer.fptr(dst_p  + 3) = primary.rays.org_z(src);
+    out_buffer.fptr(dst_p  + 4) = primary.rays.dir_x(src);
+    out_buffer.fptr(dst_p  + 5) = primary.rays.dir_y(src);
+    out_buffer.fptr(dst_p  + 6) = primary.rays.dir_z(src);
+    out_buffer.fptr(dst_p  + 7) = primary.rays.tmin(src);
+    out_buffer.fptr(dst_p  + 8) = primary.rays.tmax(src);
+    out_buffer.iptr(dst_p  + 9) = primary.chunk_id(src);
+    out_buffer.uiptr(dst_p + 15) = primary.rnd(src);
+    out_buffer.fptr(dst_p  + 16) = primary.mis(src);
+    out_buffer.fptr(dst_p  + 17) = primary.contrib_r(src);
+    out_buffer.fptr(dst_p  + 18) = primary.contrib_g(src);
+    out_buffer.fptr(dst_p  + 19) = primary.contrib_b(src);
+    out_buffer.iptr(dst_p  + 20) = primary.depth(src);
 }
 
 fn @write_out_secondary( secondary: SecondaryStream

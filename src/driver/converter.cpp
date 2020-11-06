@@ -424,7 +424,6 @@ static void write_buffer_hetero(std::string path, std::string file_name, const A
 
 static void write_tri_mesh(std::string path, const obj::TriMesh& tri_mesh, unsigned short target ) {
     printf("write tri mesh %s\n", path.c_str());
-    write_buffer_hetero(path,  "vertices.bin", tri_mesh.vertices,     target, true);
     write_buffer_hetero(path,  "normals.bin", tri_mesh.normals,      target, true);
     write_buffer_hetero(path,  "face_normals.bin", tri_mesh.face_normals, target, true);
     write_buffer_hetero(path,  "textcoords.bin", tri_mesh.texcoords,    target, true);
@@ -952,6 +951,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     std::string data_path  = "data/"; 
     std::cout<<data_path<<"\n";
     create_directory(data_path.c_str());
+    create_directory("picture/");
     float elapsed_ms = 1;
     
     auto ticks = std::chrono::high_resolution_clock::now();
@@ -1128,13 +1128,11 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     info("Generating triangle mesh for '", file_name, "'");
     const BBox &bbox = chunks->bbox; 
     os << "\n    // Triangle mesh\n"
-       << "    let vertices     = device.load_buffer(file.vertices);\n"
        << "    let normals      = device.load_buffer(file.normals);\n"
        << "    let face_normals = device.load_buffer(file.face_normals);\n"
        << "    let texcoords    = device.load_buffer(file.texcoords);\n"
        << "    let indices      = device.load_buffer(file.indices);\n"
        << "    let tri_mesh     = TriMesh {\n"
-       << "        vertices:     @ |i| vertices.load_vec3(i),\n"
        << "        normals:      @ |i| normals.load_vec3(i),\n"
        << "        face_normals: @ |i| face_normals.load_vec3(i),\n"
        << "        triangles:    @ |i| { let (i, j, k, _) = indices.load_int4(i); (i, j, k) },\n"
@@ -1338,7 +1336,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             os << "        let scene  = make_scene(device, settings, make_file_path(1, chunk), chunk, generate_rays);\n";    
         }
         os << "        renderer(scene, device, iter);\n"
-           << "        device.present();\n"
+           << "        //device.present();\n"
            << "    }\n";
     }
         
@@ -1360,7 +1358,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
     os << "extern fn get_chunk() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";
 
-    bool export_simplify_mesh = true;
+    bool export_simplify_mesh = false;
     // if use simple mesh
     if (export_simplify_mesh)
         convert_simple_mesh(file_name, mtl_lib, light, dev_num, target_list, dev_list, chunk_size, padding_flag); 

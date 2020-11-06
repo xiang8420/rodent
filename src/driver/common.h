@@ -102,7 +102,7 @@ inline size_t physical_memory_used_by_process() {
         }
     }
     fclose(file);
-    return result;
+    return result / 1024;
 }
 
 #endif // COMMON_H

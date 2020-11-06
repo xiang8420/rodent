@@ -60,17 +60,17 @@ RaysStream::RaysStream(float * ptr, int capacity, int width, int copy_size)
         error("RaysStream copy size > capacity\n");
 
     size_t memory = physical_memory_used_by_process();
-    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => resize");
+    //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => resize");
     data = new float[capacity * width];
 
    // std::vector<float> tmp(capacity * width);
    // data = tmp;
 
     //data.resize(capacity * width);
-    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => resize");
+    //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => resize");
     printf("2new rays resize cap %d %ld kb %ld mb\n", capacity, memory, memory / 1024);
     
-    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => copy");
+    //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => copy");
     // mask used as ptr mask not this 
     bool *ptr_mask = new bool[width];
     int  ptr_logic_width = width; 
@@ -92,7 +92,7 @@ RaysStream::RaysStream(float * ptr, int capacity, int width, int copy_size)
     }
     //mask change to ray itself
     size = copy_size; 
-    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => copy");
+    //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays => copy");
 }
 
 void RayStreamList::set_capacity (int logic, int store) {
@@ -134,9 +134,9 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
      
     while(copy_size > 0) {
         
-        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
+        //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
         RaysStream * rays   = new struct RaysStream(ptr, store_capacity, 21, copy_size);
-        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
+        //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
         
         int width = RAY_COMPACT ? 16 : 21; 
 
@@ -162,9 +162,9 @@ void RayStreamList::read_from_message(char* src_ptr, int msg_primary_size, int m
     
     copy_size = std::min(logic_capacity, msg_secondary_size);
     while(copy_size > 0) {
-        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
+        //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
         RaysStream * rays   = new struct RaysStream(ptr, store_capacity, 14, copy_size);
-        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
+        //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
 
         int * ids = (int*)ptr;
         os<<"secondary copy size "<<copy_size<<"\n"<<" ptr ray";

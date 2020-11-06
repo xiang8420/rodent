@@ -122,13 +122,13 @@ void RaysArray::clear()
 
 int RaysArray::check_capacity(int num) {
     printf("check size %d num %d capacity %d \n", size, num, capacity);
-    statistics.start("run => message_thread => RayList => check_capacity");
+    //statistics.start("run => message_thread => RayList => check_capacity");
     if(num + size > capacity) {
         size_t memory = physical_memory_used_by_process();
         //printf("rays resize %ld kb %ld mb\n", memory, memory / 1024);
         capacity += std::max(num, 1024);
         
-        statistics.start("run => message_thread => check_capacity");
+        //statistics.start("run => message_thread => check_capacity");
         
         float *new_data = new float[capacity * store_width]; 
         if(size > 0) {
@@ -154,11 +154,11 @@ int RaysArray::check_capacity(int num) {
    //     printf("\n");
         data = new_data;
 
-        statistics.end("run => message_thread => check_capacity");
+        //statistics.end("run => message_thread => check_capacity");
         //printf("store width %d capacity %d\n", capacity, store_width);
         //printf("after rays resize %ld kb %ld mb\n", memory, memory / 1024);
     }
-    statistics.end("run => message_thread => RayList => check_capacity");
+    //statistics.end("run => message_thread => RayList => check_capacity");
     return capacity;
 }
 
