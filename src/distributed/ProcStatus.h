@@ -116,6 +116,8 @@ public:
     bool get_rough_trace() {return rough_trace;}
 
     bool Exit() {return exit;}
+
+    void reset(); 
 };
 
 ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool rough_trace) 
@@ -132,14 +134,20 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     chunk_size = rough_trace ? cSize + 1 : cSize;
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
     
-    stream_logic_capacity = 1024 * 1024 / work_thread_num;
+    stream_logic_capacity = 256 * 256;//1024 * 1024 / work_thread_num;
     stream_store_capacity = (stream_logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
     
-    out_stream_capacity = stream_logic_capacity; 
+    out_stream_capacity = 1024*1024;//stream_logic_capacity; 
     
     global_rays.resize(proc_size * proc_size);
 }
 
+void ProcStatus::reset() {
+    thread_idle.resize(work_thread_num);
+    thread_reset(); 
+    proc_reset();
+    exit = false;
+}
 
 ProcStatus::~ProcStatus() {
     proc_idle.clear();
@@ -286,12 +294,19 @@ bool ProcStatus::update_chunk(int* schedule) {
 }
 
 bool ProcStatus::update_chunk(int candidate_proc, int candidate_chunk) {
-    for(int i = 0; i < chunk_size; i++) {
-        if(chunk_proc[i] == candidate_proc) {
-            chunk_proc[i] = -1;  //set previous chunk unloaded
-        } 
-    } 
-    chunk_proc[candidate_chunk] = candidate_proc;
+    //error("update chunk 2");
+    int i = 0;
+    while(chunk_proc[i * 2] != -1) {
+        printf("update chunk proc %d %d \n", chunk_proc[i * 2], chunk_proc[i * 2 + 1]);
+        if(chunk_proc[i * 2 + 1] == candidate_proc) 
+            chunk_proc[i * 2 + 1] = -1;  
+        if(chunk_proc[i * 2] == candidate_chunk) 
+            chunk_proc[i * 2 + 1] = candidate_proc;  
+        i++;
+    }
+    for(int i = 0; i < chunk_size; i++)
+        printf("%d %d |", chunk_proc[i*2], chunk_proc[i*2+1]);
+    printf("\n");
     printf("candidate chunk %d canidate proc %d\n", candidate_chunk, candidate_proc);
     if(candidate_proc == proc_rank) {
          current_chunk = candidate_chunk;

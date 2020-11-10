@@ -33,14 +33,19 @@ public:
     // broadcast or p2p. return sent number 1, in p2p, 0, 1 or 2 in bcast
     int  Export(Message * m, ProcStatus *rs); 
 
-    bool recv_message(RayList* List, RayStreamList * inList, ProcStatus *ps, bool block); 
+    bool recv_message(ProcStatus *ps, bool block); 
 
-    bool process_message(Message *recv_msg, RayList* List, ProcStatus *ps); 
+    bool process_message(Message *recv_msg, ProcStatus *ps); 
     
     void send_message(Message* msg, ProcStatus *rs); 
 
     void purge_completed_mpi_buffers(); 
 
+    bool out_list_empty(int);
+
+    RayStreamList *inList;  
+    RayList *outArrayList;
+    RayStreamList *outStreamList;
 private:
     MPI_Status  sta[3];
     MPI_Request req[3];
@@ -136,12 +141,12 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 	struct mpi_send_buffer *msb = new mpi_send_buffer;
    
     statistics.start("run => message_thread => send_message => export");
-    msb->total_size = m->get_header_size() + (m->has_content() ? m->get_size() : 0);
+    msb->total_size = m->get_header_size() + (m->has_content() ? m->get_content_size() : 0);
     msb->send_buffer = (char *)malloc(msb->total_size);
     memcpy(msb->send_buffer, m->get_header(), m->get_header_size());
 //    os<< "mthread msb->total size " << msb->total_size << " " <<m->get_size()<<"broadcast"<<m->is_broadcast()<<std::endl;
     if (m->has_content())
-        memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_size());
+        memcpy(msb->send_buffer + m->get_header_size(), m->get_content(), m->get_content_size());
     statistics.end("run => message_thread => send_message => export");
      
     if (m->is_broadcast()) {
@@ -175,7 +180,14 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     return k;
 }
 
-bool Communicator::process_message(Message *recv_msg, RayList* List, ProcStatus *ps) {
+bool Communicator::out_list_empty(int n) {
+    if(outArrayList == NULL)
+        return outStreamList[n].empty();
+    else
+        return outArrayList[n].empty();
+}
+
+bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
 
 //        os<<"m<"<<status.MPI_SOURCE/*recv_msg->get_sender()*/<<" "<<recv_msg->get_tag() <<"\n";
 //        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" tag "<<recv_msg->get_tag()<<" size "<<recv_msg->get_ray_size() 
@@ -200,7 +212,7 @@ bool Communicator::process_message(Message *recv_msg, RayList* List, ProcStatus 
             if(isMaster()) 
                 printf("master recv status\n");
             int sender = std::max(recv_msg->get_sender(), recv_msg->get_root()); 
-            if(List[recv_msg->get_chunk()].empty())
+            if(out_list_empty(recv_msg->get_chunk()))
                 ps->set_proc_idle(sender);
             
             bool res = ps->update_global_rays((int*)recv_msg->get_content());
@@ -246,7 +258,7 @@ bool Communicator::process_message(Message *recv_msg, RayList* List, ProcStatus 
     }
 }
 
-bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatus *ps, bool block) {
+bool Communicator::recv_message(ProcStatus *ps, bool block) {
     int recv_ready;
     MPI_Status status;
     statistics.start("run => message_thread => recv_message => probe");
@@ -264,12 +276,17 @@ bool Communicator::recv_message(RayList* List, RayStreamList * inList, ProcStatu
         
         statistics.start("run => message_thread => recv_message => RecvMsg");
         
-        Message *recv_msg = new RecvMsg(List, inList, ps->get_current_chunk(), status, MPI_COMM_WORLD); 
+        Message *recv_msg;
+        if(outArrayList != NULL)
+            recv_msg = new RecvMsg(outArrayList, inList, ps->get_current_chunk(), status, MPI_COMM_WORLD); 
+        else 
+            error("outStreamList == null");
+
         statistics.end("run => message_thread => recv_message => RecvMsg");
 
         //statistics.end("run => message_thread => recv_message => handle msg");
         
-        return process_message(recv_msg, List, ps);
+        return process_message(recv_msg, ps);
         
         //statistics.end("run => message_thread => recv_message => handle msg");
     } else {

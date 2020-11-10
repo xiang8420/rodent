@@ -1,5 +1,8 @@
 #include <chrono>
 #include <fstream>
+#include "unistd.h"
+#include <sys/syscall.h>
+#define gettid() syscall(SYS_gettid)
 
 using namespace std::chrono;
 struct TimeStatistics {
@@ -17,14 +20,15 @@ struct TimeStatistics {
     }
 
     void start(const std::string &name) {
+        std::string fname = name + " " + std::to_string(gettid());
         std::unique_lock <std::mutex> lock(mtx); 
-        std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), name);
+        std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), fname);
         if( iter != func_name.end() ) {
             int pos = distance(func_name.begin(), iter);
             func_st[pos] = std::chrono::high_resolution_clock::now(); 
             func_num_run[pos]++;
         } else {
-            func_name.emplace_back(name); 
+            func_name.emplace_back(fname); 
             func_st.emplace_back(std::chrono::high_resolution_clock::now());
             func_time.emplace_back(0.0);
             func_num_run.emplace_back(1); 
@@ -40,16 +44,17 @@ struct TimeStatistics {
     }
 
     void end(const std::string &name) {
+        std::string fname = name + " " + std::to_string(gettid());
         std::unique_lock <std::mutex> lock(mtx); 
-        std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), name);
+        std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), fname);
         for(int i = 0; i < func_name.size(); i++) {
-            if(func_name[i] == name) {
+            if(func_name[i] == fname) {
                 func_time[i] += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func_st[i]).count();
                 return ;
             }
         }
-        warn("cant find func name\n");
-        warn(name);
+        warn("cant find func fname\n");
+        warn(fname);
     }
     
     void print(std::ofstream &os) {

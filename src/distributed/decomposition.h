@@ -391,7 +391,13 @@ struct ImageDecomposition {
         splat(block_count, &scale[0], 2);
        
         //global available block 
+        for(int i = 0; i < proc_size; i++) 
+            chunk_map.push_back(std::make_pair(0, proc_rank));
         ImageBlock gblock = project_cube_to_image(camera, BBox(get_bbox()), 0, false, image);
+        if(block == 1) { 
+            render_block = gblock; 
+            return;
+        }
         
         // int step_width = width / scale[0];
         // int step_height = height / scale[1];   

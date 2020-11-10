@@ -1,22 +1,3 @@
-struct RetiredRays {
-    float* data;
-    int size;
-    int width;
-    bool primary;
-    RetiredRays(float* rays, int size, int width)
-        :size(size), width(width) 
-    {
-        primary = width == 21;
-        int capacity = size * width;
-        data = new float[capacity]; 
-        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
-    }
-
-    ~RetiredRays(){
-        delete[] data;
-    }
-};
-
 class Node {
 
 protected:
@@ -25,6 +6,7 @@ protected:
     ProcStatus *ps;
     
     RayStreamList inList;  
+    RayList *rayList;
     std::mutex  out_mutex, thread_mutex;
     
     std::condition_variable inList_not_empty; //
@@ -156,7 +138,7 @@ void Node::work_thread(void* tmp, ImageDecomposition * splitter, int devId, int 
     if(preRendering) {
         prerender(&settings);
     } else {
-        int rnd = comm->get_rank() * devNum + devId;
+        int rnd = camera->iter * (comm->get_rank() + 1) * devNum + devId;
         render(&settings, rnd, devId, ps->get_current_chunk(), generate_rays);
     }
     printf("work thread end\n");

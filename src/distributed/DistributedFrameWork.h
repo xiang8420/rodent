@@ -10,7 +10,7 @@
 
 extern "C" {
 void rodent_present(int32_t dev);
-void rodent_unload_bvh(int32_t dev ); 
+void rodent_unload_chunk_data(int32_t dev ); 
 }
 
 #include "MemoryPool.h"
@@ -107,23 +107,22 @@ struct DistributedFrameWork {
             splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace);
         }
         splitter->write_chunk_proc(ps->get_chunk_proc());
-        int * chunk_proc = ps->get_chunk_proc();
-        
         ps->updata_local_chunk();
         node->run(splitter);
         
-        for(int i = 0; i < ps->get_dev_num(); i++) 
-            rodent_present(i);
-
         statistics.end("run");
         statistics.print(comm->os);
+        ps->reset();
     }
 
-    void gather_image(const std::string& out_file, float* film, int frame, int width, int height) {
+    void gather_image(const std::string& out_file, float* film, int fid, int frame, int width, int height) {
 
         Communicator * comm = node->get_communicator();
         ProcStatus * ps = node->get_proc_status();
         
+        for(int i = 0; i < ps->get_dev_num(); i++) 
+            rodent_present(i);
+
         //film 
         printf("dfw reduce %d %d %d %d\n", comm->get_rank(), comm->get_master(), width, height); 
         int pixel_num = width * height * 3;
@@ -132,13 +131,16 @@ struct DistributedFrameWork {
         
         comm->reduce(film, reduce_buffer, pixel_num);
         
-        std::string out = "picture/" + out_file + "_f_" + std::to_string(frame) + "_w_" + std::to_string(comm->get_size()) + "_g_" + std::to_string(ps->get_chunk_size());
+        std::string out = "picture/" + out_file + "_f_" + std::to_string(fid) + "_w_" + std::to_string(comm->get_size()) + "_g_" + std::to_string(ps->get_chunk_size());
 
         save_image(film, out + "_rank_" + std::to_string(comm->get_rank()) + ".png", width, height, 1 /* iter*/ );
         printf("%d end\n", comm->get_rank());  
 
         if (comm->get_rank() == 0 && out_file != "") {
-            save_image(reduce_buffer, out + ".png", width, height, 1 /* iter*/ );
+            if(fid == frame)
+                save_image(reduce_buffer, out + ".png", width, height, frame);
+            else 
+                save_image(reduce_buffer, out + ".png", width, height, 1);
         }
     }
 };
@@ -157,8 +159,8 @@ void dfw_run(Camera *camera) {
     dfw->run(camera);
 }
 
-void dfw_save_image(const std::string& out_file, float* film, int frame, int width, int height) {
-    dfw->gather_image(out_file, film, frame, width, height);
+void dfw_save_image(const std::string& out_file, float* film, int fid, int frame, int width, int height) {
+    dfw->gather_image(out_file, film, fid, frame, width, height);
 }
 
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){

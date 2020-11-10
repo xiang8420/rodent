@@ -22,10 +22,6 @@ struct AsyncNode : public Node {
     static void message_thread(void* tmp);
     
     void run(ImageDecomposition * camera);
-    
-    RayList *rayList;
-        
-    std::vector<RetiredRays*> retiredRays; 
 };
 
 AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -36,6 +32,9 @@ AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
     rayList = new RayList[chunk_size];
     inList.set_capacity(ps->get_stream_logic_capacity(),
                         ps->get_stream_store_capacity());
+    
+    comm->outArrayList = rayList;
+    comm->inList = &inList;
 }
 
 AsyncNode::~AsyncNode() {
@@ -63,8 +62,10 @@ bool AsyncNode::rayList_empty() {
 //    printf("if raylist empty\n");
     int chunk_size = ps->get_chunk_size();
     bool res = true;
+    out_mutex.lock();
     for(int i = 0;i < chunk_size; i++)
         if(!rayList[i].empty()) { res = false; break; }
+    out_mutex.unlock();
     res &= inList.empty();
     return res;
 }
@@ -82,15 +83,7 @@ void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary){
     std::lock_guard <std::mutex> lock(out_mutex); 
     
     int width = primary ? 21 : 14; 
-    
-    int* ids = (int*)(rays);
-    for(int i = 0; i < 5; i ++) {
-        comm->os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
-    }
-    comm->os<<"\n";
-    
-    RetiredRays *retired_rays = new RetiredRays(rays, size, width);
-    retiredRays.emplace_back(retired_rays);
+    RayList::read_from_device_buffer(rayList, rays, size, primary, comm->get_rank(), ps->get_chunk_size());
 }
 
 // get chunk retun chunk id
@@ -159,6 +152,7 @@ void AsyncNode::send_message() {
     
     if (!outList_empty()) {
         comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
+        out_mutex.lock();
         int cId = get_sent_list();
         if(cId >= 0) {
             int dst_proc = ps->get_proc(cId);
@@ -172,8 +166,8 @@ void AsyncNode::send_message() {
                 comm->send_message(&ray_msg, ps);
             }
         }
+        out_mutex.unlock(); 
     }
-
 }
 
 void AsyncNode::message_thread(void* tmp) {
@@ -193,9 +187,9 @@ void AsyncNode::message_thread(void* tmp) {
         statistics.start("run => message_thread => recv_message");
 
         if(!recv && ps->is_proc_idle() && !ps->Exit())
-            recv = comm->recv_message(wk->rayList, &(wk->inList),  ps, true);
+            recv = comm->recv_message(ps, true);
         else
-            recv = comm->recv_message(wk->rayList, &(wk->inList),  ps, false);
+            recv = comm->recv_message(ps, false);
         
         statistics.end("run => message_thread => recv_message");
          
@@ -204,15 +198,6 @@ void AsyncNode::message_thread(void* tmp) {
             break;
         }
         wk->loop_check(1);
-
-        if(!wk->retiredRays.empty()) {
-            std::lock_guard <std::mutex> lock(wk->out_mutex); 
-            while(!wk->retiredRays.empty()) {
-                RetiredRays* rays = wk->retiredRays.back();
-                wk->retiredRays.pop_back();
-                RayList::read_from_device_buffer(wk->rayList, rays->data, rays->size, rays->primary, comm->get_rank(), ps->get_chunk_size());
-            }
-        }
         statistics.start("run => message_thread => inlist not empty");
         
         if(!wk->inList.empty()) 
@@ -308,7 +293,8 @@ void AsyncNode::run(ImageDecomposition * camera) {
 
         workThread.clear();
 
-        rodent_unload_bvh(0); 
+        for(int i = 0; i < deviceNum; i++) 
+            rodent_unload_chunk_data(i); 
 
         iter++;
     } while(!ps->Exit());

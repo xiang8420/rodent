@@ -27,10 +27,6 @@ struct MWNode : public Node {
     
     void run(ImageDecomposition * camera);
     
-    RayList *rayList;
-
-        
-    std::vector<RetiredRays*> retiredRays; 
 };
 
 MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -41,6 +37,8 @@ MWNode::MWNode(struct Communicator *comm, struct ProcStatus *ps)
     rayList = new RayList[chunk_size];
     inList.set_capacity(ps->get_stream_logic_capacity(),
                         ps->get_stream_store_capacity());
+    comm->outArrayList = rayList;
+    comm->inList = &inList;
 }
 
 MWNode::~MWNode() {
@@ -80,8 +78,10 @@ bool MWNode::rayList_empty() {
 //    printf("if raylist empty\n");
     int chunk_size = ps->get_chunk_size();
     bool res = true;
+    out_mutex.lock();
     for(int i = 0;i < chunk_size; i++)
         if(!rayList[i].empty()) { res = false; break; }
+    out_mutex.unlock();
     res &= inList.empty();
     return res;
 }
@@ -97,10 +97,9 @@ void MWNode::clear_outlist() {
 
 void MWNode::save_outgoing_buffer(float *rays, size_t size, bool primary){
     std::lock_guard <std::mutex> lock(out_mutex); 
-
+    
     int width = primary?21:14; 
-    RetiredRays *retired_rays = new RetiredRays(rays, size, width);
-    retiredRays.emplace_back(retired_rays);
+    RayList::read_from_device_buffer(rayList, rays, size, primary, comm->get_rank(), ps->get_chunk_size());
 }
 
 // get chunk retun chunk id
@@ -109,9 +108,15 @@ int MWNode::get_sent_list() {
     int dst_loaded = -1, dst_unloaded = -1;
     int max_loaded = 0,  max_unloaded = 0; 
    
+ //   if(comm->get_rank() == 1) { 
+       printf("proc %d raylist status: ", comm->get_rank());
+       for(int i = 0; i < chunk_size; i++)
+           printf("|chunk %d  proc %d rays %d ", i, ps->get_proc(i), rayList[i].get_primary().get_size());
+       printf("| \n");
+ //   }
     for(int i = 0; i < chunk_size; i++) {
         if(i == ps->get_current_chunk()) continue;
-
+        
         if(ps->get_proc(i) >= 0 && rayList[i].size() > max_loaded) {
             max_loaded = rayList[i].size();
             dst_loaded = i;
@@ -158,6 +163,7 @@ void MWNode::master_send_message() {
 
     //proc idle
     int idle_proc = ps->get_idle_proc();
+    out_mutex.lock();
     if(idle_proc >= 0 && ps->all_rays_received()) {
         //find a unloaded chunk contents unprocessed rays
         // if idle proc loaded chunk not empty ???
@@ -200,6 +206,7 @@ void MWNode::master_send_message() {
             comm->send_message(&ray_msg, ps);
         }
     }
+    out_mutex.unlock(); 
 }
 
 void MWNode::worker_send_message() {
@@ -229,6 +236,8 @@ void MWNode::worker_send_message() {
         comm->os<<"\n";
     }
     if (!outList_empty()) {
+        comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
+        out_mutex.lock();
         int cId = get_sent_list();
         if(cId >= 0) {
             if(ps->get_proc(cId) >= 0) {
@@ -241,6 +250,7 @@ void MWNode::worker_send_message() {
                 comm->send_message(&ray_msg, ps);
             }
         }
+        out_mutex.unlock(); 
     }
 }
 
@@ -268,22 +278,13 @@ void MWNode::message_thread(void* tmp) {
         do {
       //     if(comm->isMaster()) 
       //         comm->os<<"master wait recv\n";
-            recv = comm->recv_message(wk->rayList, &(wk->inList),  ps, false);
+            recv = comm->recv_message(ps, false);
         } while(!recv && ps->is_proc_idle() && !ps->Exit()) ;
         statistics.end("run => message_thread => recv_message");
          
         if(ps->Exit()) {
             statistics.end("run => message_thread => loop");
             break;
-        }
-
-        if(!wk->retiredRays.empty()) {
-            std::lock_guard <std::mutex> lock(wk->out_mutex); 
-            while(!wk->retiredRays.empty()) {
-                RetiredRays* rays = wk->retiredRays.back();
-                wk->retiredRays.pop_back();
-                RayList::read_from_device_buffer(wk->rayList, rays->data, rays->size, rays->primary, comm->get_rank(), ps->get_chunk_size());
-            }
         }
         
         statistics.start("run => message_thread => inlist not empty");
