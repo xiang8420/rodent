@@ -222,7 +222,7 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
             statistics.end("run => message_thread => recv_message => StatusMsg");
             return true;
         } 
-        case Ray: {
+        case ArrayRay: {
             if(isMaster()) 
                 printf("master recv ray\n");
             
@@ -231,6 +231,13 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
             ps->set_proc_busy(rank);
             recv_ray_count++;
             return true; 
+        }
+        case StreamRay: {
+            ps->accumulate_recv(recv_msg->get_ray_size());
+            //set itself busy
+            ps->set_proc_busy(rank);
+            recv_ray_count++;
+            return true;
         }
         case Schedule: {
             if(ps->update_chunk((int*)recv_msg->get_content())) {
@@ -276,11 +283,7 @@ bool Communicator::recv_message(ProcStatus *ps, bool block) {
         
         statistics.start("run => message_thread => recv_message => RecvMsg");
         
-        Message *recv_msg;
-        if(outArrayList != NULL)
-            recv_msg = new RecvMsg(outArrayList, inList, ps->get_current_chunk(), status, MPI_COMM_WORLD); 
-        else 
-            error("outStreamList == null");
+        Message *recv_msg = new RecvMsg(outArrayList, outStreamList, inList, ps->get_current_chunk(), status, MPI_COMM_WORLD); 
 
         statistics.end("run => message_thread => recv_message => RecvMsg");
 

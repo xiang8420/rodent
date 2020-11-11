@@ -5,7 +5,7 @@ struct AsyncNode : public Node {
     
     ~AsyncNode();
 
-    bool rayList_empty();
+    bool outStreamList_empty();
     
     bool all_queue_empty();
 
@@ -29,11 +29,15 @@ AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
 {
     printf("new AsyncNode\n");
     int chunk_size = ps->get_chunk_size();
-    rayList = new RayList[chunk_size];
+    outStreamList = new RayStreamList[chunk_size];
+    int store_capacity = ps->get_stream_store_capacity();
+    int logic_capacity = ps->get_stream_logic_capacity();
+    for(int i = 0; i < chunk_size; i++)
+        outStreamList[i].set_capacity(logic_capacity, store_capacity);
     inList.set_capacity(ps->get_stream_logic_capacity(),
                         ps->get_stream_store_capacity());
     
-    comm->outArrayList = rayList;
+    comm->outStreamList = outStreamList;
     comm->inList = &inList;
 }
 
@@ -44,7 +48,7 @@ AsyncNode::~AsyncNode() {
 bool AsyncNode::outList_empty() {  
     int chunk_size = ps->get_chunk_size();
     for(int i = 0; i < chunk_size; i++) {
-        if( !rayList[i].empty() && !ps->is_local_chunk(i)) {
+        if( !outStreamList[i].empty() && !ps->is_local_chunk(i)) {
             return false;
         }
     }
@@ -53,19 +57,17 @@ bool AsyncNode::outList_empty() {
 
 bool AsyncNode::all_queue_empty() { 
     for(int i = 0; i < ps->get_chunk_size(); i++) {
-        if(!rayList[i].empty()) {return false;}
+        if(!outStreamList[i].empty()) {return false;}
     }
     return true;
 }
 
-bool AsyncNode::rayList_empty() {  
+bool AsyncNode::outStreamList_empty() {  
 //    printf("if raylist empty\n");
     int chunk_size = ps->get_chunk_size();
     bool res = true;
-    out_mutex.lock();
     for(int i = 0;i < chunk_size; i++)
-        if(!rayList[i].empty()) { res = false; break; }
-    out_mutex.unlock();
+        if(!outStreamList[i].empty()) { res = false; break; }
     res &= inList.empty();
     return res;
 }
@@ -74,16 +76,16 @@ bool AsyncNode::rayList_empty() {
 void AsyncNode::clear_outlist() {  
     int chunk_size = ps->get_chunk_size();
     for(int i = 0; i < chunk_size; i++) {
-        rayList[i].get_primary().clear();
-        rayList[i].get_secondary().clear();
+        outStreamList[i].clear();
     }
 }
 
 void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary){
-    std::lock_guard <std::mutex> lock(out_mutex); 
+    sort_ray_array(rays, size, primary);
     
-    int width = primary ? 21 : 14; 
-    RayList::read_from_device_buffer(rayList, rays, size, primary, comm->get_rank(), ps->get_chunk_size());
+    //std::lock_guard <std::mutex> lock(out_mutex); 
+    RayStreamList::read_from_device_buffer(outStreamList, rays, size, primary, ps->get_chunk_size(), comm->get_rank());
+    printf("save rays\n");
 }
 
 // get chunk retun chunk id
@@ -95,12 +97,12 @@ int AsyncNode::get_sent_list() {
     for(int i = 0; i < chunk_size; i++) {
         if(ps->is_local_chunk(i)) continue;
 
-        if(ps->get_proc(i) >= 0 && rayList[i].size() > max_loaded ) {
-            max_loaded = rayList[i].size();
+        if(ps->get_proc(i) >= 0 && outStreamList[i].size() > max_loaded ) {
+            max_loaded = outStreamList[i].size();
             dst_loaded = i;
         }
-        if(ps->get_proc(i) < 0 && rayList[i].size() > max_unloaded) {
-            max_unloaded = rayList[i].size();
+        if(ps->get_proc(i) < 0 && outStreamList[i].size() > max_unloaded) {
+            max_unloaded = outStreamList[i].size();
             dst_unloaded = i;
         }
     }
@@ -117,11 +119,11 @@ void AsyncNode::send_message() {
     //comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
     printf("async node send message\n");
     for(int i = 0; i < ps->get_chunk_size(); i++)
-        printf("w %d ",rayList[i].size());
+        printf("w %d ",outStreamList[i].size());
     printf("\n");
     //comm->os<<"all thread waitting "<<ps->all_thread_waiting() <<"inList size"<<inList.size()<<"\n";
     if (ps->all_thread_waiting() && inList.empty()) {
-        if(rayList_empty()) {
+        if(outStreamList_empty()) {
             ps->set_proc_idle(comm->get_rank());
             if(ps->all_proc_idle() && ps->all_rays_received()) {
                 QuitMsg quit_msg(comm->get_rank(), get_tag()); 
@@ -136,11 +138,8 @@ void AsyncNode::send_message() {
         } else if(outList_empty()) {
             ///load new chunk
             int chunk_size = ps->get_chunk_size();
-            for(int i = 0;i < chunk_size; i++)
-                comm->os<<rayList[i].primary_size()<<" "<<rayList[i].secondary_size()<<" \n";
             ps->switch_current_chunk();
             int current_chunk = ps->get_current_chunk();
-            comm->os<<"need another chunk or need send rays "<< current_chunk << "\n"; ;
             inList_not_empty.notify_all();
             return;
         } else {
@@ -152,21 +151,29 @@ void AsyncNode::send_message() {
     
     if (!outList_empty()) {
         comm->os<<"mthread outlist empty"<<outList_empty()<<"\n";
-        out_mutex.lock();
         int cId = get_sent_list();
         if(cId >= 0) {
             int dst_proc = ps->get_proc(cId);
             comm->os<<"chunk "<<cId<<" get proc "<<dst_proc<<"\n";
             if(dst_proc >= 0) {
                 ps->set_proc_busy(dst_proc);
-                RayMsg ray_msg(rayList[cId], comm->get_rank(), dst_proc, cId, false, get_tag()); 
+                statistics.start("run => message_thread => send_message => new RayMsg");
+                
+                outStreamList[cId].mutex.lock(); 
+                RayMsg ray_msg(outStreamList[cId], comm->get_rank(), dst_proc, cId, false, get_tag()); 
+                outStreamList[cId].mutex.unlock(); 
+                statistics.end("run => message_thread => send_message => new RayMsg");
                 comm->send_message(&ray_msg, ps);
             } else {
-                RayMsg ray_msg(rayList[cId], comm->get_rank(), comm->get_master(), cId, false, get_tag()); 
+                error("ray msg");
+                statistics.start("run => message_thread => send_message => new RayMsg");
+                outStreamList[cId].mutex.lock(); 
+                RayMsg ray_msg(outStreamList[cId], comm->get_rank(), comm->get_master(), cId, false, get_tag()); 
+                outStreamList[cId].mutex.unlock(); 
+                statistics.end("run => message_thread => send_message => new RayMsg");
                 comm->send_message(&ray_msg, ps);
             }
         }
-        out_mutex.unlock(); 
     }
 }
 
@@ -254,29 +261,10 @@ void AsyncNode::run(ImageDecomposition * camera) {
         //load new chunk;
         int current_chunk = ps->get_current_chunk();
         comm->os<<"mthread copy new chunk " << current_chunk << "\n";
-        if(rayList[current_chunk].size() > 0) {
-            RaysArray &primary   = rayList[current_chunk].get_primary(); 
-            RaysArray &secondary = rayList[current_chunk].get_secondary(); 
-            
-            int* ids = (int*)(primary.data);
-            int copy_size = primary.get_size(); 
-            for(int i = 0; i < std::min(5, copy_size); i ++) {
-                comm->os<<" || " <<ids[i * 21]<<" "<<ids[i * 21 + 9];
-            }
-            comm->os<<"\n";
-            ids = (int*)(secondary.data);
-            copy_size = secondary.get_size(); 
-            comm->os<<"mthread copy new chunk rays" <<copy_size<<"\n";
-            for(int i = 0; i < std::min(5, copy_size); i ++) {
-                comm->os<<" || " <<ids[i * 14]<<" "<<ids[i * 14 + 9];
-            }
-            comm->os<<"\n";
-
-            inList.read_from_ptr(primary.get_data(), 0, primary.get_size(), true, comm->get_rank());
-            inList.read_from_ptr(secondary.get_data(), 0, secondary.get_size(), false, comm->get_rank());
-            rayList[current_chunk].clear();
-            //read to inList
-        //    clear_outlist();
+        assert(inList.empty());
+        if(outStreamList[current_chunk].size() > 0) {
+            RayStreamList::swap(inList, outStreamList[current_chunk]); 
+            outStreamList[current_chunk].clear(); 
         }
         ps->chunk_loaded();
 

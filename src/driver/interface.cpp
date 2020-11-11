@@ -380,15 +380,38 @@ struct Interface {
         return bvh8_tri4[filename] = std::move(load_bvh<Node8, Tri4>(dev, filename));
     }
    
-    void unload_bvh8_tri4(int32_t dev) {
+    void unload_chunk_data(int32_t dev) {
         printf("unload bvh\n");
-        auto iter = devices[dev].bvh8_tri4.begin();
-        while(iter != devices[dev].bvh8_tri4.end()) {
-           iter->second.nodes = std::move(anydsl::Array<Node8>(dev, reinterpret_cast<Node8*>(anydsl_alloc(dev, 0)), 0));
-           iter->second.tris  = std::move(anydsl::Array<Tri4>(dev, reinterpret_cast<Tri4*>(anydsl_alloc(dev, 0)), 0));
-           iter++;     
+        /*bvh 8 tri 4*/
+        {
+            auto iter = devices[dev].bvh8_tri4.begin();
+            while(iter != devices[dev].bvh8_tri4.end()) {
+               iter->second.nodes = std::move(anydsl::Array<Node8>(dev, reinterpret_cast<Node8*>(anydsl_alloc(dev, 0)), 0));
+               iter->second.tris  = std::move(anydsl::Array<Tri4>(dev, reinterpret_cast<Tri4*>(anydsl_alloc(dev, 0)), 0));
+               iter++;     
+            }
+            devices[dev].bvh4_tri4.clear();
         }
-        devices[dev].bvh8_tri4.clear();
+        {
+            auto iter = devices[dev].bvh4_tri4.begin();
+            while(iter != devices[dev].bvh4_tri4.end()) {
+               iter->second.nodes = std::move(anydsl::Array<Node4>(dev, reinterpret_cast<Node4*>(anydsl_alloc(dev, 0)), 0));
+               iter->second.tris  = std::move(anydsl::Array<Tri4>(dev, reinterpret_cast<Tri4*>(anydsl_alloc(dev, 0)), 0));
+               iter++;     
+            }
+            devices[dev].bvh4_tri4.clear();
+        }
+        {
+            auto iter = devices[dev].bvh2_tri1.begin();
+            while(iter != devices[dev].bvh2_tri1.end()) {
+               iter->second.nodes = std::move(anydsl::Array<Node2>(dev, reinterpret_cast<Node2*>(anydsl_alloc(dev, 0)), 0));
+               iter->second.tris  = std::move(anydsl::Array<Tri1>(dev, reinterpret_cast<Tri1*>(anydsl_alloc(dev, 0)), 0));
+               iter++;     
+            }
+            devices[dev].bvh2_tri1.clear();
+        }
+        //normal, face normal, trangles
+        //std::unordered_map<std::string, anydsl::Array<uint8_t>> buffers;
     }
 
 
@@ -974,9 +997,9 @@ void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t 
     get_primary_stream(*primary, array.data(), size);
 }
 
-void rodent_unload_bvh(int32_t dev ) {
+void rodent_unload_chunk_data(int32_t dev ) {
     printf("rodent unload \n");
-    interface->unload_bvh8_tri4(dev);
+    interface->unload_chunk_data(dev);
 }
 
 void rodent_present(int32_t dev) {

@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include "mpi.h"
 
-enum MsgType {Status, Ray, Schedule, Quit};
+enum MsgType {Status, ArrayRay, StreamRay, Schedule, Quit};
 
 struct MessageHeader {
     int      root;                   // will be -1 for point-to-point
@@ -113,20 +113,13 @@ public:
         
         int width = primary.get_store_width(); 
         int* ids = (int*)(primary.get_data());
-        for(int i = 0; i < 5; i ++) {
-            printf(" %d %d$", ids[i*width], ids[i*width + 9]);
-        }
-        printf("\n");
 
         header->primary = primary.get_size(); 
         header->secondary = secondary.get_size(); 
-
-        printf("serialize size %d %d:", header->primary, header->secondary);
         
         int primary_length = header->primary * primary.get_store_width() * sizeof(float);
         int secondary_length = header->secondary * secondary.get_store_width() * sizeof(float);
         content = new char[primary_length + secondary_length];
-        printf("Semd Message size %ld\n", primary_length + secondary_length);  
 
         char* ptr = content;
         memcpy(ptr, primary.get_data(), primary_length);
@@ -139,9 +132,45 @@ public:
 class RayMsg : public Message{
 
 public:
+    RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int tag) {
+        std::ofstream os; 
+        os.open("out/proc_buffer_worker", std::ios::out | std::ios::app ); 
+        
+        header = new MessageHeader(-1, src, dst, MsgType::ArrayRay, false, 0, idle, -1, tag);
+        
+        os<<"RayMsg :\n";
+        for(int i = 0; i < chunk_size; i++) {
+            header->primary += List[i].primary_size();
+            header->secondary += List[i].secondary_size();
+            os<<"list "<<i<<"primary copy to "<<header->primary<<" secondary"<<header->secondary<<"\n";
+        }
+        int primary_length = header->primary * List[0].primary_store_width() * sizeof(float);
+        printf("new RayMsg primary %d secondary %d\n", header->primary, header->secondary);
+        int secondary_length = header->secondary * List[0].secondary_store_width() * sizeof(float);
+        content = new char[primary_length + secondary_length];
+        header->content_size = primary_length + secondary_length; 
+        
+        char* primary_ptr   = content;
+        char* secondary_ptr = primary_ptr + primary_length;
+
+        for(int i = 0; i < chunk_size; i++) {
+            if(!List[i].empty()) {
+                RayList &out = List[i];
+                int length = out.primary_size() * out.primary_store_width() * sizeof(float);
+                memcpy(primary_ptr,   out.get_primary().get_data(), length);
+                
+                primary_ptr += length;
+                length = out.secondary_size() * List[i].secondary_store_width() * sizeof(float);
+                memcpy(secondary_ptr, out.get_secondary().get_data(), length);
+                
+                secondary_ptr += length;  
+                out.clear();
+            } 
+        }
+    }
     RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag) {
         printf("construct message ray\n");
-        header = new MessageHeader(-1, src, dst, MsgType::Ray, false, 0, idle, chunk, tag);
+        header = new MessageHeader(-1, src, dst, MsgType::ArrayRay, false, 0, idle, chunk, tag);
         
         RaysArray &primary = outList.get_primary(); 
         int width = primary.get_store_width(); 
@@ -180,52 +209,82 @@ public:
     //    printf("outlist clear src %d dst %d\n", src, dst);
     }
 
-    RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int tag) {
-        std::ofstream os; 
-        os.open("out/proc_buffer_worker", std::ios::out | std::ios::app ); 
-        
-        header = new MessageHeader(-1, src, dst, MsgType::Ray, false, 0, idle, -1, tag);
-        
-        os<<"RayMsg :\n";
-        for(int i = 0; i < chunk_size; i++) {
-            header->primary += List[i].primary_size();
-            header->secondary += List[i].secondary_size();
-            os<<"list "<<i<<"primary copy to "<<header->primary<<" secondary"<<header->secondary<<"\n";
-        }
-        int primary_length = header->primary * List[0].primary_store_width() * sizeof(float);
-        printf("new RayMsg primary %d secondary %d\n", header->primary, header->secondary);
-        int secondary_length = header->secondary * List[0].secondary_store_width() * sizeof(float);
+    RayMsg(RayStreamList &outList, int src, int dst, int chunk, bool idle, int tag) {
+        printf("construct message ray\n");
+        header = new MessageHeader(-1, src, dst, MsgType::StreamRay, false, 0, idle, chunk, tag);
+
+        header->primary = outList.primary_size(); 
+        header->secondary = outList.secondary_size(); 
+       
+        // first element is size 
+        int primary_length = header->primary * (1 + 21 * outList.get_store_capacity()) * sizeof(float);
+        int secondary_length = header->secondary * (1 + 14 * outList.get_store_capacity()) * sizeof(float);
         content = new char[primary_length + secondary_length];
         header->content_size = primary_length + secondary_length; 
-        
-        char* primary_ptr   = content;
-        char* secondary_ptr = primary_ptr + primary_length;
-
-        for(int i = 0; i < chunk_size; i++) {
-            if(!List[i].empty()) {
-                RayList &out = List[i];
-                int length = out.primary_size() * out.primary_store_width() * sizeof(float);
-                memcpy(primary_ptr,   out.get_primary().get_data(), length);
-                
-                
-                int* i_ptr = (int*)primary_ptr;
-                printf("test102 %d src %d dst %d\n", i_ptr[9], src, dst);
-
-
-                primary_ptr += length;
-                length = out.secondary_size() * List[i].secondary_store_width() * sizeof(float);
-                memcpy(secondary_ptr, out.get_secondary().get_data(), length);
-                
-                i_ptr = (int*)secondary_ptr;
-                printf("test102 %d src %d dst %d\n", i_ptr[9], src, dst);
-                
-                secondary_ptr += length;  
-                out.clear();
-            } 
-        }
+       
+        char* ptr = content;
+        printf("m %d > %d send RayMsg primary %d secondary %d\n", src, dst, header->primary, header->secondary);
+        int primary_size = outList.primary_size();
+        for(int i = 0; i < primary_size; i++) {
+            int * iptr = (int*) ptr;
+            struct RaysStream *primary = outList.get_primary();
+            iptr[0] = primary->get_size();
+            printf("primary size %d :", iptr[0]);
+            ptr += sizeof(int);
+            int length = 21 * outList.get_store_capacity() * sizeof(float);
+            memcpy(ptr, primary->get_data(), length);
+            int * irayptr = (int*) primary->get_data();
+            printf("size %d ", iptr[0]);
+            if(iptr[0] > 6) {
+                //for(int i = iptr[0] - 5; i < iptr[0]; i++) {
+                for(int i = 0; i < 5; i++) {
+                    printf("%d %d|%d|", irayptr[i], irayptr[i + 9 * outList.get_store_capacity()], src);
+                }
+                printf("write to msg %d : ", iptr[0]);
+                //for(int i = iptr[0] - 5; i < iptr[0]; i++) {
+                for(int i = 0; i < 5; i++) {
+                    printf("%d %d|%d|", iptr[1 + i], iptr[1 + i + 9 * outList.get_store_capacity()], src);
+                }
+                printf("\n");
+            }
+            delete primary;
+            ptr += length;
+        } 
+            printf("end primary size\n");
+        int secondary_size = outList.secondary_size();
+        for(int i = 0; i < secondary_size; i++) {
+            int * iptr = (int*) ptr;
+            struct RaysStream *secondary = outList.get_secondary();
+            iptr[0] = secondary->get_size();
+            printf("primary size %d :", iptr[0]);
+            ptr += sizeof(int);
+            int length = 14 * outList.get_store_capacity() * sizeof(float);
+            memcpy(ptr, secondary->get_data(), length);
+            int * irayptr = (int*) secondary->get_data();
+            if(iptr[0] > 6) {
+                //for(int i = iptr[0] - 5; i < iptr[0]; i++) {
+                for(int i = 0; i < 5; i++) {
+                    printf("%d %d||", irayptr[i], irayptr[i + 9 * outList.get_store_capacity()]);
+                }
+                printf("write to msg %d : ", iptr[0]);
+                //for(int i = iptr[0] - 5; i < iptr[0]; i++) {
+                for(int i = 0; i < 5; i++) {
+                    printf("%d %d||", iptr[1 + i], iptr[1 + i + 9 * outList.get_store_capacity()]);
+                }
+                printf("\n");
+               // for(int i = iptr[0]-6; i < iptr[0]; i++) {
+               //     printf("%d %d||", irayptr[i], irayptr[i + 9 * outList.get_store_capacity()]);
+               // }
+               // printf("write to msg %d : ", iptr[0]);
+               // for(int i = iptr[0]-6; i < iptr[0]; i++) {
+               //     printf("%d %d||", iptr[1 + i], iptr[1 + i + 9 * outList.get_store_capacity()]);
+               // }
+               // printf("\n");
+            }
+            delete secondary;
+            ptr += length;
+        } 
     }
-    RayMsg(RayStreamList List, int src, int dst, int chunk_size, bool idle, int tag);
-
     ~RayMsg() { delete[] content; }
 };
 
@@ -251,14 +310,10 @@ public:
     }
 
     //recv message, if it's ray msg load it to list 
-    RecvMsg(RayList* List, RayStreamList *inList, int local_chunk, MPI_Status &status, MPI_Comm comm) {
+    RecvMsg(RayList* outArray, RayStreamList * outStream, RayStreamList *inList, int local_chunk, MPI_Status &status, MPI_Comm comm) {
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         
-    //    std::ofstream os; 
-    //    os.open("out/proc_buffer_" + std::to_string(rank), std::ios::out | std::ios::app ); 
-    //    os<<"master read from message\n"; 
-    //    printf("construct message recv ray from proc %d\n", status.MPI_SOURCE);
         
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
@@ -270,31 +325,50 @@ public:
             char *buffer = (char *)malloc(count);
             MPI_Recv(buffer, count, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
             memcpy(header, buffer, sizeof(*header));
-    //        printf("recv msg size count %d \n", count);
-    //        os<<"recv msg sender "<<header->sender <<" root "<<header->root<<"\n";
             if(header->primary == 0 && header->secondary ==0 ) {
-    //            os<<"recv status "<<header->content_size<<"\n";
                 content = new char[header->content_size];
                 memcpy(content, buffer+sizeof(*header), header->content_size);
-    //            os<<"recv status over\n";
             } else {
-                if(header->chunk != local_chunk) {
-    //                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
-                    if(header->chunk < 0) 
-                        error("header chunk < 0 ", header->chunk);
-                    
-                    List[header->chunk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
-                    char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * 21 * sizeof(float); 
-                    List[header->chunk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
-                    
-                    //RayList::read_from_message(List, (char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
+                if(header->type == MsgType::ArrayRay) {
+                    if(header->chunk != local_chunk) {
+        //                os<<"recv mixed rays "<< header->sender <<" "<<header->content_size<<"\n";
+                        if(header->chunk < 0) 
+                            error("header chunk < 0 ", header->chunk);
+                        
+                        outArray[header->chunk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
+                        char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * 21 * sizeof(float); 
+                        outArray[header->chunk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
+                        
+                        //RayList::read_from_message(List, (char*)buffer+sizeof(MessageHeader), header->primary, header->secondary);
+                    } else {
+        //                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
+                        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
+                        inList->lock();
+                        inList->read_from_array_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
+                        inList->unlock();
+                        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
+                    }
                 } else {
-    //                os<<"recv normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
-                    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
-                    inList->lock();
-                    inList->read_from_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
-                    inList->unlock();
-                    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
+                    if(header->chunk != local_chunk) {
+                            error("local chunk %d recv chunk %d ", local_chunk, header->chunk);
+                     //   if(header->chunk < 0) 
+                     //       error("header chunk < 0 ", header->chunk);
+                     //   
+                     //   outStream[header->chunk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
+                     //   char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * 21 * sizeof(float); 
+                     //   outStream[header->chunk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
+                     //   
+                    } else {
+                        os<<"recv ray stream normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
+                        os<<"inList size "<< inList->size()<<"\n";
+                        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
+                        inList->lock();
+                        inList->read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
+                        inList->unlock();
+                        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
+                        os<<"inList size "<< inList->size()<<"\n";
+                    }
+                    
                 }
             }
             free(buffer);
