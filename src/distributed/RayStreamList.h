@@ -45,20 +45,12 @@ struct RaysStream {
             // mask used as ptr mask not this 
             bool *ptr_mask = new bool[width];
             int  ptr_logic_width = width; 
-            int  ptr_store_width = set_ray_mask(ptr_mask, ptr_logic_width, RAY_COMPACT);
-            
-            printf("new RaysStream, ");
-            int*a = (int*)data;
-            int*b = (int*)ptr;
-            float* ptr_data = (float*) ptr;
-            for(int i = 0, k = 0; i < ptr_logic_width; i++) {
-                if(ptr_mask[i]) {
-                    for(int j = 0; j < copy_size; j++) {
-                        data[j + i * logic_capacity] = ptr_data[j * ptr_store_width + k];
-                    }
-                    k++;
-                } 
+            float* fptr = (float*)ptr;
+            for(int i = 0; i < ptr_logic_width; i++) {
+                for(int j = 0; j < copy_size; j++) 
+                    data[j + i * store_capacity] = fptr[j * width + i];
             }
+            
         }
         //mask change to ray itself
         size = copy_size; 

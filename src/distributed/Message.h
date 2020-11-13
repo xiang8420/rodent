@@ -1,6 +1,6 @@
 #include <vector>
 #include <mutex>
-#include "RayList.h"
+#include "RayArrayList.h"
 #include "RayStreamList.h"
 #include <condition_variable>
 #include "mpi.h"
@@ -46,10 +46,10 @@ public:
     ~Message() { delete header; }
 
     // write content to a raylists
-    int write_raylist(struct RayList *outlist);
+    int write_raylist(struct RayArrayList *outlist);
   
     // read inlist to message 
-    int read_raylist(struct RayList *inlist);
+    int read_raylist(struct RayArrayList *inlist);
 
     int get_tag() {return header->tag;}
 	bool is_busy() { return !header->idle; }
@@ -102,9 +102,9 @@ public:
     //! is this message collective (i.e. synchrnoizing across processes)?
 	bool is_collective() { return header->collective; }
     
-    void deserialize(char* ptr, struct RayList* outList); 
+    void deserialize(char* ptr, struct RayArrayList* outList); 
     
-    int serialize(struct RayList* outList) {
+    int serialize(struct RayArrayList* outList) {
         if(outList->empty()) return 0;
       
         RaysArray &primary   = outList->get_primary();
@@ -127,12 +127,13 @@ public:
         
         return primary_length + secondary_length;
     }
+
 };
 
 class RayMsg : public Message{
 
 public:
-    RayMsg(RayList* List, int src, int dst, int chunk_size, bool idle, int tag) {
+    RayMsg(RayArrayList* List, int src, int dst, int chunk_size, bool idle, int tag) {
         std::ofstream os; 
         os.open("out/proc_buffer_worker", std::ios::out | std::ios::app ); 
         
@@ -155,7 +156,7 @@ public:
 
         for(int i = 0; i < chunk_size; i++) {
             if(!List[i].empty()) {
-                RayList &out = List[i];
+                RayArrayList &out = List[i];
                 int length = out.primary_size() * out.primary_store_width() * sizeof(float);
                 memcpy(primary_ptr,   out.get_primary().get_data(), length);
                 
@@ -168,7 +169,7 @@ public:
             } 
         }
     }
-    RayMsg(RayList &outList, int src, int dst, int chunk, bool idle, int tag) {
+    RayMsg(RayArrayList &outList, int src, int dst, int chunk, bool idle, int tag) {
         printf("construct message ray\n");
         header = new MessageHeader(-1, src, dst, MsgType::ArrayRay, false, 0, idle, chunk, tag);
         
@@ -310,7 +311,7 @@ public:
     }
 
     //recv message, if it's ray msg load it to list 
-    RecvMsg(RayList* outArray, RayStreamList * outStream, RayStreamList *inList, int local_chunk, MPI_Status &status, MPI_Comm comm) {
+    RecvMsg(RayArrayList* outArray, RayStreamList * outStream, RayStreamList *inList, int local_chunk, MPI_Status &status, MPI_Comm comm) {
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         

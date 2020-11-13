@@ -15,14 +15,11 @@ struct AllCopyNode : public Node{
     
     void run(ImageDecomposition * camera);
     
-    void save_outgoing_buffer(float *rays, size_t size, bool primary);
-
 };
 
 AllCopyNode::AllCopyNode(struct Communicator *comm, struct ProcStatus *ps)
     :Node(comm, ps)
 {
-    
     printf("new AllCopyNode\n");
     int chunk_size = ps->get_chunk_size();
     assert(chunk_size == 1 && comm->get_size() == chunk_size); 
@@ -37,10 +34,6 @@ AllCopyNode::AllCopyNode(struct Communicator *comm, struct ProcStatus *ps)
 
 AllCopyNode::~AllCopyNode() {
     printf("delete AllCopyNode\n");
-}
-
-void AllCopyNode::save_outgoing_buffer(float *retired_rays, size_t size, bool primary){ 
-    error("Allcopynode don't need save outgoing");
 }
 
 void AllCopyNode::message_thread(void* tmp) {

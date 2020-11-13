@@ -5,8 +5,6 @@ struct SingleNode : public Node{
     
     void run(ImageDecomposition * camera);
 
-    void save_outgoing_buffer(float *retired_rays, size_t size, bool primary){ }
-    
 };
 
 SingleNode::SingleNode(struct Communicator *comm, struct ProcStatus *ps)

@@ -61,7 +61,7 @@ struct TimeStatistics {
         float all_time = duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - app_st).count();
         os<<"| Statistic : numbers of call, time \n";
         for(int i = 0; i < func_name.size(); i++) {
-            os<<"| "<<func_name[i]<<"  ( "<<func_num_run[i]<<" , "<<func_time[i] / all_time * 100<<"% )\n";
+            os<<"| "<<func_name[i]<<"  ( "<<func_num_run[i]<<" , "<<func_time[i]<<" , "<<func_time[i] / all_time * 100<<"% )\n";
         }     
     
     } 

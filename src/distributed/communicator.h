@@ -44,7 +44,7 @@ public:
     bool out_list_empty(int);
 
     RayStreamList *inList;  
-    RayList *outArrayList;
+    RayArrayList *outArrayList;
     RayStreamList *outStreamList;
 private:
     MPI_Status  sta[3];
@@ -202,6 +202,7 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
    // os << "mthread switch msg type "<<recv_msg->get_type()<<"\n";
     if(isMaster()) 
         printf("master comm before recv\n");
+    printf("recv msg type %d\n", recv_msg->get_type());
     switch(recv_msg->get_type()) {
         case Quit: { 
             ps->set_exit();
@@ -223,9 +224,6 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
             return true;
         } 
         case ArrayRay: {
-            if(isMaster()) 
-                printf("master recv ray\n");
-            
             ps->accumulate_recv(recv_msg->get_ray_size());
             //set itself busy
             ps->set_proc_busy(rank);

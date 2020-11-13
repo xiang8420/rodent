@@ -1,5 +1,5 @@
-#ifndef DEF_RAYLIST
-#define DEF_RAYLIST
+#ifndef DEF_RAYARRAYLIST
+#define DEF_RAYARRAYLIST
 
 #include <cstring>
 #include <fstream>
@@ -49,12 +49,12 @@ private:
 
 };
 
-class RayList {
+class RayArrayList {
 
 public:
-    RayList(const RayList& ); 
+    RayArrayList(const RayArrayList& ); 
 
-    RayList();
+    RayArrayList();
 
     void set_capacity(); 
     
@@ -62,9 +62,9 @@ public:
 
     //void read_from_message(char* , int, int);
     
-    static void read_from_device_buffer(RayList * , float *, size_t , bool , int , int);
+    static void read_from_device_buffer(RayArrayList * , float *, size_t , bool , int , int);
     
-    static void read_from_message(RayList *, char*, int, int);
+    static void read_from_message(RayArrayList *, char*, int, int);
 
     RaysArray& get_primary() { return primary;}
     RaysArray& get_secondary() { return secondary;}
@@ -117,12 +117,13 @@ void RaysArray::resize(int cap, int width)
 void RaysArray::clear()
 {
     printf("clear rayArray\n");
+    //delete[] data;
     size = 0;
 }
 
 int RaysArray::check_capacity(int num) {
     printf("check size %d num %d capacity %d \n", size, num, capacity);
-    //statistics.start("run => message_thread => RayList => check_capacity");
+    //statistics.start("run => message_thread => RayArrayList => check_capacity");
     if(num + size > capacity) {
         size_t memory = physical_memory_used_by_process();
         //printf("rays resize %ld kb %ld mb\n", memory, memory / 1024);
@@ -158,7 +159,7 @@ int RaysArray::check_capacity(int num) {
         //printf("store width %d capacity %d\n", capacity, store_width);
         //printf("after rays resize %ld kb %ld mb\n", memory, memory / 1024);
     }
-    //statistics.end("run => message_thread => RayList => check_capacity");
+    //statistics.end("run => message_thread => RayArrayList => check_capacity");
     return capacity;
 }
 
@@ -209,30 +210,29 @@ inline void swap(float **a, float **b) {
 }
 
 //存储问题 可能从这里解决
-void RayList::clear() {
+void RayArrayList::clear() {
     //printf("\nraylist clear\n\n");
     primary.clear() ; 
     secondary.clear(); 
 }
 
-RayList::RayList(const RayList& a) {
+RayArrayList::RayArrayList(const RayArrayList& a) {
     //printf("cant copy construct\n");
     primary.resize(0, 21);
     secondary.resize(0, 14);
 }
 
-RayList::RayList() {
+RayArrayList::RayArrayList() {
     primary.resize(0, 21);
     secondary.resize(0, 14);
 }
 
-void RayList::set_capacity() {
+void RayArrayList::set_capacity() {
     primary.resize(0, 21);
     secondary.resize(0, 14);
 }
 
-
-void RayList::read_from_device_buffer(RayList * raylist, float *out_buffer,  size_t size, bool primary, int rank, int chunk_size) {
+void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_buffer,  size_t size, bool primary, int rank, int chunk_size) {
     int width       = primary ? 21 : 14;
     int* chunkIds   = (int*)(out_buffer);
 
@@ -264,7 +264,7 @@ void RayList::read_from_device_buffer(RayList * raylist, float *out_buffer,  siz
     
 }
 
-void RayList::read_from_message(RayList* rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {
+void RayArrayList::read_from_message(RayArrayList* rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {
     std::ofstream os; 
     os.open("out/proc_buffer_master", std::ios::out | std::ios::app ); 
     os<<"master read from message: all primary size "<<msg_primary_size<<" secondary "<<msg_secondary_size<<"\n"; 

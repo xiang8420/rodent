@@ -23,7 +23,7 @@ void rodent_unload_chunk_data(int32_t dev );
 #include "SingleNode.h"
 #include "SyncNode.h"
 #include "AllCopyNode.h"
-#include "MasterWorker.h"
+//#include "MasterWorker.h"
 
 #define PRIMARY_WIDTH 21
 #define SECONDARY_WIDTH 14
@@ -78,7 +78,7 @@ struct DistributedFrameWork {
 
         if(type == "Single") node = new SingleNode(comm, ps);
         else if(type == "Sync") node = new SyncNode(comm, ps);
-        else if(type == "MasterWorker") node = new MWNode(comm, ps);
+//        else if(type == "MasterWorker") node = new MWNode(comm, ps);
         else if(type == "Async") node = new AsyncNode(comm, ps);
         else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
         else error("Unknown node type");
@@ -99,6 +99,7 @@ struct DistributedFrameWork {
         int proc_rank = comm->get_rank();
         int proc_size = comm->get_size(); 
         /*block size equels proc size*/
+        std::cout<<"run type "<<type<<"\n";
         if( type == "AllCopy" || type == "Single") {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
             splitter->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
@@ -165,6 +166,7 @@ void dfw_save_image(const std::string& out_file, float* film, int fid, int frame
 
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
     statistics.start("run => work_thread => send");
+    printf("dfw save rays\n");
     dfw->node->save_outgoing_buffer(rays, size, isPrimary);
     statistics.end("run => work_thread => send");
 }
