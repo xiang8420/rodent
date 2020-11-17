@@ -60,7 +60,11 @@ public:
     
     bool is_local_chunk(int c); 
 
-    void chunk_loaded() { thread_reset(); load_new_chunk = false; }
+    void chunk_loaded() { 
+        thread_reset(); 
+        set_proc_busy(proc_rank); 
+        load_new_chunk = false; 
+    }
 
     bool has_new_chunk(){return load_new_chunk;}
 

@@ -19,18 +19,7 @@ struct AllCopyNode : public Node{
 
 AllCopyNode::AllCopyNode(struct Communicator *comm, struct ProcStatus *ps)
     :Node(comm, ps)
-{
-    printf("new AllCopyNode\n");
-    int chunk_size = ps->get_chunk_size();
-    assert(chunk_size == 1 && comm->get_size() == chunk_size); 
-    
-    comm->os<< "master chunk size"<<chunk_size<<"\n";
-  
-    comm->os<<"master set up\n";
-    printf("Memory %ld kb \n", physical_memory_used_by_process());
-    
-    st = clock();
-}
+{}
 
 AllCopyNode::~AllCopyNode() {
     printf("delete AllCopyNode\n");

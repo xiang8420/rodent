@@ -40,6 +40,7 @@ struct RayListManager {
     size_t inList_size() { return inList.size(); }
 
     bool outList_empty(ProcStatus *ps) {
+        std::lock_guard <std::mutex> lock(out_mutex); 
         if(stream) {
             for(int i = 0; i < chunk_size; i++)
                 if(!outStreamList[i].empty() && !ps->is_local_chunk(i)) 
@@ -67,11 +68,24 @@ struct RayListManager {
         }
     }
 
-    bool allList_empty(ProcStatus *ps) {return inList_empty() && outList_empty(ps);}
+    bool allList_empty() {
+        std::lock_guard <std::mutex> lock(out_mutex); 
+        if(stream) {
+            for(int i = 0; i < chunk_size; i++)
+                if(!outStreamList[i].empty()) 
+                    return false;
+        } else {
+            for(int i = 0; i < chunk_size; i++)
+                if(!outArrayList[i].empty()) 
+                    return false;
+        }
+        return inList_empty();
+    }
 
     size_t outList_size(int i) {
         if(stream)
-            return outStreamList[i].size();
+            return outStreamList[i].get_head_primary_size() 
+                 + outStreamList[i].get_head_secondary_size();
         else
             return outArrayList[i].size();
     }
@@ -151,6 +165,7 @@ struct RayListManager {
     }
     
     void copy_to_inlist(int current_chunk, int rank) {
+        std::unique_lock <std::mutex> lock(inList.mutex); 
         if(stream && outStreamList[current_chunk].size() > 0) {
             RayStreamList::swap(inList, outStreamList[current_chunk]); 
             outStreamList[current_chunk].clear(); 
@@ -181,8 +196,9 @@ protected:
     std::condition_variable render_start; //
 
     int msg_tag;
-    bool sync, stream;
 public: 
+    bool sync, stream;
+
     Node(Communicator *comm, ProcStatus *ps);
 
     ~Node();
@@ -291,12 +307,6 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
  
 //     //printf("%d rays_stream size %d %d %d\n", comm->get_rank(), rays_stream->size, primary, rays_stream->store_width);
-    int* ids = (int*)(*rays);
-    comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
-    for(int i = 0; i < std::min(5, copy_size); i ++) {
-        comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_stream_store_capacity() * 9];
-    }
-    comm->os<<"\n";
     delete rays_stream;
 
     statistics.end("run => work_thread => load_incoming_buffer-copy");

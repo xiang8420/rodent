@@ -285,6 +285,7 @@ fn @cpu_generate_rays( primary: PrimaryStream
 }
 
 fn @cpu_traverse_primary(scene: Scene, min_max: MinMax, primary: &PrimaryStream, single: bool, vector_width: i32) -> () {
+    if primary.size == 0 { return() }
     fn cpu_traverse_primary_specialized(primary: &PrimaryStream) -> () {
         cpu_traverse_hybrid(
             min_max,
@@ -699,42 +700,37 @@ fn @cpu_dis_trace( scene: Scene
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, true); 
              //           rodent_first_primary_check(-1, primary.size, 1, true);                
                     }
-                    if(primary.size < 0) {
-                        print_size("end rendering", primary.size, " ");  
-                        print_size(" ", out_primary.size, " ");  
-                        print_size(" ", secondary.size, " "); 
-                        print_size(" ", out_secondary.size, "\n");
-                        break()
-                    }
                 }
-                // Trace primary rays
-                with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {
-                    cpu_traverse_primary(scene, min_max, primary, single, vector_width);
-                }
-                // Sort hits by shader id, and filter invalid hits
-                primary.size = cpu_sort_primary_shader(primary, &mut ray_begins, &mut ray_ends, scene.num_geometries + 2, true);
-                // Perform (vectorized) shading
-                with cpu_profile(&mut shading_counter) {
-                    let mut begin = 0;
-                    for geom_id in unroll(0, scene.num_geometries + 1) {
-                        let end = ray_ends(geom_id);
-                        cpu_shade(geom_id, primary, secondary, scene, path_tracer, accumulate, begin, end, vector_width);
-                        begin = end;
+                if(primary.size < 0) { break()}
+                secondary.size = 0;
+                if primary.size > 0 { 
+                    // Trace primary rays
+                    //rodent_secondary_check(-1, secondary.size, out_secondary.size, 1, true); 
+                    with cpu_profile(if first { &mut primary_counter } else { &mut bounces_counter }) {
+                        cpu_traverse_primary(scene, min_max, primary, single, vector_width);
                     }
+                    // Sort hits by shader id, and filter invalid hits
+                    primary.size = cpu_sort_primary_shader(primary, &mut ray_begins, &mut ray_ends, scene.num_geometries + 2, true);
+                    // Perform (vectorized) shading
+                    with cpu_profile(&mut shading_counter) {
+                        let mut begin = 0;
+                        rodent_first_primary_check(-1, primary.size, 1, true);
+                        for geom_id in unroll(0, scene.num_geometries + 1) {
+                            let end = ray_ends(geom_id);
+                            cpu_shade(geom_id, primary, secondary, scene, path_tracer, accumulate, begin, end, vector_width);
+                            begin = end;
+                        }
+                    }
+                    // Filter terminated rays
+                    primary.size   = ray_ends(scene.num_geometries);
+                    primary.size   = cpu_compact_primary(primary, vector_width, vector_compact);
+                    // only when secondary size == 0 need recv, it should be compacted? no compact 
+                    secondary.size = ray_ends(scene.num_geometries - 1);
+                    secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
                 }
                 // Filter terminated rays
-                primary.size   = ray_ends(scene.num_geometries);
-                primary.size   = cpu_compact_primary(primary, vector_width, false /*vector_compact*/);
-            //    check_secondary_chunk_id(secondary, scene.chunk, 1);
-                // only when secondary size == 0 need recv, it should be compacted? no compact 
-                secondary.size = ray_ends(scene.num_geometries - 1);
-                secondary.size = cpu_compact_secondary(secondary, vector_width, vector_compact);
-                
                 with cpu_profile(&mut transfer_counter) {
                     if primary.size ==0 && secondary.size == 0 && id == num_rays {
-                        print_size("chunk ", scene.chunk_id, "\n");
-                        print_size("save out going buffer ", out_secondary.size, "\n");
-                        print_size("secondary ", secondary.size, "\n");
                         if(out_primary.size > 0) {
                             rodent_worker_primary_send(-1, out_primary.size);
                             out_primary.size = 0;

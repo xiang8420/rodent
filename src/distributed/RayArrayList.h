@@ -180,7 +180,7 @@ void RaysArray::read_device_buffer(float *rays, int src, int num, int rank) {
 }
 
 void RaysArray::read_from_ptr(char *src_ptr, int copy_size) {
-    if(check_capacity(copy_size)==0) return;
+    if(copy_size == 0 || check_capacity(copy_size)==0) return;
 
     char* dst_ptr = (char*)get_data() + size * store_width * sizeof(float);
     int copy_length = copy_size * store_width * sizeof(float);
@@ -240,8 +240,8 @@ void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_bu
     int tmp = chunkIds[9] >> 12;
     printf("read from divice buffer %ld\n", size);
     for(int i = 0; i < chunk_size; i++) { 
-        if(raylist[i].primary.check_capacity(size) == 0) return;
-        if(raylist[i].secondary.check_capacity(size) == 0) return;
+        if(primary && raylist[i].primary.check_capacity(size) == 0) return;
+        if(!primary && raylist[i].secondary.check_capacity(size) == 0) return;
     }
 
 

@@ -21,6 +21,7 @@ int  recv_rays(float **, size_t, bool, int, bool);
 void master_save_ray_batches(float*, size_t, size_t, size_t);
 
 int dfw_thread_num();
+int dfw_mpi_rank();
 int dfw_stream_logic_capacity(); 
 int dfw_stream_store_capacity();
 int dfw_out_stream_capacity();
@@ -382,36 +383,9 @@ struct Interface {
    
     void unload_chunk_data(int32_t dev) {
         printf("unload bvh\n");
-        /*bvh 8 tri 4*/
-        {
-            auto iter = devices[dev].bvh8_tri4.begin();
-            while(iter != devices[dev].bvh8_tri4.end()) {
-               iter->second.nodes = std::move(anydsl::Array<Node8>(dev, reinterpret_cast<Node8*>(anydsl_alloc(dev, 0)), 0));
-               iter->second.tris  = std::move(anydsl::Array<Tri4>(dev, reinterpret_cast<Tri4*>(anydsl_alloc(dev, 0)), 0));
-               iter++;     
-            }
-            devices[dev].bvh4_tri4.clear();
-        }
-        {
-            auto iter = devices[dev].bvh4_tri4.begin();
-            while(iter != devices[dev].bvh4_tri4.end()) {
-               iter->second.nodes = std::move(anydsl::Array<Node4>(dev, reinterpret_cast<Node4*>(anydsl_alloc(dev, 0)), 0));
-               iter->second.tris  = std::move(anydsl::Array<Tri4>(dev, reinterpret_cast<Tri4*>(anydsl_alloc(dev, 0)), 0));
-               iter++;     
-            }
-            devices[dev].bvh4_tri4.clear();
-        }
-        {
-            auto iter = devices[dev].bvh2_tri1.begin();
-            while(iter != devices[dev].bvh2_tri1.end()) {
-               iter->second.nodes = std::move(anydsl::Array<Node2>(dev, reinterpret_cast<Node2*>(anydsl_alloc(dev, 0)), 0));
-               iter->second.tris  = std::move(anydsl::Array<Tri1>(dev, reinterpret_cast<Tri1*>(anydsl_alloc(dev, 0)), 0));
-               iter++;     
-            }
-            devices[dev].bvh2_tri1.clear();
-        }
-        //normal, face normal, trangles
-        //std::unordered_map<std::string, anydsl::Array<uint8_t>> buffers;
+        devices[dev].bvh4_tri4.clear();
+        devices[dev].bvh4_tri4.clear();
+        devices[dev].bvh2_tri1.clear();
     }
 
 
@@ -862,7 +836,7 @@ void rodent_cpu_intersect_secondary_embree(SecondaryStream* secondary) {
 //debug
 void rodent_secondary_check(int32_t dev, int primary_size, int buffer_size, int32_t print_mark, bool is_first_primary) {
     SecondaryStream secondary;
-    printf("\n%d rthread secondary size  %d\n", print_mark, primary_size);
+    printf("\n rank %d |%d rthread secondary size  %d\n", dfw_mpi_rank(), print_mark, primary_size);
     if (dev == -1) {
         auto& array = interface->cpu_secondary;
         get_secondary_stream(secondary, array.data(), array.size() / 14);
@@ -887,7 +861,7 @@ void rodent_secondary_check(int32_t dev, int primary_size, int buffer_size, int3
 
 void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mark, bool is_first_primary) {
     PrimaryStream primary;
-    printf("%d rthread primary size %d\n", print_mark, primary_size);
+    printf("rank %d %d rthread primary size %d\n", dfw_mpi_rank(), print_mark, primary_size);
     if (dev == -1) {
         auto& array = interface->cpu_primary;
         get_primary_stream(primary, array.data(), array.size() / 21);

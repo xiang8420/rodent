@@ -105,7 +105,7 @@ struct DistributedFrameWork {
             splitter->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
         } else {
             int block_count = comm->get_size();
-            splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace);
+            splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace, node->sync);
         }
         splitter->write_chunk_proc(ps->get_chunk_proc());
         ps->updata_local_chunk();
@@ -194,4 +194,7 @@ int32_t dfw_thread_num() {
     return dfw->ps->get_thread_num(); 
 }
 
+int32_t dfw_mpi_rank() {
+    return dfw->comm->get_rank();
+}
 

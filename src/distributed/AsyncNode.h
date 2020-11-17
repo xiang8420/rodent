@@ -56,7 +56,7 @@ void AsyncNode::send_message() {
     //comm->os<<"mthread status inlist size "<<inList.primary_size()<<" "<<inList.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
     //comm->os<<"all thread waitting "<<ps->all_thread_waiting() <<"inList size"<<inList.size()<<"\n";
     if (ps->all_thread_waiting() && rlm->inList_empty()) {
-        if(rlm->allList_empty(ps) ) {
+        if(rlm->allList_empty() ) {
             ps->set_proc_idle(comm->get_rank());
             if(ps->all_proc_idle() && ps->all_rays_received()) {
                 QuitMsg quit_msg(comm->get_rank(), get_tag()); 
@@ -81,10 +81,10 @@ void AsyncNode::send_message() {
     } else {
         ps->set_proc_busy(comm->get_rank());
     }
-    
-    if (!rlm->outList_empty(ps)) {
-        comm->os<<"mthread outlist empty"<<rlm->outList_empty(ps)<<"\n";
-        int cId = get_sent_list();
+
+    int cId = get_sent_list();
+    if (cId >= 0) {
+        comm->os<<"mthread outlist empty "<<cId<<" "<<rlm->outList_size(cId)<<"\n";
         if(cId >= 0) {
             int dst_proc = ps->get_proc(cId);
             comm->os<<"chunk "<<cId<<" get proc "<<dst_proc<<"\n";
@@ -118,10 +118,12 @@ void AsyncNode::message_thread(void* tmp) {
 
         statistics.start("run => message_thread => recv_message");
 
+        std::unique_lock <std::mutex> lock(wk->rlm->out_mutex); 
         if(!recv && ps->is_proc_idle() && !ps->Exit())
             recv = comm->recv_message(ps, true);
         else
             recv = comm->recv_message(ps, false);
+        lock.unlock();
         
         statistics.end("run => message_thread => recv_message");
          
@@ -165,7 +167,7 @@ void AsyncNode::message_thread(void* tmp) {
         statistics.end("run => message_thread => loop");
 	}
     comm->os <<" end message thread"<<ps->all_thread_waiting()<<"\n";
-    comm->os <<" inlist "<< wk->inList.size()
+    comm->os <<" inlist "<< wk->rlm->inList_size()
              <<" recv "<<ps->global_rays[comm->get_rank() + comm->get_size()]
              <<std::endl;
     wk->inList_not_empty.notify_all();
@@ -186,7 +188,8 @@ void AsyncNode::run(ImageDecomposition * camera) {
         //load new chunk;
         int current_chunk = ps->get_current_chunk();
         comm->os<<"mthread copy new chunk " << current_chunk << "\n";
-       rlm->copy_to_inlist(current_chunk, comm->get_rank());
+        rlm->copy_to_inlist(current_chunk, comm->get_rank());
+        
         ps->chunk_loaded();
 
         comm->os<<comm->get_rank()<<" before set render start"<<"\n";

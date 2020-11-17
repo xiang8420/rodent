@@ -135,6 +135,7 @@ struct Camera {
     float w, h;
     float w_sin, h_sin;
     int width, height, spp;
+    int iter;
 
     Camera(float3 e, float3 d, float3 u, float fov, int width, int height) 
         : width(width), height(height)
@@ -150,6 +151,7 @@ struct Camera {
         
         w_sin = std::sin(fov * PI / 360.0f);
         h_sin = w_sin / ratio;
+        iter = 0;
     }
 
     void rotate(float yaw, float pitch) {
@@ -293,7 +295,7 @@ struct ImageDecomposition {
         chunk_proc[i * 2] = -1;
     }
 
-    void image_domain_decomposition(Camera *cam, int block, int proc_rank, int proc_size, bool simple_mesh) {
+    void image_domain_decomposition(Camera *cam, int block, int proc_rank, int proc_size, bool simple_mesh, bool sync) {
         camera = cam;
         ImageBlock image(width, height);
         block_count = block;
@@ -376,7 +378,10 @@ struct ImageDecomposition {
             }
             int proc = 0;
             for(auto& iter :unloaded_chunk) {
-                chunk_map.push_back(std::make_pair(iter, proc));
+                if(sync)
+                    chunk_map.push_back(std::make_pair(iter, -1));
+                else 
+                    chunk_map.push_back(std::make_pair(iter, proc % proc_size));
                 proc++;
             } 
         }

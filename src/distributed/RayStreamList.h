@@ -97,6 +97,9 @@ public:
 
     int primary_size(){ return primary.size();}    
     int secondary_size(){ return secondary.size();}    
+    
+    int get_head_primary_size() { return primary.size() > 0 ? primary.front()->get_size() : 0; }
+    int get_head_secondary_size() { return secondary.size() > 0 ? secondary.front()->get_size() : 0; }
     bool empty() { return primary.empty() && secondary.empty(); } 
     int size() { return primary.size() + secondary.size(); }
     void lock() { mutex.lock();}
