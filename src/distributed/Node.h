@@ -147,7 +147,7 @@ struct RayListManager {
                 printf("outstreamlist size %d p %d s %d\n", i, outStreamList[i].primary_size(), outStreamList[i].secondary_size());
         } else {
             int width = primary?21:14; 
-            RayArrayList::read_from_device_buffer(outArrayList, rays, size, primary, rank, chunk_size);
+            RayArrayList::read_from_device_buffer(outArrayList, rays, size, primary, chunk_size);
         }
         printf("save rays %d \n", size);
         
@@ -197,6 +197,7 @@ protected:
 
     int msg_tag;
 public: 
+    int max_used_mem, pre_mem;
     bool sync, stream;
 
     Node(Communicator *comm, ProcStatus *ps);
@@ -228,11 +229,14 @@ Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
     rlm = new RayListManager(stream,  chunk_size, logic_capacity, store_capacity);
 
     msg_tag = 0;
+    pre_mem = 0;
     sync = false;
     
     comm->outStreamList = rlm->get_outStreamList();
     comm->outArrayList = rlm->get_outArrayList();
     comm->inList = &(rlm -> get_inList());
+
+    max_used_mem = 0;
 }
 
 int Node::get_tag(){
@@ -272,7 +276,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
         while (inList.empty() && !ps->Exit() && !ps->has_new_chunk()) {
             comm->os<<"rthread wait for incoming lock"<<ps->is_thread_idle(thread_id)<<"\n";
             printf("rthread wait for incoming lock\n");
-            inList_not_empty.wait(lock);
+            inList.cond_full.wait(lock);
             comm->os<<"rthread get condition  "<<ps->Exit()<<"\n";
             printf("rthread get condition\n");
         }
@@ -287,13 +291,15 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
 
     struct RaysStream *rays_stream;
     if(primary && inList.primary_size() > 0) {
+        if(inList.secondary_size() > inList.primary_size())
+            return rays_size;
         rays_stream = inList.get_primary();
     } else if (!primary && inList.secondary_size() > 0) {
         rays_stream = inList.get_secondary();
     } else {
         return rays_size;
     }
-
+    inList.empty_notify(); //tell mthread inlist size changed 
     lock.unlock();
 
     statistics.start("run => work_thread => load_incoming_buffer-copy");
@@ -358,8 +364,12 @@ void Node::work_thread(void* tmp, ImageDecomposition * splitter, int devId, int 
 
 void Node::loop_check(float i) {
     if(1) {    
-        //comm->os<<"mark "<<i<<"\n"; 
-        comm->os<<i<<" memory use "<<physical_memory_used_by_process()<<"\n"; 
+        int mem = physical_memory_used_by_process();
+        if(/*i> 1000 ||*/mem != pre_mem) {
+            comm->os<<i<<" memory use "<<mem<<"\n"; 
+            max_used_mem = std::max(mem, max_used_mem);
+            pre_mem = mem;
+        }
         //printf("%d mark %f\n", comm->get_rank(), i);
     }
 }

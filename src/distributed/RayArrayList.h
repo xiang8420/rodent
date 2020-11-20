@@ -24,7 +24,7 @@ public:
 
     void resize(int capacity, int width); 
 
-    void read_device_buffer(float *rays, int src, int num, int rank);
+    void read_device_buffer(float *rays, int src, int num);
     
     void read_from_ptr(char *src_ptr, int copy_size);
     
@@ -39,7 +39,6 @@ public:
     int get_capacity() {return capacity;}
     int get_store_width(){return store_width;}
     int get_logic_width(){return logic_width;}
-
 private:
     
     //size capacity are ray size,
@@ -52,7 +51,7 @@ private:
 class RayArrayList {
 
 public:
-    RayArrayList(const RayArrayList& ); 
+    RayArrayList(const RayArrayList&, int); 
 
     RayArrayList();
 
@@ -62,7 +61,7 @@ public:
 
     //void read_from_message(char* , int, int);
     
-    static void read_from_device_buffer(RayArrayList * , float *, size_t , bool , int , int);
+    static void read_from_device_buffer(RayArrayList * , float *, size_t , bool , int);
     
     static void read_from_message(RayArrayList *, char*, int, int);
 
@@ -80,7 +79,7 @@ public:
 private:
     struct RaysArray primary;
     struct RaysArray secondary;
-    std::mutex mutex;
+    int rank;
 };
 
 //Only works for primary
@@ -148,11 +147,6 @@ int RaysArray::check_capacity(int num) {
             printf("\n");
         }
         delete[] data;
-   //     ids = (int*)(new_data);
-   //     for(int i = 0; i < 5; i ++) {
-   //         printf(" %d %d$", ids[i*store_width], ids[i*store_width + 9]);
-   //     }
-   //     printf("\n");
         data = new_data;
 
         //statistics.end("run => message_thread => check_capacity");
@@ -163,8 +157,7 @@ int RaysArray::check_capacity(int num) {
     return capacity;
 }
 
-void RaysArray::read_device_buffer(float *rays, int src, int num, int rank) {
-//    printf("read device buffer %d, ray capacity %d num %d\n", rank, num);
+void RaysArray::read_device_buffer(float *rays, int src, int num) {
     int* iptr = (int *) data;
     for(int i = 0; i < num; i++) {
         int k = 0;
@@ -216,10 +209,11 @@ void RayArrayList::clear() {
     secondary.clear(); 
 }
 
-RayArrayList::RayArrayList(const RayArrayList& a) {
+RayArrayList::RayArrayList(const RayArrayList& a, int r) {
     //printf("cant copy construct\n");
     primary.resize(0, 21);
     secondary.resize(0, 14);
+    rank = r;
 }
 
 RayArrayList::RayArrayList() {
@@ -232,10 +226,11 @@ void RayArrayList::set_capacity() {
     secondary.resize(0, 14);
 }
 
-void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_buffer,  size_t size, bool primary, int rank, int chunk_size) {
+void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_buffer,  size_t size, bool primary, int chunk_size) {
     int width       = primary ? 21 : 14;
     int* chunkIds   = (int*)(out_buffer);
 
+    std::lock_guard <std::mutex> lock(raylist[0].mutex); 
     int st = 0, num = 0; 
     int tmp = chunkIds[9] >> 12;
     printf("read from divice buffer %ld\n", size);
@@ -252,7 +247,7 @@ void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_bu
         } else {
             RaysArray &ray = primary ? raylist[tmp].primary : raylist[tmp].secondary;
             //printf("before list read st %d num %d capacity %d dst chunk %d rank %d\n", st, num, capacity, tmp, rank);
-            ray.read_device_buffer(out_buffer, st, num, rank);
+            ray.read_device_buffer(out_buffer, st, num);
             //printf("after list read st %d num %d capacity %d dst chunk %d rank %d ray size %d ray width %d\n", st, num, capacity, tmp, rank, ray.get_size(), ray.get_store_width());
             tmp = chunk;
             st = i; 
@@ -260,8 +255,7 @@ void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_bu
         }
     }
     RaysArray &ray = primary ? raylist[tmp].primary : raylist[tmp].secondary;
-    ray.read_device_buffer(out_buffer, st, num, rank); 
-    
+    ray.read_device_buffer(out_buffer, st, num); 
 }
 
 void RayArrayList::read_from_message(RayArrayList* rayList, char* ptr, int msg_primary_size, int msg_secondary_size) {

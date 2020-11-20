@@ -3,6 +3,8 @@
 
 #include<queue>
 
+#define MAX_STREAM_LIST 32 
+
 struct RaysStream {
     
     float * data;
@@ -79,6 +81,8 @@ struct RaysStream {
 class RayStreamList {
 public:
     std::mutex mutex;
+    std::condition_variable cond_empty; 
+    std::condition_variable cond_full; 
 
     RayStreamList(){}
     
@@ -90,22 +94,24 @@ public:
     RaysStream* get_primary();
 
     RaysStream* get_secondary(); 
-   
      
     void read_from_array_message(char*, int, int, int); 
     void read_from_stream_message(char*, int, int, int); 
-
     int primary_size(){ return primary.size();}    
     int secondary_size(){ return secondary.size();}    
     
     int get_head_primary_size() { return primary.size() > 0 ? primary.front()->get_size() : 0; }
     int get_head_secondary_size() { return secondary.size() > 0 ? secondary.front()->get_size() : 0; }
-    bool empty() { return primary.empty() && secondary.empty(); } 
     int size() { return primary.size() + secondary.size(); }
-    void lock() { mutex.lock();}
-    void unlock() { mutex.unlock();}
     int get_logic_capacity() {return logic_capacity; }
     int get_store_capacity() {return store_capacity; }
+    
+    bool empty() { return primary.empty() && secondary.empty(); } 
+    bool full() { return primary.size() + secondary.size() > MAX_STREAM_LIST; }
+    void lock() { mutex.lock(); }
+    void unlock() { mutex.unlock(); }
+    void full_notify() { cond_full.notify_all(); }
+    void empty_notify() { cond_empty.notify_all(); }
 
     void clear();
     void read_from_ptr(float*, int, int, bool, int); 
@@ -356,7 +362,7 @@ void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_
             num = 1; 
         }
     }
-////    printf("after save rays outlist size chunk size%d: ", chunk_size);
+//    printf("after save rays outlist size chunk size%d: ", chunk_size);
 //    for(int i = 0; i < chunk_size; i ++) {
 //        printf("chunk %d:\n", i);
 //        int rays_size = outList[i].primary_size();

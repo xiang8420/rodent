@@ -330,36 +330,35 @@ public:
                 content = new char[header->content_size];
                 memcpy(content, buffer+sizeof(*header), header->content_size);
             } else {
-                if(header->type == MsgType::ArrayRay) {
-                    if(header->chunk != local_chunk) {
-                        if(header->chunk < 0) 
-                            error("header chunk < 0 ", header->chunk);
+                int cur_chk = header->chunk;
+                if(cur_chk != local_chunk) {
+                    if(header->type == MsgType::ArrayRay) {
+                        if(cur_chk < 0) 
+                            error("header chunk < 0 ", cur_chk);
                         
-                        outArray[header->chunk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
+                        std::unique_lock <std::mutex> lock(outArray[0].mutex); 
+                        outArray[cur_chk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
                         char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * 21 * sizeof(float); 
-                        outArray[header->chunk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
+                        outArray[cur_chk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
                     } else {
-                        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
-                        inList->lock();
-                        inList->read_from_array_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
-                        inList->unlock();
-                        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
+                        std::unique_lock <std::mutex> lock(outStream[0].mutex); 
+                        outStream[cur_chk].read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
                     }
                 } else {
-                    if(header->chunk != local_chunk) {
-
-                        outStream[header->chunk].read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
-                    } else {
-                        os<<"recv ray stream normal rays "<< header->sender <<" "<<get_ray_size()<<"\n";
-                        os<<"inList size "<< inList->size()<<"\n";
-                        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
-                        inList->lock();
-                        inList->read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
-                        inList->unlock();
-                        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
-                        os<<"inList size "<< inList->size()<<"\n";
-                    }
+                    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
                     
+                    std::unique_lock <std::mutex> lock(inList->mutex); 
+                    while (inList->full()) {
+                        inList->cond_empty.wait(lock);
+                    }
+                    if(header->type == MsgType::ArrayRay) {
+                        inList->read_from_array_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
+                    } else {
+                        inList->read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
+                    }
+                    os<<"inList size "<< inList->size()<<"\n";
+                    lock.unlock();
+                    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
                 }
             }
             free(buffer);

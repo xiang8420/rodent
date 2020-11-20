@@ -198,3 +198,6 @@ int32_t dfw_mpi_rank() {
     return dfw->comm->get_rank();
 }
 
+void dfw_print_memory(int i) {
+    return dfw->node->loop_check(i);
+}

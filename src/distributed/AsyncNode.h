@@ -62,7 +62,7 @@ void AsyncNode::send_message() {
                 QuitMsg quit_msg(comm->get_rank(), get_tag()); 
                 comm->send_message(&quit_msg, ps);
                 ps->set_exit();
-                inList_not_empty.notify_all();
+                rlm->inList.cond_full.notify_all();
                 return;
             } else {
                 StatusMsg status(comm->get_rank(), comm->get_master(), ps->get_status(), ps->get_current_chunk(), comm->get_size(), get_tag()); 
@@ -73,7 +73,7 @@ void AsyncNode::send_message() {
             int chunk_size = ps->get_chunk_size();
             ps->switch_current_chunk();
             int current_chunk = ps->get_current_chunk();
-            inList_not_empty.notify_all();
+            rlm->inList.cond_full.notify_all();
             return;
         } else {
             comm->os<<"still has rays to send\n";
@@ -118,12 +118,12 @@ void AsyncNode::message_thread(void* tmp) {
 
         statistics.start("run => message_thread => recv_message");
 
-        std::unique_lock <std::mutex> lock(wk->rlm->out_mutex); 
+        //std::unique_lock <std::mutex> lock(wk->rlm->out_mutex); 
         if(!recv && ps->is_proc_idle() && !ps->Exit())
             recv = comm->recv_message(ps, true);
         else
             recv = comm->recv_message(ps, false);
-        lock.unlock();
+        //lock.unlock();
         
         statistics.end("run => message_thread => recv_message");
          
@@ -135,7 +135,7 @@ void AsyncNode::message_thread(void* tmp) {
         statistics.start("run => message_thread => inlist not empty");
         
         if(!wk->rlm->inList_empty()) 
-            wk->inList_not_empty.notify_one();
+            wk->rlm->inList.cond_full.notify_one();
 
         statistics.end("run => message_thread => inlist not empty");
         wk->loop_check(3);
@@ -170,7 +170,7 @@ void AsyncNode::message_thread(void* tmp) {
     comm->os <<" inlist "<< wk->rlm->inList_size()
              <<" recv "<<ps->global_rays[comm->get_rank() + comm->get_size()]
              <<std::endl;
-    wk->inList_not_empty.notify_all();
+    wk->rlm->inList.cond_full.notify_all();
     statistics.end("run => message_thread");
     return;
 } 

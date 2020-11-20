@@ -19,9 +19,6 @@ private:
     std::vector<int> local_chunks;
     int chunk_size, current_chunk;
 
-    //decomposition
-    std::mutex mutex;
-   
     int stream_logic_capacity, stream_store_capacity;
     int out_stream_capacity; 
     bool exit, load_new_chunk;
@@ -68,10 +65,6 @@ public:
 
     bool has_new_chunk(){return load_new_chunk;}
 
-    void lock(){mutex.lock();}
-    
-    void unlock(){mutex.unlock();}
-    
     int* get_chunk_proc(){return &chunk_proc[0];}
     
     int get_chunk_size(){return chunk_size;}
