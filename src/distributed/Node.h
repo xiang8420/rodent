@@ -97,7 +97,7 @@ struct RayListManager {
     RayStreamList& get_inList() { return inList; }
 
     void sort_ray_array(float* rays, int size, bool primary){
-        int width = primary ? 21 : 14;
+        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
         std::vector<int> end;
         std::vector<int> begin;
 
@@ -107,7 +107,7 @@ struct RayListManager {
         }
         int * iptr = (int*) rays;
         for(int i = 0; i < size; i++) { 
-            int chunk = iptr[i * width + 9] >> 12;
+            int chunk = iptr[i * width + 9];
             end[chunk]++;
         }
         
@@ -123,7 +123,7 @@ struct RayListManager {
             int ed = end[i];
             int j = st;
             while ( j < ed) {
-                int cid = iptr[j * width + 9] >> 12; 
+                int cid = iptr[j * width + 9]; 
                 if (cid != i) {
                     int k = begin[cid]++;
                     swap_array(rays, k, j, width);                
@@ -146,7 +146,7 @@ struct RayListManager {
             for(int i = 0; i < chunk_size; i++) 
                 printf("outstreamlist size %d p %d s %d\n", i, outStreamList[i].primary_size(), outStreamList[i].secondary_size());
         } else {
-            int width = primary?21:14; 
+            int width = primary?PRIMARY_WIDTH : SECONDARY_WIDTH; 
             RayArrayList::read_from_device_buffer(outArrayList, rays, size, primary, chunk_size);
         }
         printf("save rays %d \n", size);

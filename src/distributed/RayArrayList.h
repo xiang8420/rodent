@@ -7,8 +7,6 @@
 #include <vector>
 #include <mutex>
 
-#define RAY_COMPACT false
-
 size_t physical_memory_used_by_process(); 
 
 //array of struct ray, used for storage primary or secondary depends on width 
@@ -44,13 +42,14 @@ private:
     //size capacity are ray size,
     int size, capacity; 
     int logic_width, store_width;
-    bool mask[30];
 
 };
 
 class RayArrayList {
 
 public:
+    std::mutex mutex;
+
     RayArrayList(const RayArrayList&, int); 
 
     RayArrayList();
@@ -82,28 +81,13 @@ private:
     int rank;
 };
 
-//Only works for primary
-inline int set_ray_mask(bool *mask, int width, bool compact) {
-     
-    for(int i = 0; i < width; i++ ) {
-        mask[i] = true;
-    }
-    if (compact && width == 21) {
-        for(int i = 10; i < 15; i++ ) {
-            mask[i] = false; 
-        }
-        return 16; 
-    } else {
-        return width; 
-    } 
-}
 
 void RaysArray::resize(int cap, int width) 
 {
     capacity = cap;
     
     logic_width = width;
-    store_width = set_ray_mask(mask, width, RAY_COMPACT);
+    store_width = width; 
     
     data = new float[capacity * store_width];
 
@@ -162,11 +146,8 @@ void RaysArray::read_device_buffer(float *rays, int src, int num) {
     for(int i = 0; i < num; i++) {
         int k = 0;
         for(int j = 0; j < logic_width; j++) {
-            if(mask[j]) {
-                //printf("| %d %d %d %d", rank, (size + i) * store_width + k, (src + i) * logic_width + j, data.size(), num);
-                data[(size + i) * store_width + k]  = rays[(src + i) * logic_width + j];
-                k++; 
-            }
+            data[(size + i) * store_width + k]  = rays[(src + i) * logic_width + j];
+            k++; 
         }
     }
     size += num;
@@ -211,28 +192,28 @@ void RayArrayList::clear() {
 
 RayArrayList::RayArrayList(const RayArrayList& a, int r) {
     //printf("cant copy construct\n");
-    primary.resize(0, 21);
-    secondary.resize(0, 14);
+    primary.resize(0, PRIMARY_WIDTH);
+    secondary.resize(0, SECONDARY_WIDTH);
     rank = r;
 }
 
 RayArrayList::RayArrayList() {
-    primary.resize(0, 21);
-    secondary.resize(0, 14);
+    primary.resize(0, PRIMARY_WIDTH);
+    secondary.resize(0, SECONDARY_WIDTH);
 }
 
 void RayArrayList::set_capacity() {
-    primary.resize(0, 21);
-    secondary.resize(0, 14);
+    primary.resize(0, PRIMARY_WIDTH);
+    secondary.resize(0, SECONDARY_WIDTH);
 }
 
 void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_buffer,  size_t size, bool primary, int chunk_size) {
-    int width       = primary ? 21 : 14;
+    int width       = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
     int* chunkIds   = (int*)(out_buffer);
 
     std::lock_guard <std::mutex> lock(raylist[0].mutex); 
     int st = 0, num = 0; 
-    int tmp = chunkIds[9] >> 12;
+    int tmp = chunkIds[9];
     printf("read from divice buffer %ld\n", size);
     for(int i = 0; i < chunk_size; i++) { 
         if(primary && raylist[i].primary.check_capacity(size) == 0) return;
@@ -241,7 +222,7 @@ void RayArrayList::read_from_device_buffer(RayArrayList * raylist, float *out_bu
 
 
     for(int i = 0; i < size; i++) {
-        int chunk = chunkIds[i * width + 9] >> 12;
+        int chunk = chunkIds[i * width + 9];
         if(chunk == tmp) {
             num ++;
         } else {
@@ -264,12 +245,12 @@ void RayArrayList::read_from_message(RayArrayList* rayList, char* ptr, int msg_p
     os<<"master read from message: all primary size "<<msg_primary_size<<" secondary "<<msg_secondary_size<<"\n"; 
     if(msg_primary_size > 0) {
         int* id_ptr = (int*) ptr;
-        int width = RAY_COMPACT ? 16 : 21;
+        int width = PRIMARY_WIDTH;
         int st = 0, ed = 0; 
-        int tmp = id_ptr[9] >> 12;
+        int tmp = id_ptr[9];
         while(ed < msg_primary_size - 1) {
             ed ++;
-            int chunk = id_ptr[ed * width + 9] >> 12;
+            int chunk = id_ptr[ed * width + 9];
             if( chunk != tmp || ed == msg_primary_size - 1) {
                 os<<"copy st "<<st<<" ed "<<ed<<" ed*width+9 "<<id_ptr[ed * width + 9]<<" chunk "<<chunk<<" tmp "<<tmp<<"\n"; 
                 rayList[tmp].get_primary().read_from_ptr((char*)ptr + st * width * sizeof(float), ed - st);
@@ -281,14 +262,14 @@ void RayArrayList::read_from_message(RayArrayList* rayList, char* ptr, int msg_p
     }
     os<<"secondary \n"; 
     if(msg_secondary_size > 0) {
-        int width = 14;// rayList[0].get_secondary().get_store_width();
+        int width = SECONDARY_WIDTH;// rayList[0].get_secondary().get_store_width();
         int* id_ptr = (int*) ptr;
         int st = 0, ed = 0; 
-        int tmp = id_ptr[9] >> 12;;
+        int tmp = id_ptr[9];
         os<<"msg_secondary_size "<< msg_secondary_size<<" :";
         while(ed < msg_secondary_size) {
             ed ++;
-            int chunk = id_ptr[ed * width + 9] >> 12;
+            int chunk = id_ptr[ed * width + 9];
             os <<id_ptr[ed * width + 9]<<" "<<chunk<<" ";
             if( chunk != tmp || ed == msg_secondary_size - 1) {
          //       os<<"copy st "<<st<<" ed "<<ed<<"chunk "<<chunk<<" tmp "<<tmp<<"\n"; 

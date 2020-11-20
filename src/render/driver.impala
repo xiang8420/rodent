@@ -59,7 +59,8 @@ struct RayStream {
 
 struct PrimaryStream {
     rays: RayStream,
-    chunk_id: &mut [i32],
+    pre_chk: &mut [i32],
+    org_chk: &mut [i32],
     geom_id: &mut [i32],
     prim_id: &mut [i32],
     t: &mut [f32],
@@ -76,7 +77,8 @@ struct PrimaryStream {
 
 struct SecondaryStream {
     rays: RayStream,
-    chunk_id: &mut [i32],
+    pre_chk: &mut [i32],
+    org_chk: &mut [i32],
     prim_id: &mut [i32],
     color_r: &mut [f32],
     color_g: &mut [f32],
@@ -117,13 +119,14 @@ fn @write_out_primary( primary: PrimaryStream
     out_buffer.fptr(dst_p  + 6) = primary.rays.dir_z(src);
     out_buffer.fptr(dst_p  + 7) = primary.rays.tmin(src);
     out_buffer.fptr(dst_p  + 8) = primary.rays.tmax(src);
-    out_buffer.iptr(dst_p  + 9) = primary.chunk_id(src);
-    out_buffer.uiptr(dst_p + 15) = primary.rnd(src);
-    out_buffer.fptr(dst_p  + 16) = primary.mis(src);
-    out_buffer.fptr(dst_p  + 17) = primary.contrib_r(src);
-    out_buffer.fptr(dst_p  + 18) = primary.contrib_g(src);
-    out_buffer.fptr(dst_p  + 19) = primary.contrib_b(src);
-    out_buffer.iptr(dst_p  + 20) = primary.depth(src);
+    out_buffer.iptr(dst_p  + 9) = primary.pre_chk(src);
+    out_buffer.iptr(dst_p  + 10) = primary.org_chk(src);
+    out_buffer.uiptr(dst_p + 16) = primary.rnd(src);
+    out_buffer.fptr(dst_p  + 17) = primary.mis(src);
+    out_buffer.fptr(dst_p  + 18) = primary.contrib_r(src);
+    out_buffer.fptr(dst_p  + 19) = primary.contrib_g(src);
+    out_buffer.fptr(dst_p  + 20) = primary.contrib_b(src);
+    out_buffer.iptr(dst_p  + 21) = primary.depth(src);
 }
 
 fn @write_out_secondary( secondary: SecondaryStream
@@ -141,11 +144,12 @@ fn @write_out_secondary( secondary: SecondaryStream
     out_buffer.fptr(dst * width + 6)  = secondary.rays.dir_z(src);
     out_buffer.fptr(dst * width + 7)  = secondary.rays.tmin(src);
     out_buffer.fptr(dst * width + 8)  = secondary.rays.tmax(src);
-    out_buffer.iptr(dst * width + 9)  = secondary.chunk_id(src);
-    out_buffer.iptr(dst * width + 10) = secondary.prim_id(src);
-    out_buffer.fptr(dst * width + 11) = secondary.color_r(src);
-    out_buffer.fptr(dst * width + 12) = secondary.color_g(src);
-    out_buffer.fptr(dst * width + 13) = secondary.color_b(src);
+    out_buffer.iptr(dst * width + 9)  = secondary.pre_chk(src);
+    out_buffer.iptr(dst * width + 10)  = secondary.org_chk(src);
+    out_buffer.iptr(dst * width + 11) = secondary.prim_id(src);
+    out_buffer.fptr(dst * width + 12) = secondary.color_r(src);
+    out_buffer.fptr(dst * width + 13) = secondary.color_g(src);
+    out_buffer.fptr(dst * width + 14) = secondary.color_b(src);
 }
 
 fn @copy_primary_ray( primary: PrimaryStream
@@ -163,7 +167,8 @@ fn @copy_primary_ray( primary: PrimaryStream
     other_primary.rays.dir_z(dst_id) = primary.rays.dir_z(src_id);
     other_primary.rays.tmin(dst_id)  = primary.rays.tmin(src_id);
     other_primary.rays.tmax(dst_id)  = primary.rays.tmax(src_id);
-    other_primary.chunk_id(dst_id)    = primary.chunk_id(src_id);
+    other_primary.pre_chk(dst_id)    = primary.pre_chk(src_id);
+    other_primary.org_chk(dst_id)    = primary.org_chk(src_id);
     if keep_hit {
         other_primary.geom_id(dst_id) = primary.geom_id(src_id);
         other_primary.prim_id(dst_id) = primary.prim_id(src_id);
@@ -194,7 +199,8 @@ fn @copy_secondary_ray( secondary: SecondaryStream
     other_secondary.rays.dir_z(dst_id) = secondary.rays.dir_z(src_id);
     other_secondary.rays.tmin(dst_id)  = secondary.rays.tmin(src_id);
     other_secondary.rays.tmax(dst_id)  = secondary.rays.tmax(src_id);
-    other_secondary.chunk_id(dst_id)    = secondary.chunk_id(src_id);
+    other_secondary.pre_chk(dst_id)    = secondary.pre_chk(src_id);
+    other_secondary.org_chk(dst_id)    = secondary.org_chk(src_id);
     other_secondary.prim_id(dst_id) = secondary.prim_id(src_id);
     other_secondary.color_r(dst_id)  = secondary.color_r(src_id);
     other_secondary.color_g(dst_id)  = secondary.color_g(src_id);
@@ -259,7 +265,7 @@ fn @make_secondary_stream_hit_writer(secondary: SecondaryStream, vector_width: i
         let k = i * vector_width + j;
         secondary.prim_id(k) = hit.prim_id;
         secondary.rays.tmin(k) = hit.distance;
-        secondary.chunk_id(k)   = hit.geom_id; 
+        secondary.pre_chk(k)   = hit.geom_id; 
     }
 }
 

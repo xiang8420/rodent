@@ -218,8 +218,8 @@ public:
         header->secondary = outList.secondary_size(); 
        
         // first element is size 
-        int primary_length = header->primary * (1 + 21 * outList.get_store_capacity()) * sizeof(float);
-        int secondary_length = header->secondary * (1 + 14 * outList.get_store_capacity()) * sizeof(float);
+        int primary_length = header->primary * (1 + PRIMARY_WIDTH * outList.get_store_capacity()) * sizeof(float);
+        int secondary_length = header->secondary * (1 + SECONDARY_WIDTH * outList.get_store_capacity()) * sizeof(float);
         content = new char[primary_length + secondary_length];
         header->content_size = primary_length + secondary_length; 
        
@@ -232,7 +232,7 @@ public:
             iptr[0] = primary->get_size();
             printf("primary size %d :", iptr[0]);
             ptr += sizeof(int);
-            int length = 21 * outList.get_store_capacity() * sizeof(float);
+            int length = PRIMARY_WIDTH * outList.get_store_capacity() * sizeof(float);
             memcpy(ptr, primary->get_data(), length);
             int * irayptr = (int*) primary->get_data();
             printf("size %d ", iptr[0]);
@@ -259,7 +259,7 @@ public:
             iptr[0] = secondary->get_size();
             printf("primary size %d :", iptr[0]);
             ptr += sizeof(int);
-            int length = 14 * outList.get_store_capacity() * sizeof(float);
+            int length = SECONDARY_WIDTH * outList.get_store_capacity() * sizeof(float);
             memcpy(ptr, secondary->get_data(), length);
             int * irayptr = (int*) secondary->get_data();
             if(iptr[0] > 6) {
@@ -338,7 +338,7 @@ public:
                         
                         std::unique_lock <std::mutex> lock(outArray[0].mutex); 
                         outArray[cur_chk].get_primary().read_from_ptr((char*)buffer+sizeof(MessageHeader), header->primary);
-                        char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * 21 * sizeof(float); 
+                        char* secondary_ptr = (char*)buffer + sizeof(MessageHeader) + header->primary * PRIMARY_WIDTH * sizeof(float); 
                         outArray[cur_chk].get_secondary().read_from_ptr(secondary_ptr, header->secondary);
                     } else {
                         std::unique_lock <std::mutex> lock(outStream[0].mutex); 

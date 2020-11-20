@@ -9,7 +9,7 @@ struct Scene {
     bvh:        Bvh,    
     bbox:       BBox,
     chunk:      Vec3,
-    chunk_id:   i32,
+    cur_chk:    i32,
     rough_trace: bool
 }
 

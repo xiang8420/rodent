@@ -216,7 +216,7 @@ fn @extract_chunk_id(n: i32) -> i32 {
     if n == -1000 {
         return( -1 )
     }
-    n >> 12 as i32
+    n as i32
 }
 
 fn @coordinate_chunk_id(chunk: Vec3, scale: Vec3_i32, math: Intrinsics) -> i32 {
@@ -240,15 +240,7 @@ fn @coordinate_compress(chunk: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsic
      || id.z < 0 || id.z >= scale.z {
         return( -1000 )
     } 
-    let chunk = ((id.x * scale.y + id.y) * scale.z) + id.z;
-    (chunk << 12) + (id.x << 8) + (id.y << 4) + id.z
-}
-
-fn @get_coordinate(n: i32) -> (Vec3_i32) {
-    let x = (n >> 8) & 0xF;
-    let y = (n >> 4) & 0xF;
-    let z = n & 0xF;   
-    make_vec3_i32(x, y, z)
+    ((id.x * scale.y + id.y) * scale.z) + id.z
 }
 
 fn @get_chunk_coordinate(chunk: i32, scale: Vec3_i32) -> (Vec3_i32) {

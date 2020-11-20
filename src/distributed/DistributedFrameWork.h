@@ -12,7 +12,7 @@ extern "C" {
 void rodent_present(int32_t dev);
 void rodent_unload_chunk_data(int32_t dev ); 
 }
-
+#include "../driver/common.h"
 #include "MemoryPool.h"
 #include "statistic.h"
 #include "ProcStatus.h"
@@ -24,9 +24,6 @@ void rodent_unload_chunk_data(int32_t dev );
 #include "SyncNode.h"
 #include "AllCopyNode.h"
 //#include "MasterWorker.h"
-
-#define PRIMARY_WIDTH 21
-#define SECONDARY_WIDTH 14
 
 #include "AsyncNode.h"
 
@@ -57,7 +54,7 @@ static void save_image(float *result, const std::string& out_file, size_t width,
 //
 
 struct DistributedFrameWork {
-    ImageDecomposition *splitter;
+    Scheduler *scheduler;
     Node *node;
     Communicator *comm;
     ProcStatus *ps;
@@ -67,7 +64,7 @@ struct DistributedFrameWork {
 
     DistributedFrameWork(std::string dis_type, int chunk, int dev, int width, int height, int spp):  type(dis_type) 
     {
-        splitter = new ImageDecomposition(width, height, spp);
+        scheduler = new Scheduler(width, height, spp);
         comm = new Communicator();
         rough_trace = false; //true || (comm->get_size() % 2 == 1 && comm->get_size() > 1);
         ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev, rough_trace);
@@ -102,14 +99,14 @@ struct DistributedFrameWork {
         std::cout<<"run type "<<type<<"\n";
         if( type == "AllCopy" || type == "Single") {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
-            splitter->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
+            scheduler->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
         } else {
             int block_count = comm->get_size();
-            splitter->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace, node->sync);
+            scheduler->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace, node->sync);
         }
-        splitter->write_chunk_proc(ps->get_chunk_proc());
+        scheduler->write_chunk_proc(ps->get_chunk_proc());
         ps->updata_local_chunk();
-        node->run(splitter);
+        node->run(scheduler);
         
         statistics.end("run");
         statistics.print(comm->os);

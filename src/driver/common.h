@@ -105,4 +105,7 @@ inline size_t physical_memory_used_by_process() {
     return result / 1024;
 }
 
+#define PRIMARY_WIDTH 22
+#define SECONDARY_WIDTH 15
+
 #endif // COMMON_H

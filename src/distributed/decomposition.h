@@ -174,7 +174,7 @@ struct Camera {
 };
 
 // Grid hierarchy for scheduling
-struct ImageDecomposition {
+struct Scheduler {
     float2 scale;
     
     int width, height, spp, proc_spp;
@@ -190,7 +190,7 @@ struct ImageDecomposition {
     Camera* camera;
     std::vector<std::pair<int, int>> chunk_map;
 
-    ImageDecomposition(){}
+    Scheduler(){}
 
     ImageBlock project_cube_to_image(Camera *camera, BBox box, int chunk, bool Record, ImageBlock image) {
         if(box.is_inside(camera->eye)) { 
@@ -425,7 +425,7 @@ struct ImageDecomposition {
         //write_project_result(width, height, domain.data()); 
     }
 
-    ImageDecomposition( int width, int height, int spp)
+    Scheduler( int width, int height, int spp)
             : width(width), height(height), spp(spp) 
     {
         

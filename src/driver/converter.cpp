@@ -1294,7 +1294,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        bbox:           make_bbox(make_vec3(" << bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f), (make_vec3(" 
                                                          << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
        << "        chunk:          make_vec3("<< chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f),\n"     
-       << "        chunk_id:       chunk, \n"
+       << "        cur_chk:        chunk, \n"
        << "        rough_trace:    settings.rough_trace\n"
        << "    }\n"
        << "}\n\n";

@@ -52,7 +52,6 @@ struct RaysStream {
                 for(int j = 0; j < copy_size; j++) 
                     data[j + i * store_capacity] = fptr[j * width + i];
             }
-            
         }
         //mask change to ray itself
         size = copy_size; 
@@ -173,22 +172,12 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
     while(copy_size > 0) {
         
         //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
-        RaysStream * rays   = new struct RaysStream((char*)ptr, logic_capacity, store_capacity, 21, copy_size, false);
+        RaysStream * rays   = new struct RaysStream((char*)ptr, logic_capacity, store_capacity, PRIMARY_WIDTH, copy_size, false);
         //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
         
-        int width = RAY_COMPACT ? 16 : 21; 
+        int width = PRIMARY_WIDTH; 
 
-        int * ids = (int*)ptr;
-        os<<"primary copy size "<<copy_size<<"\n"<<" ptr ray";
-        for(int i = 0; i < std::min(copy_size, 5); i ++) {
-            os<<"| "<< ids[i * width] <<" "<< ids[i * width + 9] << " ";
-        } os<<"\n ";
 
-        ids = (int*)(rays->get_data());
-        os<<"rays ray ";
-        for(int i = 0; i < std::min(copy_size, 5); i ++) {
-            os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
-        } os<<"\n";
 
 
         msg_primary_size -= copy_size; 
@@ -201,13 +190,13 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
     copy_size = std::min(logic_capacity, msg_secondary_size);
     while(copy_size > 0) {
         //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
-        RaysStream * rays   = new struct RaysStream((char*)ptr, logic_capacity, store_capacity, 14, copy_size, false);
+        RaysStream * rays   = new struct RaysStream((char*)ptr, logic_capacity, store_capacity, SECONDARY_WIDTH, copy_size, false);
         //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
 
         int * ids = (int*)ptr;
         os<<"secondary copy size "<<copy_size<<"\n"<<" ptr ray";
         for(int i = 0; i < std::min(copy_size, 5); i ++) {
-            os<<"| "<< ids[i * 14] <<" "<< ids[i * 14 + 9] << " ";
+            os<<"| "<< ids[i * SECONDARY_WIDTH] <<" "<< ids[i * SECONDARY_WIDTH + 9] << " ";
         } os<<"\n ";
 
         ids = (int*)(rays->get_data());
@@ -218,7 +207,7 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
  
 
         msg_secondary_size -= copy_size; 
-        int width = 14; 
+        int width = SECONDARY_WIDTH; 
         ptr += copy_size * width; 
         secondary.push(rays);
         
@@ -234,7 +223,7 @@ void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size
         printf("read from stream msg primary num %d\n", num);
         src_ptr += sizeof(int);
         if(num > 0) {
-            RaysStream * rays   = new struct RaysStream(src_ptr, logic_capacity, store_capacity, 21, num, true);
+            RaysStream * rays   = new struct RaysStream(src_ptr, logic_capacity, store_capacity, PRIMARY_WIDTH, num, true);
             printf("recv get new ray  %d : ", num);
            // int* iptr = (int*)rays->data;
            // if(num > 7)
@@ -242,7 +231,7 @@ void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size
            //     for(int i = 0; i < 5; i++) 
            //         printf("%d %d msg ", iptr[i], iptr[i + 9 * store_capacity]);
            // printf("\n");
-            src_ptr += store_capacity * 21 * sizeof(float); 
+            src_ptr += store_capacity * PRIMARY_WIDTH * sizeof(float); 
             primary.push(rays);
         }
     }
@@ -251,14 +240,14 @@ void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size
         printf("read from stream msg secondary num %d\n", num);
         src_ptr += sizeof(int);
         if(num > 0) {
-            RaysStream * rays   = new struct RaysStream(src_ptr, logic_capacity, store_capacity, 14, num, true);
+            RaysStream * rays   = new struct RaysStream(src_ptr, logic_capacity, store_capacity, SECONDARY_WIDTH, num, true);
             int* iptr = (int*)rays->data;
           //  if(num > 7)
           //      //for(int i = num-6; i < num; i++) 
           //      for(int i = 0; i < 5; i++) 
           //          printf("%d %d msg ", iptr[i], iptr[i + 9 * store_capacity]);
           //  printf("\n");
-            src_ptr += store_capacity * 14 * sizeof(float); 
+            src_ptr += store_capacity * SECONDARY_WIDTH * sizeof(float); 
             secondary.push(rays);
         }
     }
@@ -270,7 +259,7 @@ void RayStreamList::read_from_ptr(float* rays_ptr, int st, int rays_size, bool i
 //    os<<"read from message\n"; 
 
     int copy_size = std::min(logic_capacity, rays_size);
-    int width = isPrimary ? (RAY_COMPACT ? 16 : 21) : 14; 
+    int width = isPrimary ? PRIMARY_WIDTH : SECONDARY_WIDTH; 
 //    os<<"copy size "<<copy_size<<" logic capacity "<<logic_capacity<<" priamry ? "<<isPrimary<<" msg ray "<<rays_size<<"\n";
     float *ptr = (float*)rays_ptr;
     while(copy_size > 0) {
@@ -319,7 +308,7 @@ RaysStream* RayStreamList::get_free_stream(bool Primary) {
     if(!queue.empty() && !queue.back()->full()) {
         return queue.back();
     } else {
-        RaysStream* rays = new RaysStream(logic_capacity, store_capacity, Primary ? 21 : 14);
+        RaysStream* rays = new RaysStream(logic_capacity, store_capacity, Primary ? PRIMARY_WIDTH : SECONDARY_WIDTH);
         queue.push(rays);
         return rays;
     }
@@ -334,12 +323,12 @@ void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_
     
     printf("read from divice buffer %d \n", buffer_size); 
     
-    int width   = primary ? 21 : 14;
+    int width   = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
     int* iptr   = (int*)(out_buffer);
     int st = 0, num = 0; 
-    int tmp = iptr[9] >> 12;
+    int tmp = iptr[9];
     for(int i = 0; i < buffer_size; i++) {
-        int chunk = iptr[i * width + 9] >> 12;
+        int chunk = iptr[i * width + 9];
         if(chunk == tmp && i != buffer_size - 1) {
             num ++;
         } else {
