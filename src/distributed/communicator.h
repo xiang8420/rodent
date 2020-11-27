@@ -27,6 +27,8 @@ public:
     int get_master() {return master;}
 
     void reduce(float* film, float *reduce_buffer, int pixel_num);
+    
+    void reduce(int* send_buffer, int *reduce_buffer, int num);
 
     void all_gather_float(float *a, float *res, int size); 
 
@@ -87,6 +89,11 @@ void Communicator::all_gather_float(float *a, float *res, int size) {
 void Communicator::reduce(float* film, float *reduce_buffer, int pixel_num){
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
+}
+
+void Communicator::reduce(int* send_buffer, int *reduce_buffer, int num){
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Reduce(send_buffer, reduce_buffer, num, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
 }
 
 void Communicator::purge_completed_mpi_buffers() {

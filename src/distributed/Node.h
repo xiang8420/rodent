@@ -210,9 +210,9 @@ public:
 
     int load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait);
     
-    static void work_thread(void* tmp, ImageDecomposition * camera, int devId, int devNum, bool preprocess, bool shoot_rays);
+    static void work_thread(void* tmp, Scheduler * camera, int devId, int devNum, bool preprocess, bool shoot_rays);
 
-    virtual void run(ImageDecomposition * camera) = 0;
+    virtual void run(Scheduler * camera) = 0;
 
     void save_outgoing_buffer(float *, size_t, bool); 
     
@@ -320,7 +320,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
         
 }
 
-void Node::work_thread(void* tmp, ImageDecomposition * splitter, int devId, int devNum, bool preRendering, bool generate_rays) {
+void Node::work_thread(void* tmp, Scheduler * splitter, int devId, int devNum, bool preRendering, bool generate_rays) {
     printf("work threadstart\n");
 
     Node * wk = (Node*)tmp;

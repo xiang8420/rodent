@@ -105,7 +105,12 @@ inline size_t physical_memory_used_by_process() {
     return result / 1024;
 }
 
+#define MAX_CHUNK 3
+#define MAX_PROC  128
 #define PRIMARY_WIDTH 22
-#define SECONDARY_WIDTH 15
+#define SECONDARY_WIDTH 16
+#define LIGHT_FIELD_RES 128
+#define INTERSECT_FIELD_RES 128
+#define VIS_LIGHT_FIELD true
 
 #endif // COMMON_H

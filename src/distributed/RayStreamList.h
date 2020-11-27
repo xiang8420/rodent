@@ -45,7 +45,6 @@ struct RaysStream {
                 }
         } else {
             // mask used as ptr mask not this 
-            bool *ptr_mask = new bool[width];
             int  ptr_logic_width = width; 
             float* fptr = (float*)ptr;
             for(int i = 0; i < ptr_logic_width; i++) {

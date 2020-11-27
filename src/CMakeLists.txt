@@ -29,6 +29,7 @@ set(RODENT_SRCS
     core/sort.impala
     core/vector.impala
     core/file.impala
+    render/light_field.impala
     render/image.impala
     render/camera.impala
     render/geometry.impala

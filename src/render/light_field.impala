@@ -1,0 +1,111 @@
+fn @get_chunk_bbox(scene: Scene, math: Intrinsics) -> BBox {
+    let cur_chk = scene.cur_chk;
+    let chunk = make_vec3_i32( math.floorf(scene.chunk.x) as i32
+                             , math.floorf(scene.chunk.y) as i32
+                             , math.floorf(scene.chunk.z) as i32
+                             );
+    let coord_x = cur_chk / (chunk.y * chunk.z);
+    let coord_z = cur_chk % chunk.z;
+    let coord_y = (cur_chk - coord_x * chunk.y * chunk.z) / chunk.z; 
+    let coord   = make_vec3(coord_x as f32, coord_y as f32, coord_z as f32);
+
+    let bbox    = scene.bbox; 
+    let step    = vec3_div(vec3_sub(bbox.max, bbox.min), scene.chunk);
+    let min     = vec3_add(bbox.min, vec3_mul(step, coord));
+    let max     = vec3_add(min, step);
+ 
+    make_bbox(min, max)
+}
+
+fn @get_sign(a: f32) -> i32 {
+    if(a > 0 as f32) { 0 }
+    else { 1 }
+}
+
+fn @get_uv_coord(bbox: BBox, its: Vec3, res: i32, dir: Vec3, axit: i32, math: Intrinsics) -> (i32, i32, i32) {
+    fn @get_sign_code (a : f32, b: f32) -> i32 { 
+        get_sign(a) * 2 + get_sign(b) 
+    }
+    let mut u: f32;
+    let mut v: f32;
+    let mut sign: i32;
+    if axit == 0 { 
+        u = (its.y - bbox.min.y) / (bbox.max.y - bbox.min.y) * res as f32; 
+        v = (its.z - bbox.min.z) / (bbox.max.z - bbox.min.z) * res as f32;
+        sign = get_sign_code(dir.y, dir.z); 
+    } else if axit == 1 { 
+        u = (its.x - bbox.min.x) / (bbox.max.x - bbox.min.x) * res as f32; 
+        v = (its.z - bbox.min.z) / (bbox.max.z - bbox.min.z) * res as f32; 
+        sign = get_sign_code(dir.x, dir.z); 
+    } else { 
+        u = (its.x - bbox.min.x) / (bbox.max.x - bbox.min.x) * res as f32; 
+        v = (its.y - bbox.min.y) / (bbox.max.y - bbox.min.y) * res as f32; 
+        sign = get_sign_code(dir.x, dir.y);
+    }
+    (math.floorf(u) as i32, math.floorf(v) as i32, sign)
+}
+
+fn @get_face_id(bbox: BBox, its: Vec3) -> i32 {
+    if its.x < bbox.min.x + 0.001 as f32 { 0 as i32 }
+    else if its.x > bbox.max.x - 0.001 as f32 { 1 as i32 } 
+    else if its.y < bbox.min.y + 0.001 as f32 { 2 as i32 } 
+    else if its.y > bbox.max.y - 0.001 as f32 { 3 as i32 } 
+    else if its.z < bbox.min.z + 0.001 as f32 { 4 as i32 } 
+    else if its.z > bbox.max.z - 0.001 as f32 { 5 as i32 } 
+    else { -1 }
+}
+
+fn @get_light_field_coord(bbox: BBox, its: Vec3, dir: Vec3, res: i32, math: Intrinsics) -> i32 {
+    let fid = get_face_id(bbox, its);
+    let (u, v, sign) = get_uv_coord(bbox, its, res, dir, fid / 2, math);
+//    print_string(" fid ");
+//    print_i32(fid);
+//    print_string("u ");
+//    print_i32(u);
+//    print_string("v ");
+//    print_i32(v);
+//    print_string("\n");
+//    print_string("write coord ");
+//    print_i32(fid * res * res + u *res + v);
+    print_string("wsign ");
+    print_i32(sign);
+    let result = ( sign << 28 ) + ((fid * res * res + u *res + v) << 8);
+    print_string(" result ");
+    print_i32(result);
+    print_string(" in id ");
+    print_i32( (fid * res * res + u *res + v) << 8);
+    print_string(" sign ");
+    print_i32(result >> 28);
+    result
+}
+
+fn write_light_field(org_chk: i32, luminance: f32, cur_chk:i32, light_field: LightField) -> () {
+    if(luminance <= 0 as f32) { return() }
+//    print_string("read coord ");
+//    print_i32(org_chk);
+//    print_string(" ");
+//    print_f32(luminance);
+    let chk_id = org_chk & 0xFF;
+    let in_chk_id = (org_chk >> 8) & 0xFFFFF;
+    let sign = (org_chk >> 28) & 0xF;
+    let sign_bit = sign * 8;
+    let light_field_id = chk_id * light_field.chk_cap + in_chk_id;
+    let lu_i32 = (luminance * 255 as f32) as i32; 
+//    print_string(" chk id: ");
+//    print_i32(chk_id);
+//    print_string(" in id: ");
+//    print_i32(in_chk_id);
+//    print_string(" light_field_id: ");
+//    print_i32(light_field_id);
+
+    if((light_field.ctrb(light_field_id) >> sign_bit) & 0x80 == 1) {
+        let its_chk = (light_field.its(light_field_id) >> sign_bit) & 0x7F;
+        if(its_chk != cur_chk) {
+            light_field.its(light_field_id) = light_field.its(light_field_id) | (0xFF << sign_bit);
+        }
+    } else {
+        light_field.its(light_field_id) += ((cur_chk | 0x80) << sign_bit);
+    }
+    light_field.ctrb(light_field_id) += (lu_i32 << sign_bit);
+}
+                        

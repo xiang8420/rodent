@@ -13,7 +13,7 @@ struct AllCopyNode : public Node{
 
     static void message_thread(void* tmp);
     
-    void run(ImageDecomposition * camera);
+    void run(Scheduler * camera);
     
 };
 
@@ -30,7 +30,7 @@ void AllCopyNode::message_thread(void* tmp) {
     AllCopyNode *wk = (struct AllCopyNode*)tmp;
     Communicator * comm = wk->comm; 
     ProcStatus * ps = wk->ps;
-    ImageDecomposition * camera = ps->get_camera();
+    Scheduler * camera = ps->get_camera();
 
     printf("%d message thread\n", comm->get_rank());
     comm->os<<"message thread\n";
@@ -75,7 +75,7 @@ void AllCopyNode::message_thread(void* tmp) {
     return;
 } 
 
-void AllCopyNode::run(ImageDecomposition * camera) {
+void AllCopyNode::run(Scheduler * camera) {
    
     comm->os <<" start image decomposition  \n";
     //start rendering with origin tile

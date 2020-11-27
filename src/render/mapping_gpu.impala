@@ -71,7 +71,7 @@ fn @gpu_traverse_secondary(secondary: SecondaryStream, acc: Accelerator, intrins
             1 /*root*/
         );
         make_secondary_stream_hit_writer(secondary, 1)(gid, 0, hit); 
-        if hit.geom_id < 0 /* || secondary.pre_chk(gid) == scene.num_geometries*/ {
+        if hit.geom_id < 0 /* || secondary.next_chk(gid) == scene.num_geometries*/ {
             let color = make_color(
                 secondary.color_r(gid),
                 secondary.color_g(gid),
@@ -87,8 +87,8 @@ fn @gpu_shade(acc: Accelerator, atomics: Atomics, scene: Scene, path_tracer: Pat
     let block_w = 64;
     let chunk  = (round_up(n, block_w), 1, 1);
     let block = (block_w, 1, 1);
-    let pre_chks    = primary.pre_chk;
-    let write_chunk = @ |i, _, id| pre_chks(i) = id;
+    let next_chks    = primary.next_chk;
+    let write_chunk = @ |i, _, id| next_chks(i) = id;
     let write_primary_ray   = make_ray_stream_writer(primary.rays, 1);
 
     with work_item in acc.exec(chunk, block) {
@@ -217,11 +217,11 @@ fn @gpu_generate_rays( primary: PrimaryStream
     let film_div = make_fast_div(film_width as u32);
 
     let ray_ids     = primary.rays.id;
-    let pre_chks    = primary.pre_chk;
+    let next_chks    = primary.next_chk;
     let write_ray   = make_ray_stream_writer(primary.rays, 1);
     let write_state = make_primary_stream_state_writer(primary, 1);
     let write_id    = @ |i, _, id| ray_ids(i) = id;
-    let write_chunk = @ |i, _, gid| pre_chks(i) = gid;
+    let write_chunk = @ |i, _, gid| next_chks(i) = gid;
     
     with work_item in acc.exec((round_up(num_rays, block_w), 1, 1), (block_w, 1, 1)) {
         let gid = work_item.gidx();
@@ -348,8 +348,8 @@ fn @gpu_primary_chunk( primary: PrimaryStream
     let inv_step   = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
     let num_chunks  = chunk_scale.x * chunk_scale.y * chunk_scale.z;
 
-    let pre_chks    = primary.pre_chk;
-    let write_chunk  = @ |i, _, id| primary.pre_chk(i) = id;
+    let next_chks    = primary.next_chk;
+    let write_chunk  = @ |i, _, id| primary.next_chk(i) = id;
     let ray_reader  = make_ray_stream_reader(primary.rays, 1);
     let ray_ids     = primary.rays.id;
     let scene_chunk = scene.cur_chk;
@@ -365,7 +365,7 @@ fn @gpu_primary_chunk( primary: PrimaryStream
         }
         let ray = make_ray_stream_reader(primary.rays, 1)(src_id, 0);
         if ray_ids(src_id) != -1 {
-            if pre_chks(src_id) == 1022 {
+            if next_chks(src_id) == 1022 {
                 if inside_point_bbox(bbox, ray.org){
                     let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
                     write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, intrinsics));
@@ -406,7 +406,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
     if primary.size == 0 {return (0, buffer.size)}
     
     let block_w  = 64;
-    let pre_chks = primary.pre_chk;
+    let next_chks = primary.next_chk;
     let mut size : [i32 * 2]; 
     // primary size, buffer size, new buffer size
     size(0) = 0;
@@ -417,7 +417,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
         if src_id >= primary.size {
             break()
         }
-        let id = extract_chunk_id(pre_chks(src_id));
+        let id = extract_chunk_id(next_chks(src_id));
         if  id != chunk && id != -1 {
             atomics.add_global_i32(&mut gpu_tmp(0), 1);
         }
@@ -438,7 +438,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
             if src_id >= primary.size {
                 break()
             }
-            let id = extract_chunk_id(pre_chks(src_id));
+            let id = extract_chunk_id(next_chks(src_id));
             if id == chunk {
                 let dst_id  = atomics.add_global_i32(&mut gpu_tmp(0), 1);
                 copy_primary_ray(primary, other_primary, src_id, dst_id, false);
@@ -474,8 +474,8 @@ fn @gpu_secondary_chunk( secondary: SecondaryStream
     let inv_step   = vec3_div(make_vec3(1.0f, 1.0f, 1.0f), step);
     let num_chunks  = chunk_scale.x * chunk_scale.y * chunk_scale.z;
 
-    let pre_chks    = secondary.pre_chk;
-    let write_chunk  = @ |i, _, id| secondary.pre_chk(i) = id;
+    let next_chks    = secondary.next_chk;
+    let write_chunk  = @ |i, _, id| secondary.next_chk(i) = id;
     let ray_reader  = make_ray_stream_reader(secondary.rays, 1);
     let ray_ids     = secondary.rays.id;
     let scene_chunk    = scene.cur_chk;
@@ -490,7 +490,7 @@ fn @gpu_secondary_chunk( secondary: SecondaryStream
             break()
         }
         let ray = make_ray_stream_reader(secondary.rays, 1)(src_id, 0);
-        if secondary.pre_chk(src_id) == scene.num_geometries {
+        if secondary.next_chk(src_id) == scene.num_geometries {
             let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
             let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
             write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, intrinsics));
@@ -517,7 +517,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
     if secondary.size == 0 {return (0, buffer.size)}
     
     let block_w  = 64;
-    let pre_chks = secondary.pre_chk;
+    let next_chks = secondary.next_chk;
     let mut size : [i32 * 2]; 
     // secondary size, buffer size, new buffer size
     size(0) = 0;
@@ -528,7 +528,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
         if src_id >= secondary.size {
             break()
         }
-        let id = extract_chunk_id(pre_chks(src_id));
+        let id = extract_chunk_id(next_chks(src_id));
         if  id != chunk && id != -1 {
             atomics.add_global_i32(&mut gpu_tmp(0), 1);
         }
@@ -553,7 +553,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
             if src_id >= secondary.size {
                 break()
             }
-            let id = extract_chunk_id(pre_chks(src_id));
+            let id = extract_chunk_id(next_chks(src_id));
             if id != chunk && id != -1 {
                 let dst_id  = atomics.add_global_i32(&mut gpu_tmp(1), 1);
                 //copy_secondary_ray(secondary, buffer, src_id, dst_id);
@@ -878,7 +878,6 @@ fn @gpu_mega_kernel_trace(dev_id: i32, acc: Accelerator, intrinsics: Intrinsics,
 
 fn @gpu_ray_batching( dev_id: i32
                      , camera: Camera 
-                     , domain: Domain
                      , acc: Accelerator
                      , intrinsics: Intrinsics
                      , atomics: Atomics

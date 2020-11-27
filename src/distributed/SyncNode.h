@@ -21,7 +21,7 @@ struct SyncNode : public Node{
     
     static void message_thread(void* tmp);
     
-    void run(ImageDecomposition * camera);
+    void run(Scheduler * camera);
    
 };
 //每一轮光线全部给master然后 master发送调度消息给各个节点 各个节点读取新场景， 接受光线
@@ -188,7 +188,7 @@ void SyncNode::synchronize () {
     printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), rlm->inList_size());
 }
 
-void SyncNode::run(ImageDecomposition * camera) {
+void SyncNode::run(Scheduler * camera) {
     
     comm->os <<" start run message thread \n";
 

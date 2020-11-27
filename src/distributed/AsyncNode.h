@@ -11,7 +11,7 @@ struct AsyncNode : public Node {
 
     static void message_thread(void* tmp);
     
-    void run(ImageDecomposition * camera);
+    void run(Scheduler * camera);
 };
 
 AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -175,7 +175,7 @@ void AsyncNode::message_thread(void* tmp) {
     return;
 } 
 
-void AsyncNode::run(ImageDecomposition * camera) {
+void AsyncNode::run(Scheduler * camera) {
     
     comm->os <<" start run message thread \n";
 
@@ -184,7 +184,7 @@ void AsyncNode::run(ImageDecomposition * camera) {
     std::vector<std::thread> workThread;
    
     std::thread mthread(message_thread, this);
-    do { 
+    do {
         //load new chunk;
         int current_chunk = ps->get_current_chunk();
         comm->os<<"mthread copy new chunk " << current_chunk << "\n";

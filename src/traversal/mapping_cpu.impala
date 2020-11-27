@@ -225,8 +225,6 @@ fn @cpu_traverse_single_helper( mut ray: Ray
             let mut terminated = false;
             while true {
                 let prim = bvh.prim(prim_id++);
-               // print_string("prim is : ");
-               // print_i32(prim_id);
 
                 // Intersect primitives
                for j in vectorize(prim.size) {

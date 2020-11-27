@@ -3,7 +3,7 @@ struct SingleNode : public Node{
     
     ~SingleNode();
     
-    void run(ImageDecomposition * camera);
+    void run(Scheduler * camera);
 
 };
 
@@ -18,7 +18,7 @@ SingleNode::~SingleNode() {
     printf("delete SingleNode\n");
 }
 
-void SingleNode::run(ImageDecomposition * camera) {
+void SingleNode::run(Scheduler * camera) {
     
     comm->os <<" start run message thread \n";
     int deviceNum = ps->get_dev_num();

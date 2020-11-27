@@ -1,11 +1,11 @@
-#pragma once
+#ifndef DEF_PROC_STATUS
+#define DEF_PROC_STATUS
+
 #include "../driver/interface.h"
 #include <iostream>
 #include <thread>
 #include "decomposition.h"
 
-#define MAX_CHUNK 3
-#define MAX_PROC  128
 
 class ProcStatus {
 private:
@@ -19,15 +19,17 @@ private:
     std::vector<int> local_chunks;
     int chunk_size, current_chunk;
 
-    int stream_logic_capacity, stream_store_capacity;
+    //global capacity settings
+    int stream_logic_capacity;
+    int stream_store_capacity;
     int out_stream_capacity; 
+
     bool exit, load_new_chunk;
     int proc_size, proc_rank;
     std::vector<bool> proc_idle;
-
     bool rough_trace;
 public:    
-    ImageDecomposition *camera;   
+    Scheduler *camera;   
     std::vector<int>  global_rays;
     
     ~ProcStatus(); 
@@ -100,7 +102,7 @@ public:
     
     int get_dev_num() {return dev_num;}
     
-    ImageDecomposition* get_camera() { return camera; } 
+    Scheduler* get_camera() { return camera; } 
     
     void set_new_chunk(){load_new_chunk = true;}
     
@@ -120,7 +122,6 @@ public:
 ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool rough_trace) 
     : proc_rank(proc_rank), proc_size(proc_size), dev_num(dev), rough_trace(rough_trace)
 {
-    
     work_thread_num = 8;//std::thread::hardware_concurrency();
     thread_idle.resize(work_thread_num);
     thread_reset(); 
@@ -131,11 +132,10 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     chunk_size = rough_trace ? cSize + 1 : cSize;
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
     
-    stream_logic_capacity = 256 * 256;//1024 * 1024 / work_thread_num;
+    stream_logic_capacity = 256 * 256;
     stream_store_capacity = (stream_logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
     
     out_stream_capacity = 1024*1024;//stream_logic_capacity; 
-    
     global_rays.resize(proc_size * proc_size);
 }
 
@@ -149,7 +149,6 @@ void ProcStatus::reset() {
 ProcStatus::~ProcStatus() {
     proc_idle.clear();
     global_rays.clear();
-
     printf("procstatus delete\n");
 }
 
@@ -312,4 +311,4 @@ bool ProcStatus::update_chunk(int candidate_proc, int candidate_chunk) {
     } 
     return false;
 }
-
+#endif

@@ -28,13 +28,18 @@ extern "C" {
     fn rodent_secondary_check(i32, i32, i32, i32, bool) -> ();
     fn rodent_memory_check(i32) -> ();
 
+    fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
+    fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();
+
+    fn rodent_get_render_light_field(i32, &mut LightField) -> ();
+    fn rodent_cpu_get_record_light_field(&mut LightField) -> ();
+    fn rodent_save_light_field(i32) -> ();
+    
     fn rodent_cpu_thread_num() -> i32;
     fn rodent_stream_logic_capacity() -> i32;
     fn rodent_stream_store_capacity() -> i32;
     fn rodent_out_stream_capacity() -> i32;
-
-    fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
-    fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();
+    fn rodent_light_field_resolution() -> i32;
 
     fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
     fn rodent_worker_primary_send(i32, i32) -> ();    
@@ -59,7 +64,7 @@ struct RayStream {
 
 struct PrimaryStream {
     rays: RayStream,
-    pre_chk: &mut [i32],
+    next_chk: &mut [i32],
     org_chk: &mut [i32],
     geom_id: &mut [i32],
     prim_id: &mut [i32],
@@ -77,8 +82,9 @@ struct PrimaryStream {
 
 struct SecondaryStream {
     rays: RayStream,
-    pre_chk: &mut [i32],
+    next_chk: &mut [i32],
     org_chk: &mut [i32],
+    pri_chk: &mut [i32],
     prim_id: &mut [i32],
     color_r: &mut [f32],
     color_g: &mut [f32],
@@ -102,6 +108,13 @@ struct PreprocessRecord {
     chunk:  i32
 }
 
+struct LightField {
+    ctrb: &mut[i32],
+    its:  &mut[i32],
+    res:  i32,
+    chk_cap: i32
+}
+
 fn @write_out_primary( primary: PrimaryStream
                      , out_buffer: OutRayStream
                      , src: i32
@@ -119,7 +132,7 @@ fn @write_out_primary( primary: PrimaryStream
     out_buffer.fptr(dst_p  + 6) = primary.rays.dir_z(src);
     out_buffer.fptr(dst_p  + 7) = primary.rays.tmin(src);
     out_buffer.fptr(dst_p  + 8) = primary.rays.tmax(src);
-    out_buffer.iptr(dst_p  + 9) = primary.pre_chk(src);
+    out_buffer.iptr(dst_p  + 9) = primary.next_chk(src);
     out_buffer.iptr(dst_p  + 10) = primary.org_chk(src);
     out_buffer.uiptr(dst_p + 16) = primary.rnd(src);
     out_buffer.fptr(dst_p  + 17) = primary.mis(src);
@@ -144,12 +157,13 @@ fn @write_out_secondary( secondary: SecondaryStream
     out_buffer.fptr(dst * width + 6)  = secondary.rays.dir_z(src);
     out_buffer.fptr(dst * width + 7)  = secondary.rays.tmin(src);
     out_buffer.fptr(dst * width + 8)  = secondary.rays.tmax(src);
-    out_buffer.iptr(dst * width + 9)  = secondary.pre_chk(src);
+    out_buffer.iptr(dst * width + 9)  = secondary.next_chk(src);
     out_buffer.iptr(dst * width + 10)  = secondary.org_chk(src);
-    out_buffer.iptr(dst * width + 11) = secondary.prim_id(src);
-    out_buffer.fptr(dst * width + 12) = secondary.color_r(src);
-    out_buffer.fptr(dst * width + 13) = secondary.color_g(src);
-    out_buffer.fptr(dst * width + 14) = secondary.color_b(src);
+    out_buffer.iptr(dst * width + 11)  = secondary.pri_chk(src);
+    out_buffer.iptr(dst * width + 12) = secondary.prim_id(src);
+    out_buffer.fptr(dst * width + 13) = secondary.color_r(src);
+    out_buffer.fptr(dst * width + 14) = secondary.color_g(src);
+    out_buffer.fptr(dst * width + 15) = secondary.color_b(src);
 }
 
 fn @copy_primary_ray( primary: PrimaryStream
@@ -167,7 +181,7 @@ fn @copy_primary_ray( primary: PrimaryStream
     other_primary.rays.dir_z(dst_id) = primary.rays.dir_z(src_id);
     other_primary.rays.tmin(dst_id)  = primary.rays.tmin(src_id);
     other_primary.rays.tmax(dst_id)  = primary.rays.tmax(src_id);
-    other_primary.pre_chk(dst_id)    = primary.pre_chk(src_id);
+    other_primary.next_chk(dst_id)    = primary.next_chk(src_id);
     other_primary.org_chk(dst_id)    = primary.org_chk(src_id);
     if keep_hit {
         other_primary.geom_id(dst_id) = primary.geom_id(src_id);
@@ -199,8 +213,9 @@ fn @copy_secondary_ray( secondary: SecondaryStream
     other_secondary.rays.dir_z(dst_id) = secondary.rays.dir_z(src_id);
     other_secondary.rays.tmin(dst_id)  = secondary.rays.tmin(src_id);
     other_secondary.rays.tmax(dst_id)  = secondary.rays.tmax(src_id);
-    other_secondary.pre_chk(dst_id)    = secondary.pre_chk(src_id);
+    other_secondary.next_chk(dst_id)   = secondary.next_chk(src_id);
     other_secondary.org_chk(dst_id)    = secondary.org_chk(src_id);
+    other_secondary.pri_chk(dst_id)    = secondary.pri_chk(src_id);
     other_secondary.prim_id(dst_id) = secondary.prim_id(src_id);
     other_secondary.color_r(dst_id)  = secondary.color_r(src_id);
     other_secondary.color_g(dst_id)  = secondary.color_g(src_id);
@@ -263,9 +278,9 @@ fn @make_primary_stream_hit_writer(primary: PrimaryStream, vector_width: i32, in
 fn @make_secondary_stream_hit_writer(secondary: SecondaryStream, vector_width: i32) -> fn (i32, i32, Hit) -> () {
     @ |i, j, hit| {
         let k = i * vector_width + j;
-        secondary.prim_id(k) = hit.prim_id;
+        secondary.prim_id(k)   = hit.prim_id;
         secondary.rays.tmin(k) = hit.distance;
-        secondary.pre_chk(k)   = hit.geom_id; 
+        secondary.next_chk(k)  = hit.geom_id; 
     }
 }
 
