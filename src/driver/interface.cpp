@@ -29,7 +29,6 @@ int dfw_out_stream_capacity();
 const int primary_width   = PRIMARY_WIDTH;
 const int secondary_width = SECONDARY_WIDTH;
 const int light_field_res = LIGHT_FIELD_RES;
-const int its_field_res   = INTERSECT_FIELD_RES;
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -274,6 +273,7 @@ struct Interface {
     anydsl::Array<float> host_outgoing_secondary;
     anydsl::Array<int32_t> host_primary_num;
     anydsl::Array<int32_t> host_record_light_field;
+    anydsl::Array<int32_t> host_render_light_field;
 
     size_t film_width;
     size_t film_height;
@@ -291,8 +291,11 @@ struct Interface {
         
         host_primary_num = anydsl::Array<int32_t>(128);
         printf("light field size %d\n", light_field_res * light_field_res * 6 * dfw_chunk_size() * 2);
-        host_record_light_field = anydsl::Array<int32_t>(light_field_res * light_field_res * 6 * dfw_chunk_size() * 2);
+        int light_field_size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
+        host_record_light_field = anydsl::Array<int32_t>(light_field_size);
         std::fill(host_record_light_field.begin(), host_record_light_field.end(), 0);
+        host_render_light_field = anydsl::Array<int32_t>(light_field_size);
+        std::fill(host_render_light_field.begin(), host_render_light_field.end(), 0);
         os = std::ofstream("mem_check");
     }
 
@@ -785,12 +788,14 @@ void rodent_cpu_get_record_light_field(LightField *light_field) {
 }
 
 void rodent_get_render_light_field(int32_t dev, LightField *light_field) {
+    std::lock_guard <std::mutex> lock(interface->mtx); 
     auto& array = interface->render_light_field_list(dev);
+    int size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
     get_light_field(*light_field, array.data()); 
+    memcpy(array.data(), interface->host_render_light_field.data(), size * sizeof(int));
 }
 
 //gpu
-//
 void rodent_initial_gpu_host_data(int32_t size) {
     interface->initial_gpu_host_data(size); 
 }
@@ -976,14 +981,42 @@ int32_t rodent_worker_secondary_recv(int32_t dev, int32_t rays_size, bool isFirs
     return size_new;
 }
 
+inline int get_its(int a, int b) {
+    if(a == 255) return 255;
+    if(b == 0) return a;
+    return b;
+}
+
+int its_cmp(int a, int b) {
+    int res = 0;
+    res += get_its((a & 0xFF), (b & 0xFF));
+    res += (get_its(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
+    res += (get_its(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
+    res += (get_its(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
+    return res;
+}
+
 void rodent_save_light_field(int32_t dev) {
     if(dev == -1) {
         std::lock_guard <std::mutex> lock(interface->mtx); 
         int* array = interface->cpu_record_light_field.data();
         int* host = interface->host_record_light_field.data();
-        int size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
+        int size = light_field_res * light_field_res * 6 * dfw_chunk_size();
         for (int i = 0; i < size; i++){
             host[i] += array[i];
+        }
+        int ed = size * 2;
+        int chk_size = dfw_chunk_size();
+        for (int i = size; i < ed; i++){
+            host[i] = its_cmp(host[i], array[i]);
+            int its = host[i] & 0xFF;
+            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+            its = (host[i] >> 8) & 0xFF;
+            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+            its = (host[i] >> 16) & 0xFF;
+            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+            its = (host[i] >> 24) & 0xFF;
+            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
         }
     } else {
         error("only cpu");
@@ -992,6 +1025,10 @@ void rodent_save_light_field(int32_t dev) {
 
 int* rodent_get_light_field() {
     interface->host_record_light_field.data();
+}
+
+void rodent_update_render_light_field(int32_t* new_light_field, int32_t size) {
+    memcpy(interface->host_record_light_field.data(), new_light_field, size * sizeof(int));
 }
 
 void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t size) {

@@ -13,6 +13,7 @@ extern "C" {
 void rodent_present(int32_t dev);
 void rodent_unload_chunk_data(int32_t dev ); 
 int* rodent_get_light_field();
+void rodent_update_render_light_field(int32_t*, int32_t);
 }
 #include "../driver/common.h"
 #include "MemoryPool.h"
@@ -60,7 +61,7 @@ static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
     img.width = res * 6 + 20;
     img.height = res * chunk_size;
     img.pixels.reset(new uint8_t[img.width * img.height * 4]);
-    
+
     int width = img.width; 
     int height = img.height;
     
@@ -80,6 +81,7 @@ static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
         }
     }
 
+    rgb black(0.0, 0.0, 0.0);
 
     int all_face_size = res * res * 6;
     int face_size = res * res;
@@ -92,25 +94,37 @@ static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
                 int pu = w_st + u;
                 for(int v = 0; v < res; v++) {
                     int pv = h_st + v;
-                    
                     if(v == res - 1 || u == res - 1) {
                         img.pixels[4 * (pv * width + pu) + 0] = 0;
                         img.pixels[4 * (pv * width + pu) + 1] = 255;
                         img.pixels[4 * (pv * width + pu) + 2] = 0;
                         img.pixels[4 * (pv * width + pu) + 3] = 255;
                     } else { 
-                        int its = (reduce_buffer[all_face_size * i + face_size * j + (res - v) * res + u]) >> 8;
-                        if(its >= 255 || its == 0) continue;
-                        its = its & 0x7F;
-                        rgb& col = color[its];
-                        img.pixels[4 * (pv * width + pu) + 0] = col.x;
-                        img.pixels[4 * (pv * width + pu) + 1] = col.y;
-                        img.pixels[4 * (pv * width + pu) + 2] = col.z;
+                        int id = all_face_size * i + face_size * j + (res - 1 - v) * res + u;
+                        int recv_its = reduce_buffer[id];
+                    //    int its = (recv_its & 0xFF) - 1;
+                        int its = ((recv_its >> 8) & 0xFF ) - 1;
+                    //    int its = ((recv_its >> 16) & 0xFF ) - 1;
+                    //    int its = ((recv_its >> 24) & 0xFF ) - 1;
+
+                
+                        rgb *col;
+                        if(its >= 254 || its == -1) col = &black;
+                        else { 
+                            if(its < 0|| its > chunk_size - 1) {
+                                printf("error its %d\n", its);
+                                col = &black;
+                            } else
+                                col = &color[its];
+                        }
+                        img.pixels[4 * (pv * width + pu) + 0] = col->x;
+                        img.pixels[4 * (pv * width + pu) + 1] = col->y;
+                        img.pixels[4 * (pv * width + pu) + 2] = col->z;
                         img.pixels[4 * (pv * width + pu) + 3] = 255;
                     }
                 }
             }
-        } 
+        }
     }
     if (!save_png(std::string("picture/light_field_its.png"), img))
         error("Failed to save PNG file light_field.png");
@@ -138,15 +152,16 @@ static void save_image_ctrb(int* reduce_buffer, int chunk_size, float spp) {
                 for(int v = 0; v < res; v++) {
                     int pv = h_st + v;
                     
-                    int lu = reduce_buffer[all_face_size * i + face_size * j + (res - v) * res + u];
+                    int lu = reduce_buffer[all_face_size * i + face_size * j + (res - 1 - v) * res + u];
                     int lu_q0 = lu & 0xFF;
                     int lu_q1 = lu >> 8  & 0xFF;
                     int lu_q2 = lu >> 16 & 0xFF;
                     int lu_q3 = lu >> 24 & 0xFF;
                     
-                    img.pixels[4 * (pv * width + pu) + 0] = lu_q3; 
-                    img.pixels[4 * (pv * width + pu) + 1] = lu_q3;
-                    img.pixels[4 * (pv * width + pu) + 2] = lu_q3;
+                    int lu_q = lu_q0;// + lu_q1 + lu_q2 + lu_q3; 
+                    img.pixels[4 * (pv * width + pu) + 0] = lu_q; // (lu_q >> 4) * inv_spp; 
+                    img.pixels[4 * (pv * width + pu) + 1] = lu_q; // ((lu_q >> 2) & 0x3) * inv_spp;
+                    img.pixels[4 * (pv * width + pu) + 2] = lu_q; // (lu_q & 0x3) * inv_spp;
                     img.pixels[4 * (pv * width + pu) + 3] = 255;
                     if(v == res - 1 || u == res - 1) {
                         img.pixels[4 * (pv * width + pu) + 0] = 255;
@@ -199,21 +214,26 @@ struct DistributedFrameWork {
     }
     
     void save_light_field(int* light_field, float spp) {
-        int size = LIGHT_FIELD_RES * LIGHT_FIELD_RES * 2 * 6 * ps->get_chunk_size();
-        int *reduce_buffer = new int[size];
-        comm->reduce(light_field, reduce_buffer, size);
-        int not_zero = 0;
-        for(int i = 0; i < size; i++) {
-            if(light_field[i] != 0){
-                not_zero ++;
-                comm->os<<i<<" "<<light_field[i]<<" | "; 
-            } 
+        int size = LIGHT_FIELD_RES * LIGHT_FIELD_RES * 6 * ps->get_chunk_size();
+        int *reduce_buffer = new int[size * 2];
+        printf("start reduce %d\n", comm->get_rank());
+        {
+            statistics.start("run => light field => bcast ");
+            comm->update_light_field(light_field, reduce_buffer, size);
+            MPI_Bcast(reduce_buffer, size * 2, MPI_INT, 0, MPI_COMM_WORLD);
+            statistics.end("run => light field => bcast ");
         }
-        printf("not zero %d\n", not_zero);
+        //reduce ctib 存在了reduce 里
+            statistics.start("run => light field => save img  ");
         if(comm->get_rank() == 0 && VIS_LIGHT_FIELD) { 
-            save_image_its(reduce_buffer + LIGHT_FIELD_RES * LIGHT_FIELD_RES * 6 * ps->get_chunk_size(), ps->get_chunk_size(), spp);
             save_image_ctrb(reduce_buffer, ps->get_chunk_size(), spp);
+            save_image_its(&reduce_buffer[size], ps->get_chunk_size(), spp);
         }
+            statistics.end("run => light field => save img  ");
+        rodent_update_render_light_field(reduce_buffer, size);
+        //cpy to interface light
+        
+        delete[] reduce_buffer;
     }
 
     void run(Camera *camera) {
@@ -236,9 +256,9 @@ struct DistributedFrameWork {
         node->run(scheduler);
         
         statistics.end("run");
+        if(comm->get_size() > 1)
+            save_light_field(rodent_get_light_field(), scheduler->get_spp());
         statistics.print(comm->os);
-       
-        save_light_field(rodent_get_light_field(), scheduler->get_spp());
 
         ps->reset();
     }

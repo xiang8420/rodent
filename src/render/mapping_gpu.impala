@@ -138,7 +138,7 @@ fn @gpu_shade(acc: Accelerator, atomics: Atomics, scene: Scene, path_tracer: Pat
                     break()
                 }, @ || -> ! {
                     primary.rays.id(ray_id) = -1;
-                    write_chunk(ray_id, 0, -1000);
+                    write_chunk(ray_id, 0, 255);
                     break()
                 })
             }
@@ -353,7 +353,6 @@ fn @gpu_primary_chunk( primary: PrimaryStream
     let ray_reader  = make_ray_stream_reader(primary.rays, 1);
     let ray_ids     = primary.rays.id;
     let scene_chunk = scene.cur_chk;
-    let cur_coord   = get_chunk_coordinate(scene_chunk, chunk_scale);
  
     // Compact primary rays into another queue
     
@@ -376,7 +375,7 @@ fn @gpu_primary_chunk( primary: PrimaryStream
                         let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
                         write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, intrinsics));
                     } else {
-                        write_chunk(src_id, 0, -1000);
+                        write_chunk(src_id, 0, 255);
                     }
                 }
             } else {
@@ -417,7 +416,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
         if src_id >= primary.size {
             break()
         }
-        let id = extract_chunk_id(next_chks(src_id));
+        let id = next_chks(src_id);
         if  id != chunk && id != -1 {
             atomics.add_global_i32(&mut gpu_tmp(0), 1);
         }
@@ -438,7 +437,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
             if src_id >= primary.size {
                 break()
             }
-            let id = extract_chunk_id(next_chks(src_id));
+            let id = next_chks(src_id);
             if id == chunk {
                 let dst_id  = atomics.add_global_i32(&mut gpu_tmp(0), 1);
                 copy_primary_ray(primary, other_primary, src_id, dst_id, false);
@@ -479,7 +478,6 @@ fn @gpu_secondary_chunk( secondary: SecondaryStream
     let ray_reader  = make_ray_stream_reader(secondary.rays, 1);
     let ray_ids     = secondary.rays.id;
     let scene_chunk    = scene.cur_chk;
-    let cur_coord   = get_chunk_coordinate(scene_chunk, chunk_scale);
  
     // Compact secondary rays into another queue
     
@@ -495,7 +493,7 @@ fn @gpu_secondary_chunk( secondary: SecondaryStream
             let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
             write_chunk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, intrinsics));
         } else {
-            write_chunk(src_id, 0, -1000);
+            write_chunk(src_id, 0, 255);
         }
     }
     acc.sync();
@@ -528,7 +526,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
         if src_id >= secondary.size {
             break()
         }
-        let id = extract_chunk_id(next_chks(src_id));
+        let id = next_chks(src_id);
         if  id != chunk && id != -1 {
             atomics.add_global_i32(&mut gpu_tmp(0), 1);
         }
@@ -553,7 +551,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
             if src_id >= secondary.size {
                 break()
             }
-            let id = extract_chunk_id(next_chks(src_id));
+            let id = next_chks(src_id);
             if id != chunk && id != -1 {
                 let dst_id  = atomics.add_global_i32(&mut gpu_tmp(1), 1);
                 //copy_secondary_ray(secondary, buffer, src_id, dst_id);

@@ -311,26 +311,33 @@ public:
     }
 
     //recv message, if it's ray msg load it to list 
-    RecvMsg(RayArrayList* outArray, RayStreamList * outStream, RayStreamList *inList, int local_chunk, MPI_Status &status, MPI_Comm comm) {
+    RecvMsg(RayArrayList* outArray, RayStreamList * outStream, RayStreamList *inList, const int local_chunk, MPI_Status &status) {
+        statistics.start("run => message_thread => recv_message => RecvMsg => new RecvMsg");
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         
+        statistics.start("run => message_thread => recv_message => RecvMsg => main");
         
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
         MPI_Status s0;
         header = new MessageHeader();
         if (count == sizeof(*header)) {
-            MPI_Recv((char *)header, count, MPI_UNSIGNED_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
+            MPI_Recv((char *)header, count, MPI_UNSIGNED_CHAR, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &s0);
         } else {
+            statistics.start("run => message_thread => recv_message => RecvMsg => mpi recv");
             char *buffer = (char *)malloc(count);
-            MPI_Recv(buffer, count, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, comm, &s0);
+            MPI_Recv(buffer, count, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &s0);
             memcpy(header, buffer, sizeof(*header));
+            statistics.end("run => message_thread => recv_message => RecvMsg => mpi recv");
             if(header->primary == 0 && header->secondary ==0 ) {
+                statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
                 content = new char[header->content_size];
                 memcpy(content, buffer+sizeof(*header), header->content_size);
+                statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
             } else {
                 int cur_chk = header->chunk;
+                statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
                 if(cur_chk != local_chunk) {
                     if(header->type == MsgType::ArrayRay) {
                         if(cur_chk < 0) 
@@ -345,27 +352,31 @@ public:
                         outStream[cur_chk].read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
                     }
                 } else {
-                    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message");
                     
                     std::unique_lock <std::mutex> lock(inList->mutex); 
+                    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => empty cond");
                     while (inList->full()) {
                         inList->cond_empty.wait(lock);
                     }
+                    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => empty cond");
                     if(header->type == MsgType::ArrayRay) {
                         inList->read_from_array_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
                     } else {
                         inList->read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
                     }
-                    os<<"inList size "<< inList->size()<<"\n";
                     lock.unlock();
-                    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
                 }
+                statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message");
             }
             free(buffer);
         }
+        statistics.end("run => message_thread => recv_message => RecvMsg => main");
     }
 
-    ~RecvMsg() { delete[] content; }
+    ~RecvMsg() { 
+        delete[] content; 
+        statistics.end("run => message_thread => recv_message => RecvMsg => new RecvMsg");
+    }
 };
 
 class QuitMsg : public Message {

@@ -111,6 +111,9 @@ inline size_t physical_memory_used_by_process() {
 #define SECONDARY_WIDTH 16
 #define LIGHT_FIELD_RES 128
 #define INTERSECT_FIELD_RES 128
+#define INTERSECT_FIELD_RES 128
 #define VIS_LIGHT_FIELD true
+#define STREAM_CAPACITY 256 * 256
+#define OUT_BUFFER_CAPACITY 1024 * 1024 
 
 #endif // COMMON_H

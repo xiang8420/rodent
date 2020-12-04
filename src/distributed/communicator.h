@@ -28,7 +28,7 @@ public:
 
     void reduce(float* film, float *reduce_buffer, int pixel_num);
     
-    void reduce(int* send_buffer, int *reduce_buffer, int num);
+    void update_light_field(int *, int *, int);
 
     void all_gather_float(float *a, float *res, int size); 
 
@@ -77,13 +77,8 @@ Communicator::Communicator() {
     
 Communicator::~Communicator() {
     printf("delete communicator\n");
-    std::cout<<"msg send "<< send_msg_count<<"recv "<<recv_msg_count
-      <<"ray send "<< send_ray_count<<"recv "<<recv_ray_count<<"\n";
+    os<<"msg send "<< send_msg_count<<"recv "<<recv_msg_count<<"ray send "<< send_ray_count<<"recv "<<recv_ray_count<<"\n";
     MPI_Finalize();
-}
-
-void Communicator::all_gather_float(float *a, float *res, int size) {
-    MPI_Allgather(a, 1, MPI_FLOAT, res, 1, MPI_FLOAT, MPI_COMM_WORLD);
 }
 
 void Communicator::reduce(float* film, float *reduce_buffer, int pixel_num){
@@ -91,9 +86,54 @@ void Communicator::reduce(float* film, float *reduce_buffer, int pixel_num){
     MPI_Reduce(film, reduce_buffer, pixel_num, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD); 
 }
 
-void Communicator::reduce(int* send_buffer, int *reduce_buffer, int num){
-    MPI_Barrier(MPI_COMM_WORLD);
-    MPI_Reduce(send_buffer, reduce_buffer, num, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
+void Communicator::all_gather_float(float *a, float *res, int size) {
+    MPI_Allgather(a, 1, MPI_FLOAT, res, 1, MPI_FLOAT, MPI_COMM_WORLD);
+}
+
+inline int get_its(int a, int b) {
+    if(a == 255) return 255;
+    if(b == 0) return a;
+    return b;
+}
+
+int its_cmp(int a, int b) {
+    int res = 0;
+    res += get_its((a & 0xFF), (b & 0xFF));
+    res += (get_its(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
+    res += (get_its(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
+    res += (get_its(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
+    return res;
+}
+
+void Communicator::update_light_field(int *org_buf, int * recv_buf, int buf_size) {
+    MPI_Reduce(org_buf, recv_buf, buf_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
+    
+    int * org_its = &org_buf[buf_size];
+    int * recv_its = &recv_buf[buf_size];
+
+    int num = size; // comm size
+    MPI_Status status;
+    int level = size;
+    do {
+        level = level / 2;
+        int dst = rank % level;
+        if(rank == dst) {
+            os<<"recv from "<<dst + level<<" level "<<level<<"\n";
+            MPI_Recv(recv_its, buf_size, MPI_INT, dst + level, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            for(int i = 0; i < buf_size; i++) {
+                org_its[i] = its_cmp(org_its[i], recv_its[i]);
+            }
+        } else {
+            os<<"send to "<<dst<<" level "<<level<<"\n";
+		    MPI_Send(org_its, buf_size, MPI_INT, dst, 0, MPI_COMM_WORLD);
+        }
+        if(rank >= level) return;
+    } while(level > 1);
+    if(rank == 0)
+        memcpy(recv_its, org_its, buf_size * sizeof(int));
+
+    //MPI_Bcast(recv_buf, buf_size * 2, MPI_INT, 0, MPI_COMM_WORLD);
+    //MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void Communicator::purge_completed_mpi_buffers() {
@@ -200,34 +240,25 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
 //        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" tag "<<recv_msg->get_tag()<<" size "<<recv_msg->get_ray_size() 
 //            <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
     
-    statistics.start("run => message_thread => recv_message => broadcast");
     if (recv_msg->is_broadcast()) {
 //            os << "mthread recv broadcast\n";
         Export(recv_msg, ps); 
     }
-    statistics.end("run => message_thread => recv_message => broadcast");
    // os << "mthread switch msg type "<<recv_msg->get_type()<<"\n";
-    if(isMaster()) 
-        printf("master comm before recv\n");
-    printf("recv msg type %d\n", recv_msg->get_type());
     switch(recv_msg->get_type()) {
         case Quit: { 
             ps->set_exit();
             return true;
         }
         case Status: {
-            statistics.start("run => message_thread => recv_message => StatusMsg");
-            if(isMaster()) 
-                printf("master recv status\n");
+            statistics.start("run => message_thread => process_message => StatusMsg");
             int sender = std::max(recv_msg->get_sender(), recv_msg->get_root()); 
             if(out_list_empty(recv_msg->get_chunk()))
                 ps->set_proc_idle(sender);
             
             bool res = ps->update_global_rays((int*)recv_msg->get_content());
             int *s = ps->get_status();
-            printf("recv status %d %d %d %d\n", s[0], s[1], s[2], s[3]);
-//                    os<< "update all rays received "<< s[0] <<" "<< s[1] <<" "<<s[2]<<" "<<s[3]<<"\n";
-            statistics.end("run => message_thread => recv_message => StatusMsg");
+            statistics.end("run => message_thread => process_message => StatusMsg");
             return true;
         } 
         case ArrayRay: {
@@ -246,25 +277,13 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
         }
         case Schedule: {
             if(ps->update_chunk((int*)recv_msg->get_content())) {
-//                        os<<"mthread new chun k" << ps->get_current_chunk()<<"\n";
-                int * s = (int*)recv_msg->get_content();
-//                        os<<s[0]<<" "<<s[1]<<" "<<s[2]<<" "<<s[3]<<"\n";
-                int * a = ps->get_chunk_proc();
-//                        os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
-                printf("mthread new chunk %d\n", ps->get_current_chunk());
 
                 return false; // waiting for rays
             } else {
-                os<<"do nothing\n";
-                int * a = ps->get_chunk_proc();
-                os<<a[0]<<" "<<a[1]<<" "<<a[2]<<" "<<a[3]<<"\n";
                 return true;
             }
         }
         default : {
-            if(isMaster()) 
-                printf("master recv unknown\n");
-            os<<"recv unknown msg\n";
             return true;
         }
     }
@@ -282,33 +301,28 @@ bool Communicator::recv_message(ProcStatus *ps, bool block) {
     statistics.end("run => message_thread => recv_message => probe");
 
     if (recv_ready || block) {
-        int count;
+        int count = 0;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
-        printf("%d before recv rays\n", rank);
         
         statistics.start("run => message_thread => recv_message => RecvMsg");
-        
-        Message *recv_msg = new RecvMsg(outArrayList, outStreamList, inList, ps->get_current_chunk(), status, MPI_COMM_WORLD); 
+        Message *recv_msg = new RecvMsg(outArrayList, outStreamList, inList, ps->get_current_chunk(), status); 
 
         statistics.end("run => message_thread => recv_message => RecvMsg");
 
-        //statistics.end("run => message_thread => recv_message => handle msg");
+        statistics.start("run => message_thread => recv_message => process");
+        bool res = process_message(recv_msg, ps);
+        statistics.end("run => message_thread => recv_message => process");
+        return res;
         
-        return process_message(recv_msg, ps);
-        
-        //statistics.end("run => message_thread => recv_message => handle msg");
     } else {
         return false;
     } 
 }
 
 void Communicator::send_message(Message *message, ProcStatus *rs) {
-
-    //outList lock
-    //serialize
     
     //current process is not destination or broadcast, send to destination 
-    os <<"mthread| send message to "<<message->get_destination() <<" tag "<< message->get_tag() <<"\n";
+    os <<"mthread| send message to "<<message->get_destination() <<" tag "<< message->get_tag()<<" type "<<message->get_type() <<"\n";
 //    os<< "mthread send message: size "<<message->get_size()<<" broadcast "<<message->is_broadcast()<<std::endl;
     if (message->is_broadcast() || (message->get_destination() != rank))
         Export(message, rs);

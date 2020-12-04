@@ -132,10 +132,10 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     chunk_size = rough_trace ? cSize + 1 : cSize;
     printf("chunk_size %d cSize %d\n", chunk_size, cSize);
     
-    stream_logic_capacity = 256 * 256;
+    stream_logic_capacity = STREAM_CAPACITY; 
     stream_store_capacity = (stream_logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
     
-    out_stream_capacity = 1024*1024;//stream_logic_capacity; 
+    out_stream_capacity = OUT_BUFFER_CAPACITY; 
     global_rays.resize(proc_size * proc_size);
 }
 
@@ -264,7 +264,6 @@ bool ProcStatus::update_global_rays(int* a) {
         sent += global_rays[i];
         recv += global_rays[i + proc_size];
     }
-    printf("updata %d %d\n", sent, recv);
     if (sent <= recv )
         return true;
     else 

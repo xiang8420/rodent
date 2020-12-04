@@ -212,18 +212,6 @@ fn @inside_point_bbox(bbox: BBox, p: Vec3) -> bool {
   && p.z >= bbox.min.z && p.z <= bbox.max.z) 
 }
 
-fn @extract_chunk_id(n: i32) -> i32 {
-    if n == -1000 {
-        return( -1 )
-    }
-    n as i32
-}
-
-fn @get_chunk_id(chunk: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsics) -> i32 {
-    let id = make_vec3_i32(math.floorf(chunk.x) as i32, math.floorf(chunk.y) as i32, math.floorf(chunk.z) as i32); 
-    ((id.x * scale.y + id.y) * scale.z) + id.z
-}
-
 fn @coordinate_compress(chunk: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsics) -> i32 {
     let mut id = make_vec3_i32(math.floorf(chunk.x) as i32, math.floorf(chunk.y) as i32, math.floorf(chunk.z) as i32); 
     if chunk.x == max.x {id.x = scale.x - 1; } 
@@ -233,16 +221,9 @@ fn @coordinate_compress(chunk: Vec3, scale: Vec3_i32, max: Vec3, math: Intrinsic
     if  id.x < 0 || id.x >= scale.x 
      || id.y < 0 || id.y >= scale.y
      || id.z < 0 || id.z >= scale.z {
-        return( -1000 )
+        return( 255 )
     } 
     ((id.x * scale.y + id.y) * scale.z) + id.z
-}
-
-fn @get_chunk_coordinate(chunk: i32, scale: Vec3_i32) -> (Vec3_i32) {
-    let x = chunk / (scale.y  * scale.z );
-    let y = (chunk - x * (scale.y * scale.z)) / scale.z;
-    let z = chunk % scale.z; 
-    make_vec3_i32(x, y, z)
 }
 
 fn @get_closest_chunk(min_max: MinMax, ray: Ray, org: Vec3,  bbox: BBox, id: Vec3_i32, scale: Vec3_i32, step: Vec3, inv_step: Vec3, math: Intrinsics) -> i32 {

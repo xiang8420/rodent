@@ -222,7 +222,7 @@ public:
 };
 
 Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
-    stream = false;
+    stream = true;//false;
     int chunk_size = ps->get_chunk_size();
     int store_capacity = ps->get_stream_store_capacity();
     int logic_capacity = ps->get_stream_logic_capacity();
@@ -266,7 +266,7 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
     } 
     statistics.start("run => work_thread => load_incoming_buffer-wait");
     if(!inList.empty() && ps->Exit())
-        error("inlist not empty but prepared to exit\n");
+        warn("inlist not empty but prepared to exit\n");
 
     std::unique_lock <std::mutex> lock(inList.mutex); 
     if(!sync) {
@@ -286,8 +286,6 @@ int Node::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int
         }
     }
     statistics.end("run => work_thread => load_incoming_buffer-wait");
-
-    std::cout<<"primary ? "<<primary<<" primary size "<<inList.primary_size()<<" secondary size "<<inList.secondary_size()<<"\n";
 
     struct RaysStream *rays_stream;
     if(primary && inList.primary_size() > 0) {

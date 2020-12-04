@@ -65,8 +65,10 @@ void AsyncNode::send_message() {
                 rlm->inList.cond_full.notify_all();
                 return;
             } else {
-                StatusMsg status(comm->get_rank(), comm->get_master(), ps->get_status(), ps->get_current_chunk(), comm->get_size(), get_tag()); 
-                comm->send_message(&status, ps);
+                if(!comm->isMaster()) {
+                    StatusMsg status(comm->get_rank(), comm->get_master(), ps->get_status(), ps->get_current_chunk(), comm->get_size(), get_tag()); 
+                    comm->send_message(&status, ps);
+                }
             }
         } else if(rlm->outList_empty(ps)) {
             ///load new chunk
@@ -118,12 +120,12 @@ void AsyncNode::message_thread(void* tmp) {
 
         statistics.start("run => message_thread => recv_message");
 
-        //std::unique_lock <std::mutex> lock(wk->rlm->out_mutex); 
+        std::unique_lock <std::mutex> lock(wk->rlm->out_mutex); 
         if(!recv && ps->is_proc_idle() && !ps->Exit())
             recv = comm->recv_message(ps, true);
         else
             recv = comm->recv_message(ps, false);
-        //lock.unlock();
+        lock.unlock();
         
         statistics.end("run => message_thread => recv_message");
          
@@ -161,7 +163,6 @@ void AsyncNode::message_thread(void* tmp) {
                 }
             }
         }
-        wk->loop_check(5);
 
         usleep(500);
         statistics.end("run => message_thread => loop");
