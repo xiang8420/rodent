@@ -15,6 +15,7 @@ struct RaysStream {
     RaysStream(int lcap, int scap, int width)
         :logic_capacity(lcap), store_capacity(scap), width(width) 
     {
+        printf("construct empty RaysStream %d %d\n", store_capacity, width);
         data = new float[store_capacity * width];
         size = 0; 
     }
@@ -29,10 +30,8 @@ struct RaysStream {
         if(stream) {
             memcpy((char*)data, ptr, store_capacity * width * sizeof(float));
         } else {
-            // mask used as ptr mask not this 
-            int  ptr_logic_width = width; 
             float* fptr = (float*)ptr;
-            for(int i = 0; i < ptr_logic_width; i++) {
+            for(int i = 0; i < width; i++) {
                 for(int j = 0; j < copy_size; j++) 
                     data[j + i * store_capacity] = fptr[j * width + i];
             }
@@ -177,12 +176,11 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
      
     while(copy_size > 0) {
         
+        statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
         RaysStream * rays   = new struct RaysStream((char*)ptr, logic_capacity, store_capacity, PRIMARY_WIDTH, copy_size, false);
+        statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
         
         int width = PRIMARY_WIDTH; 
-
-
-
 
         msg_primary_size -= copy_size; 
         ptr += copy_size * width; 
@@ -193,22 +191,7 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
     
     copy_size = std::min(logic_capacity, msg_secondary_size);
     while(copy_size > 0) {
-        //statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
         RaysStream * rays   = new struct RaysStream((char*)ptr, logic_capacity, store_capacity, SECONDARY_WIDTH, copy_size, false);
-        //statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays secondary");
-
-        int * ids = (int*)ptr;
-        os<<"secondary copy size "<<copy_size<<"\n"<<" ptr ray";
-        for(int i = 0; i < std::min(copy_size, 5); i ++) {
-            os<<"| "<< ids[i * SECONDARY_WIDTH] <<" "<< ids[i * SECONDARY_WIDTH + 9] << " ";
-        } os<<"\n ";
-
-        ids = (int*)(rays->get_data());
-        os<<"rays ray ";
-        for(int i = 0; i < std::min(copy_size, 5); i ++) {
-            os<<"| "<< ids[i] <<" "<< ids[i + 9 * store_capacity] << " ";
-        } os<<"\n";
- 
 
         msg_secondary_size -= copy_size; 
         int width = SECONDARY_WIDTH; 
@@ -221,6 +204,7 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
 }
 // msg_primary_size is stream num
 void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size, int msg_secondary_size, int rank) {
+    statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
     for(int i = 0; i < msg_primary_size; i++) {
         int num = ((int*)src_ptr)[0];
         src_ptr += sizeof(int);
@@ -236,6 +220,7 @@ void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size
     for(int i = 0; i < msg_secondary_size; i++) {
         int num = ((int*)src_ptr)[0];
         src_ptr += sizeof(int);
+        
         if(num < get_back_secondary_left() ) {    
             RaysStream *rear = get_free_stream(false);
             rear->fill_stream((float*)src_ptr, 0, num, rank);
@@ -245,6 +230,7 @@ void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size
         } 
         src_ptr += store_capacity * SECONDARY_WIDTH * sizeof(float); 
     }
+    statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
 }
 void RayStreamList::read_from_ptr(float* rays_ptr, int st, int rays_size, bool isPrimary, int rank) {
 
@@ -291,7 +277,6 @@ RaysStream* RayStreamList::get_free_stream(bool Primary) {
 }
 
 void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_buffer,  size_t buffer_size, bool primary, int chunk_size, int rank) {
-//    auto os = std::ofstream("out/proc_read_from_buffer_" + std::to_string(rank));
 
     RaysStream **writeList = new RaysStream*[chunk_size];
     for(int i = 0; i < chunk_size; i ++) 
@@ -309,46 +294,23 @@ void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_
             num ++;
         } else {
             while(num > 0) {
-                //outList[tmp].mutex.lock(); 
-                if(writeList[tmp] == NULL || (writeList[tmp]->full() && num > 0))
+                if(writeList[tmp] == NULL || (writeList[tmp]->full() && num > 0)) {
                     writeList[tmp] = outList[tmp].get_free_stream(primary);
+                    printf("get free stream rank %d \n", rank);
+                }
                 int left = std::min(num, writeList[tmp]->logic_capacity - writeList[tmp]->size);
+                printf("before fill left %d st %d  num %d chk %d rank %d \n", left, st,  num, chunk, rank);
                 writeList[tmp]->fill_array(out_buffer, st, left, rank);
-                //outList[tmp].mutex.unlock(); 
+                printf("after fill left %d st %d  num %d rank %d \n", left, st,  num, rank);
                 
                 st += left;
                 num -= left;
             }
-            //printf("after list read st %d num %d capacity %d dst chunk %d rank %d ray size %d ray width %d\n", st, num, capacity, tmp, rank, ray.get_size(), ray.get_store_width());
             tmp = chunk;
             st = i; 
             num = 1; 
         }
     }
-//    printf("after save rays outlist size chunk size%d: ", chunk_size);
-//    for(int i = 0; i < chunk_size; i ++) {
-//        printf("chunk %d:\n", i);
-//        int rays_size = outList[i].primary_size();
-////        printf("ray_size = %d", rays_size);
-//        RaysStream * rays; 
-//        for(int k = 0; k < rays_size; k++) {
-//            rays = outList[i].get_primary();
-//            if(rays->get_size() > 0)
-//                outList[i].primary.push(rays);
-//            else 
-//                delete rays;
-//        }
-//        
-//        rays_size = outList[i].secondary_size();
-////        printf("ray_size = %d\n", rays_size);
-//        for(int k = 0; k < rays_size; k++) {
-//            rays = outList[i].get_secondary();
-//            if(rays->get_size() > 0)
-//                outList[i].secondary.push(rays);
-//            else 
-//                delete rays;
-//        }
-//    }
 }
 
 void RayStreamList::swap(RayStreamList &list1, RayStreamList &list2) {

@@ -7,6 +7,10 @@ struct SyncNode : public Node{
     
     int get_unloaded_chunk(int *);
     
+    int load_incoming_buffer(float **, size_t, bool, int, bool); 
+    
+    void save_outgoing_buffer(float *rays, size_t size, bool primary);
+    
     void send_message();
 
     void gather_rays(int, int, bool);
@@ -23,16 +27,25 @@ struct SyncNode : public Node{
     
     void run(Scheduler * camera);
    
+    RayArrayList * outArrayList;
+    RayStreamList inList;  
 };
 //每一轮光线全部给master然后 master发送调度消息给各个节点 各个节点读取新场景， 接受光线
 SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps)
     :Node(comm, ps)
 {
-    sync = true;
+    int chunk_size = ps->get_chunk_size();
+    outArrayList = new RayArrayList[chunk_size];
 }
 
 SyncNode::~SyncNode() {
+    delete[] outArrayList;
     printf("delete SyncNode\n");
+}
+
+void SyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
+    int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH; 
+    RayArrayList::read_from_device_buffer(outArrayList, rays, size, primary, ps->get_chunk_size());
 }
 
 void SyncNode::get_raylist_size(RayArrayList *outArrayList, std::vector <int> &list_size) { 
@@ -44,7 +57,6 @@ void SyncNode::get_raylist_size(RayArrayList *outArrayList, std::vector <int> &l
 void SyncNode::gather_rays(int chunk, int owner, bool primary) {
 
     std::vector<int> gather_rays_size(comm->get_size());
-    RayArrayList * outArrayList = rlm->get_outArrayList();
     struct RaysArray &rays = primary ? outArrayList[chunk].get_primary() : outArrayList[chunk].get_secondary();
     int width = rays.get_store_width();
     int list_size = rays.get_size();
@@ -87,7 +99,7 @@ void SyncNode::gather_rays(int chunk, int owner, bool primary) {
         }
         comm->os<<"\n";
 
-        rlm->get_inList().read_from_ptr(recv_buffer.data(), 0, all_rays_size, primary, owner);
+        inList.read_from_ptr(recv_buffer.data(), 0, all_rays_size, primary, owner);
     }
 
 }
@@ -114,6 +126,68 @@ int SyncNode::get_unloaded_chunk(int* list_size) {
     }
 
     return unloaded_chunk;
+}
+
+int SyncNode::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
+    printf("load incoming buffer\n");
+    comm->os<<"rthread load incoming buffer inlist size "<<inList.size()<<"\n";
+    if(inList.empty()) { return -1; } 
+    if(!inList.empty() && ps->Exit())
+        warn("inlist not empty but prepared to exit\n");
+
+
+    struct RaysStream *rays_stream;
+    if(primary && inList.primary_size() > 0) {
+        if(inList.secondary_size() > inList.primary_size())
+            return rays_size;
+        rays_stream = inList.get_primary();
+    } else if (!primary && inList.secondary_size() > 0) {
+        rays_stream = inList.get_secondary();
+    } else {
+        return rays_size;
+    }
+
+    statistics.start("run => work_thread => load_incoming_buffer-copy");
+
+    ps->set_thread_idle(thread_id, false);
+    int copy_size = rays_stream->size;
+    comm->os<<"all rays chunk "<<ps->get_current_chunk()<<" size "<<copy_size<<"\n";
+    int width = rays_stream->width;
+    printf("copy primary size %d\n", copy_size);
+ //   comm->os<<"rthread width "<<width <<" logic width "<<rays_stream->logic_width<<"\n";
+    memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
+ 
+//     //printf("%d rays_stream size %d %d %d\n", comm->get_rank(), rays_stream->size, primary, rays_stream->store_width);
+    int* ids = (int*)(*rays);
+    //int psize = std::min(5, copy_size);
+    int psize = copy_size;
+    
+    
+//    if(primary) {
+//        comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
+//        for(int i = 0; i < psize; i ++) {
+//        //    comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_stream_store_capacity() * 9]
+//        //                                      <<" "<<ids[i + rays_size + ps->get_stream_store_capacity() * 10];
+//            if((0xFF & ids[i + rays_size + ps->get_stream_store_capacity() * 10]) > 4 )
+//                comm->os<<"pri pri chk "<<(0xFF & ids[i + rays_size + ps->get_stream_store_capacity() * 10])<<" read error\n";
+//        }
+//        comm->os<<"\n";
+//    } else {
+//        comm->os<<"rthread recv ray render size" <<copy_size<<"\n";
+//        for(int i = 0; i < psize; i ++) {
+//         //   comm->os<<"#" <<ids[i + rays_size]<<" "<<ids[i + rays_size + ps->get_stream_store_capacity() * 9]
+//         //                                     <<" "<<ids[i + rays_size + ps->get_stream_store_capacity() * 10]
+//         //                                     <<" "<<ids[i + rays_size + ps->get_stream_store_capacity() * 11];
+//            if((0xFF & ids[i + rays_size + ps->get_stream_store_capacity() * 11]) > 4 )
+//                comm->os<<"sec pri chk "<<(0xFF & ids[i + rays_size + ps->get_stream_store_capacity() * 11])<<" read error\n";
+//        }
+//        comm->os<<"\n";
+//    }
+    delete rays_stream;
+
+    statistics.end("run => work_thread => load_incoming_buffer-copy");
+    return copy_size + rays_size;
+        
 }
 
 void SyncNode::schedule(int * list_size) {
@@ -146,7 +220,6 @@ void SyncNode::synchronize () {
     int chunk_size =  ps->get_chunk_size();
     std::vector<int> list_size(chunk_size); 
 
-    RayArrayList * outArrayList = rlm->get_outArrayList();
     get_raylist_size(outArrayList, list_size);
     MPI_Allreduce(list_size.data(), list_size.data(), chunk_size, MPI_INT, MPI_SUM, MPI_COMM_WORLD); 
     
@@ -185,7 +258,7 @@ void SyncNode::synchronize () {
         outArrayList[chunk].clear();
     }  
     statistics.end("run => synchronize => gather_rays");
-    printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), rlm->inList_size());
+    printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), inList.size());
 }
 
 void SyncNode::run(Scheduler * camera) {
@@ -194,8 +267,6 @@ void SyncNode::run(Scheduler * camera) {
 
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
-    RayStreamList& inList = rlm->get_inList();
-    RayArrayList * outArrayList = rlm->get_outArrayList();
     std::vector<std::thread> workThread;
     while(!ps->Exit()) {
         comm->os<<"run while\n";
@@ -227,16 +298,8 @@ void SyncNode::run(Scheduler * camera) {
         //    clear_outlist();
         }
 
+        launch_rodent_render(camera, deviceNum, iter==0);
         std::cout<<"rthread rank " << comm->get_rank()<<" generate rays "<<ps->generate_rays()<<"\n";
-        for(int i = 0; i < deviceNum; i++)
-            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, iter == 0 && ps->generate_rays()));
-        
-        render_start.notify_all(); 
-        for(auto &thread: workThread)
-            thread.join();
-    
-        comm->os<<"rthread end thread\n";
-        workThread.clear();
         statistics.start("run => synchronize");
         synchronize();
         statistics.end("run => synchronize");

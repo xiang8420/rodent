@@ -10,8 +10,12 @@ struct AllCopyNode : public Node{
     ~AllCopyNode();
     
     void send_message();
+    
+    void save_outgoing_buffer(float *, size_t, bool){} ; 
 
     static void message_thread(void* tmp);
+    
+    int load_incoming_buffer(float **, size_t, bool, int, bool) { }; 
     
     void run(Scheduler * camera);
     
@@ -87,12 +91,7 @@ void AllCopyNode::run(Scheduler * camera) {
     std::vector<std::thread> workThread;
     if(comm->isMaster()) {
         std::thread mthread(message_thread, this);
-        for(int i = 0; i < deviceNum; i++)
-            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-
-        for(auto &thread: workThread)
-            thread.join();
-        workThread.clear();
+        launch_rodent_render(camera, deviceNum, true);
         while(!ps->Exit()) {
             
             ps->set_proc_idle(comm->get_rank());
@@ -103,23 +102,12 @@ void AllCopyNode::run(Scheduler * camera) {
                 block_cond.wait(lock);
                 printf("get block\n");
             }
-            for(int i = 0; i < deviceNum; i++)
-                workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-
-            for(auto &thread: workThread)
-                thread.join();
-            workThread.clear();
+            launch_rodent_render(camera, deviceNum, true);
         }
         mthread.join();
 
     } else {
-        for(int i = 0; i < deviceNum; i++) 
-            workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-
-        for(auto &thread: workThread)
-            thread.join();
-        
-        workThread.clear();
+        launch_rodent_render(camera, deviceNum, true);
         while(!ps->Exit()) {
 
             int new_block;
@@ -132,12 +120,7 @@ void AllCopyNode::run(Scheduler * camera) {
             if(new_block == -1)
                 break;
             camera->set_render_block(new_block);
-            for(int i = 0; i < deviceNum; i++) 
-                workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-
-            for(auto &thread: workThread)
-                thread.join();
-            workThread.clear();
+            launch_rodent_render(camera, deviceNum, true);
         }
         printf("worker %d exit\n", comm->get_rank());
     }

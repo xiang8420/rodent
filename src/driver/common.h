@@ -115,5 +115,7 @@ inline size_t physical_memory_used_by_process() {
 #define VIS_LIGHT_FIELD true
 #define STREAM_CAPACITY 256 * 256
 #define OUT_BUFFER_CAPACITY 1024 * 1024 
+#define OUT_BUFFER true
+
 
 #endif // COMMON_H

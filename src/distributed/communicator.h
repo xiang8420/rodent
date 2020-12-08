@@ -35,19 +35,16 @@ public:
     // broadcast or p2p. return sent number 1, in p2p, 0, 1 or 2 in bcast
     int  Export(Message * m, ProcStatus *rs); 
 
-    bool recv_message(ProcStatus *ps, bool block); 
+    bool recv_message(ProcStatus *, RayStreamList *, RayStreamList &, bool); 
 
-    bool process_message(Message *recv_msg, ProcStatus *ps); 
+    bool process_message(Message *, ProcStatus *, RayStreamList *); 
     
     void send_message(Message* msg, ProcStatus *rs); 
 
     void purge_completed_mpi_buffers(); 
 
-    bool out_list_empty(int);
-
-    RayStreamList *inList;  
-    RayArrayList *outArrayList;
-    RayStreamList *outStreamList;
+    int get_tag();
+    
 private:
     MPI_Status  sta[3];
     MPI_Request req[3];
@@ -56,6 +53,7 @@ private:
     MPI_Comm Client_Comm;
     int rank, size, master;
    
+    int msg_tag;
     int send_ray_count, recv_ray_count;
     int send_msg_count, recv_msg_count;
         
@@ -71,6 +69,7 @@ Communicator::Communicator() {
     
     printf("comm rank %d \n", rank);
     os     = std::ofstream("out/proc_" + std::to_string(rank));
+    msg_tag = 0;
     send_ray_count = 0; recv_ray_count = 0;
     send_msg_count = 0; recv_msg_count = 0;
 }
@@ -88,6 +87,10 @@ void Communicator::reduce(float* film, float *reduce_buffer, int pixel_num){
 
 void Communicator::all_gather_float(float *a, float *res, int size) {
     MPI_Allgather(a, 1, MPI_FLOAT, res, 1, MPI_FLOAT, MPI_COMM_WORLD);
+}
+
+int Communicator::get_tag(){
+    return msg_tag++;
 }
 
 inline int get_its(int a, int b) {
@@ -227,24 +230,13 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
     return k;
 }
 
-bool Communicator::out_list_empty(int n) {
-    if(outArrayList == NULL)
-        return outStreamList[n].empty();
-    else
-        return outArrayList[n].empty();
-}
+bool Communicator::process_message(Message *recv_msg, ProcStatus *ps, 
+                                RayStreamList *outStreamList) 
+{
 
-bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
-
-//        os<<"m<"<<status.MPI_SOURCE/*recv_msg->get_sender()*/<<" "<<recv_msg->get_tag() <<"\n";
-//        os<<"mthread recv rays from "<<recv_msg->get_sender()<<" tag "<<recv_msg->get_tag()<<" size "<<recv_msg->get_ray_size() 
-//            <<" root: "<<recv_msg->get_root()<<"chunk "<<recv_msg->get_chunk()<<"\n";
-    
     if (recv_msg->is_broadcast()) {
-//            os << "mthread recv broadcast\n";
         Export(recv_msg, ps); 
     }
-   // os << "mthread switch msg type "<<recv_msg->get_type()<<"\n";
     switch(recv_msg->get_type()) {
         case Quit: { 
             ps->set_exit();
@@ -253,11 +245,10 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
         case Status: {
             statistics.start("run => message_thread => process_message => StatusMsg");
             int sender = std::max(recv_msg->get_sender(), recv_msg->get_root()); 
-            if(out_list_empty(recv_msg->get_chunk()))
+            if(outStreamList[recv_msg->get_chunk()].empty())
                 ps->set_proc_idle(sender);
             
             bool res = ps->update_global_rays((int*)recv_msg->get_content());
-            int *s = ps->get_status();
             statistics.end("run => message_thread => process_message => StatusMsg");
             return true;
         } 
@@ -289,7 +280,9 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps) {
     }
 }
 
-bool Communicator::recv_message(ProcStatus *ps, bool block) {
+bool Communicator::recv_message(ProcStatus *ps, RayStreamList *outStreamList, 
+                                RayStreamList &inList, bool block) 
+{
     int recv_ready;
     MPI_Status status;
     statistics.start("run => message_thread => recv_message => probe");
@@ -305,12 +298,12 @@ bool Communicator::recv_message(ProcStatus *ps, bool block) {
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
         
         statistics.start("run => message_thread => recv_message => RecvMsg");
-        Message *recv_msg = new RecvMsg(outArrayList, outStreamList, inList, ps->get_current_chunk(), status); 
+        Message *recv_msg = new RecvMsg(outStreamList, &inList, ps->get_current_chunk(), status); 
 
         statistics.end("run => message_thread => recv_message => RecvMsg");
 
         statistics.start("run => message_thread => recv_message => process");
-        bool res = process_message(recv_msg, ps);
+        bool res = process_message(recv_msg, ps, outStreamList);
         statistics.end("run => message_thread => recv_message => process");
         return res;
         

@@ -19,4 +19,3 @@ extern fn get_bbox() -> &[f32] { &[0f, 0f, 0f, 1f, 1f, 1f] }
 extern fn get_chunk() -> &[f32] { &[2f, 2f, 2f] }
 
 extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, valid_camera: bool) -> () {}
-extern fn prerender(settings: &Settings) -> () {}

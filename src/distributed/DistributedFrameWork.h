@@ -248,8 +248,8 @@ struct DistributedFrameWork {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
             scheduler->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
         } else {
-            int block_count = comm->get_size();
-            scheduler->image_domain_decomposition(camera, block_count, proc_rank, proc_size, rough_trace, node->sync);
+            int block = comm->get_size();
+            scheduler->image_domain_decomposition(camera, block, proc_rank, proc_size, rough_trace, type == "Sync");
         }
         scheduler->write_chunk_proc(ps->get_chunk_proc());
         ps->updata_local_chunk();

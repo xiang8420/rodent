@@ -1342,18 +1342,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         
     os << "}\n\n";
      
-    bool preprocess  = true; 
-
-    if(preprocess) {
-        os << "extern fn prerender(settings: &Settings) -> () {\n"   
-           << "    let renderer = make_path_tracing_renderer(4 /*max_path_len*/, 1 /*spp*/); \n"
-           << "    let device   = make_avx2_device(false); \n"
-           << "    let scene    = make_scene(device, settings, make_file_path(1, 999), 0, true);\n"
-           << "    renderer(scene, device, 0);\n"
-           << "}\n";
-    } else {
-        os << "extern fn preprocess(settings: &Settings) -> () {}\n";
-    }
     os << "extern fn get_bbox() -> &[f32] { &["<< bbox.min.x << "f, " << bbox.min.y << "f, " << bbox.min.z << "f, "
        << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
     os << "extern fn get_chunk() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";

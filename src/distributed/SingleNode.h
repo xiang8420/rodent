@@ -3,6 +3,10 @@ struct SingleNode : public Node{
     
     ~SingleNode();
     
+    int load_incoming_buffer(float **, size_t, bool, int, bool) { }; 
+    
+    void save_outgoing_buffer(float *, size_t, bool){} ; 
+    
     void run(Scheduler * camera);
 
 };
@@ -23,15 +27,7 @@ void SingleNode::run(Scheduler * camera) {
     comm->os <<" start run message thread \n";
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
-    std::vector<std::thread> workThread;
-    printf("only one worker %d  ", comm->get_rank());
-    for(int i = 0; i < deviceNum; i++) 
-        workThread.emplace_back(std::thread(work_thread, this, camera, i, deviceNum, false, true));
-    
-    for( auto &thread: workThread) 
-        thread.join();
-
-    workThread.clear();
+    launch_rodent_render(camera, deviceNum, iter==0);
     printf("run SingleNode\n");
     return;
 }
