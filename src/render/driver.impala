@@ -32,8 +32,7 @@ extern "C" {
     fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();
 
     fn rodent_get_render_light_field(i32, &mut LightField) -> ();
-    fn rodent_cpu_get_record_light_field(&mut LightField) -> ();
-    fn rodent_save_light_field(i32) -> ();
+    fn rodent_cpu_get_record_light_field(&mut LightField, i32, bool) -> ();
     
     fn rodent_cpu_thread_num() -> i32;
     fn rodent_stream_logic_capacity() -> i32;

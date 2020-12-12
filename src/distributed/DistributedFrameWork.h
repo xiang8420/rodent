@@ -16,7 +16,6 @@ int* rodent_get_light_field();
 void rodent_update_render_light_field(int32_t*, int32_t);
 }
 #include "../driver/common.h"
-#include "MemoryPool.h"
 #include "statistic.h"
 #include "ProcStatus.h"
 #include "communicator.h"
@@ -112,7 +111,6 @@ static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
                         if(its >= 254 || its == -1) col = &black;
                         else { 
                             if(its < 0|| its > chunk_size - 1) {
-                                printf("error its %d\n", its);
                                 col = &black;
                             } else
                                 col = &color[its];
@@ -238,7 +236,6 @@ struct DistributedFrameWork {
 
     void run(Camera *camera) {
         statistics.start("run");
-
         printf("dis frame worker run\n");
         int proc_rank = comm->get_rank();
         int proc_size = comm->get_size(); 
@@ -256,8 +253,10 @@ struct DistributedFrameWork {
         node->run(scheduler);
         
         statistics.end("run");
-        if(comm->get_size() > 1)
-            save_light_field(rodent_get_light_field(), scheduler->get_spp());
+        statistics.start("process light lield");
+   //     if(comm->get_size() > 1)
+   //        save_light_field(rodent_get_light_field(), scheduler->get_spp());
+        statistics.end("process light lield");
         statistics.print(comm->os);
 
         ps->reset();
@@ -339,3 +338,8 @@ int32_t dfw_thread_num() { return dfw->ps->get_thread_num(); }
 int32_t dfw_mpi_rank() { return dfw->comm->get_rank(); }
 
 void dfw_print_memory(int i) { return dfw->node->loop_check(i); }
+
+void dfw_time_start(std::string s) { statistics.start(s); }
+
+void dfw_time_end(std::string s) { statistics.start(s); }
+

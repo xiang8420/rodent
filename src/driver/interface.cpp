@@ -25,6 +25,8 @@ int dfw_mpi_rank();
 int dfw_stream_logic_capacity(); 
 int dfw_stream_store_capacity();
 int dfw_out_stream_capacity();
+void dfw_time_start(std::string);
+void dfw_time_end(std::string);
 
 const int primary_width   = PRIMARY_WIDTH;
 const int secondary_width = SECONDARY_WIDTH;
@@ -259,7 +261,7 @@ struct Interface {
     static thread_local anydsl::Array<float> cpu_secondary;
     static thread_local anydsl::Array<float> cpu_primary_outgoing;
     static thread_local anydsl::Array<float> cpu_secondary_outgoing;
-    static thread_local anydsl::Array<int32_t> cpu_record_light_field;
+    anydsl::Array<int32_t> *cpu_record_light_field;
 
 #ifdef ENABLE_EMBREE_DEVICE
     EmbreeDevice embree_device;
@@ -279,6 +281,7 @@ struct Interface {
     size_t film_height;
 
     std::mutex mtx;    
+    bool first_write; 
     std::ofstream os;
 
     Interface(size_t width, size_t height)
@@ -292,6 +295,11 @@ struct Interface {
         host_primary_num = anydsl::Array<int32_t>(128);
         printf("light field size %d\n", light_field_res * light_field_res * 6 * dfw_chunk_size() * 2);
         int light_field_size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
+        
+        cpu_record_light_field = new anydsl::Array<int32_t>[light_field_size];
+        for(int i = 0; i < dfw_thread_num(); i++)
+            cpu_record_light_field[i] = anydsl::Array<int32_t>(light_field_size);
+        
         host_record_light_field = anydsl::Array<int32_t>(light_field_size);
         std::fill(host_record_light_field.begin(), host_record_light_field.end(), 0);
         host_render_light_field = anydsl::Array<int32_t>(light_field_size);
@@ -312,12 +320,6 @@ struct Interface {
     anydsl::Array<int32_t>& render_light_field_list(int32_t dev) {
         int size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
         return resize_array(dev, devices[dev].cpu_render_light_field, size, 1);
-    }
-    
-    anydsl::Array<int32_t>& cpu_record_light_field_list() {
-        int size = light_field_res * light_field_res * 6 * 2 * dfw_chunk_size();
-        printf("resize record light field %d\n", size);
-        return resize_array(0, cpu_record_light_field, size, 1);
     }
     
 
@@ -566,7 +568,6 @@ thread_local anydsl::Array<float> Interface::cpu_primary;
 thread_local anydsl::Array<float> Interface::cpu_secondary;
 thread_local anydsl::Array<float> Interface::cpu_primary_outgoing;
 thread_local anydsl::Array<float> Interface::cpu_secondary_outgoing;
-thread_local anydsl::Array<int32_t> Interface::cpu_record_light_field;
 
 static std::unique_ptr<Interface> interface;
 
@@ -756,6 +757,7 @@ void rodent_load_bvh8_tri4(int32_t dev, const char* file, Node8** nodes, Tri4** 
 
 //cpu
 void rodent_cpu_get_primary_stream(PrimaryStream* primary, int32_t size) {
+    dfw_time_start("render prepare data");
     auto& array = interface->cpu_primary_stream(size);
     get_primary_stream(*primary, array.data(), array.size() / primary_width);
 }
@@ -781,10 +783,26 @@ void rodent_cpu_get_secondary_outgoing_stream(SecondaryStream* buffer, int32_t s
     get_secondary_stream(*buffer, array.data(), array.size() / secondary_width);
 }
 
-void rodent_cpu_get_record_light_field(LightField *light_field) {
-    auto& array = interface->cpu_record_light_field_list();
-    std::fill(array.begin(), array.end(), 0);
+void rodent_cpu_get_record_light_field(LightField *light_field, int tid, bool clear) {
+    auto& array = interface->cpu_record_light_field[tid];
+    if(clear) {
+        interface->first_write = true;
+        std::fill(array.begin(), array.end(), 0);
+    }
+   //     int size = light_field_res * light_field_res * 6 * dfw_chunk_size();
+   //     int ed = size * 2;
+   //     int chk_size = dfw_chunk_size();
+   //     for (int i = size; i < ed; i++){
+   //         int its = ((array[i] >> 8) & 0xFF ) - 1;
+   //         if(its >= 254 || its == -1) continue; 
+   //         else { 
+   //             if(its < 0|| its > chk_size - 1) {
+   //                 printf("get rocord error its %d\n", its);
+   //             }
+   //         }
+   //     }
     get_light_field(*light_field, array.data()); 
+    dfw_time_end("render prepare data");
 }
 
 void rodent_get_render_light_field(int32_t dev, LightField *light_field) {
@@ -918,7 +936,68 @@ int32_t rodent_out_stream_capacity() {
 }
 
 int32_t rodent_light_field_resolution() {
+    dfw_time_end("run => render thread => get start ");
     return LIGHT_FIELD_RES;
+}
+
+inline int get_its(int a, int b) {
+    if(a == 255) return 255;
+    if(b == 0) return a;
+    return b;
+}
+
+int its_cmp(int a, int b) {
+    int res = 0;
+    res += get_its((a & 0xFF), (b & 0xFF));
+    res += (get_its(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
+    res += (get_its(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
+    res += (get_its(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
+    return res;
+}
+
+void rodent_save_light_field(int32_t dev, int32_t tid) {
+    if(dev == -1) {
+        std::lock_guard <std::mutex> lock(interface->mtx); 
+        int* array = interface->cpu_record_light_field[tid].data();
+        int* host = interface->host_record_light_field.data();
+        int size = light_field_res * light_field_res * 6 * dfw_chunk_size();
+        if(interface->first_write) {
+            memcpy(host, array, 2 * size * sizeof(int));
+            interface->first_write = false;
+            return;
+        }
+        for (int i = 0; i < size; i++){
+            host[i] += array[i];
+        }
+        int ed = size * 2;
+        int chk_size = dfw_chunk_size();
+        for (int i = size; i < ed; i++){
+            host[i] = its_cmp(host[i], array[i]);
+
+         //   int its = ((array[i] >> 8) & 0xFF ) - 1;
+         //   if(its >= 254 || its == -1) continue; 
+         //   else { 
+         //       if(its < 0|| its > chk_size - 1) {
+         //           printf("interface error its %d\n", its);
+         //       } 
+         //   }
+        }
+       //     host[i] = its_cmp(host[i], array[i]);
+       //     int its = host[i] & 0xFF;
+       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+       //     its = (host[i] >> 8) & 0xFF;
+       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+       //     its = (host[i] >> 16) & 0xFF;
+       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+       //     its = (host[i] >> 24) & 0xFF;
+       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+    } else {
+        error("only cpu");
+    }
+}
+
+int* rodent_get_light_field() {
+    interface->host_record_light_field.data();
 }
 
 void rodent_worker_primary_send(int32_t dev, int buffer_size) {
@@ -979,52 +1058,6 @@ int32_t rodent_worker_secondary_recv(int32_t dev, int32_t rays_size, bool isFirs
         }
     }
     return size_new;
-}
-
-inline int get_its(int a, int b) {
-    if(a == 255) return 255;
-    if(b == 0) return a;
-    return b;
-}
-
-int its_cmp(int a, int b) {
-    int res = 0;
-    res += get_its((a & 0xFF), (b & 0xFF));
-    res += (get_its(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
-    res += (get_its(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
-    res += (get_its(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
-    return res;
-}
-
-void rodent_save_light_field(int32_t dev) {
-    if(dev == -1) {
-        std::lock_guard <std::mutex> lock(interface->mtx); 
-        int* array = interface->cpu_record_light_field.data();
-        int* host = interface->host_record_light_field.data();
-        int size = light_field_res * light_field_res * 6 * dfw_chunk_size();
-        for (int i = 0; i < size; i++){
-            host[i] += array[i];
-        }
-        int ed = size * 2;
-        int chk_size = dfw_chunk_size();
-        for (int i = size; i < ed; i++){
-            host[i] = its_cmp(host[i], array[i]);
-            int its = host[i] & 0xFF;
-            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-            its = (host[i] >> 8) & 0xFF;
-            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-            its = (host[i] >> 16) & 0xFF;
-            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-            its = (host[i] >> 24) & 0xFF;
-            if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-        }
-    } else {
-        error("only cpu");
-    }
-}
-
-int* rodent_get_light_field() {
-    interface->host_record_light_field.data();
 }
 
 void rodent_update_render_light_field(int32_t* new_light_field, int32_t size) {

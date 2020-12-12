@@ -437,14 +437,6 @@ fn @cpu_get_film_data() -> (&mut [f32], i32, i32) {
     (film_pixels, film_width, film_height)
 }
 
-fn @make_pre_render_data_writer(pixel_size: i32) -> fn(i32, i32, i32, bool) -> () {
-    let mut prerender_data: &mut[i32];
-    rodent_get_prerender_data(&mut prerender_data);
-    @|pixel, dep, chunk, secondary| {
-        prerender_data(pixel + pixel_size * dep) = chunk;    
-    }
-}
-
 fn @cpu_primary_transfer( primary: PrimaryStream
                         , buffer: OutRayStream
                         , min_max: MinMax
@@ -658,6 +650,7 @@ fn @cpu_dis_trace( scene: Scene
     let mut shadow_counter   = 0i64;
     let mut shading_counter  = 0i64;
     let mut transfer_counter = 0i64;
+    let mut sendrecv_counter = 0i64;
     let mut total_counter    = 0i64;
 
     let valid_camera = scene.camera.valid; 
@@ -684,7 +677,7 @@ fn @cpu_dis_trace( scene: Scene
             let mut record_field :LightField;
             let mut render_field :LightField;
             rodent_get_render_light_field(0, &mut render_field);
-            rodent_cpu_get_record_light_field(&mut record_field);
+            rodent_cpu_get_record_light_field(&mut record_field, tid, valid_camera);
             
             let mut id = 0;
             if !valid_camera { id = num_rays; }
@@ -720,7 +713,7 @@ fn @cpu_dis_trace( scene: Scene
                         primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, true); 
                     }
                 }
-                if(primary.size < 0) { rodent_save_light_field(-1); break()}
+                if(primary.size < 0) { break() }
                 secondary.size = 0;
                 if primary.size > 0 { 
                     // Trace primary rays
@@ -768,7 +761,7 @@ fn @cpu_dis_trace( scene: Scene
                         //check_secondary_cur_chk(secondary, scene.cur_chk, 99);
                     }
                 }
-                if secondary.size < 0 { rodent_save_light_field(-1); break() }
+                if secondary.size < 0 { break() }
                 if secondary.size == 0 { continue()}
                 
                 //rodent_secondary_check(-1, secondary.size, out_primary.size, 1, true); 
@@ -825,7 +818,6 @@ fn @cpu_dis_trace( scene: Scene
 fn @make_cpu_device(  use_embree: bool
                     , vector_compact: bool
                     , single: bool
-                    , prerender: bool
                     , min_max: MinMax
                     , vector_width: i32
                     , tile_size: i32
@@ -880,26 +872,23 @@ fn @make_cpu_device(  use_embree: bool
     }
 }
 
-fn @make_prerender_avx_device() -> Device {
-    make_cpu_device(false, true, true, true, make_default_min_max(), 8, 128)
-}
 
 fn @make_avx2_device(use_embree: bool) -> Device {
-    make_cpu_device(use_embree, true, true, false, make_cpu_int_min_max(), 8, 32)
+    make_cpu_device(use_embree, true, true, make_cpu_int_min_max(), 8, 32)
 }
 
 fn @make_avx_device() -> Device {
-    make_cpu_device(false, true, true, false, make_default_min_max(), 8, 32)
+    make_cpu_device(false, true, true, make_default_min_max(), 8, 32)
 }
 
 fn @make_sse42_device() -> Device {
-    make_cpu_device(false, false, true, false, make_cpu_int_min_max(), 4, 16)
+    make_cpu_device(false, false, true, make_cpu_int_min_max(), 4, 16)
 }
 
 fn @make_asimd_device() -> Device {
-    make_cpu_device(false, false, false, false, make_cpu_int_min_max(), 4, 16)
+    make_cpu_device(false, false, false, make_cpu_int_min_max(), 4, 16)
 }
 
 fn @make_cpu_default_device() -> Device {
-    make_cpu_device(false, false, false, false, make_default_min_max(), 1, 16)
+    make_cpu_device(false, false, false, make_default_min_max(), 1, 16)
 }

@@ -108,6 +108,8 @@ public:
     
     void switch_current_chunk();
 
+    int switch_current_chunk(RayStreamList *); 
+
     void set_exit() {exit = true;}
     
     void set_working() {exit = false;}
@@ -150,6 +152,24 @@ ProcStatus::~ProcStatus() {
     proc_idle.clear();
     global_rays.clear();
     printf("procstatus delete\n");
+}
+
+int ProcStatus::switch_current_chunk(RayStreamList * outlist) {
+    int local_size = local_chunks.size();
+    int max = 0, new_chk = -1;
+    for(int i = 0; i < local_size; i++) {
+        int chk = local_chunks[i];
+        if(chk != current_chunk && outlist[chk].size() > max) {
+            new_chk = chk;
+            max = outlist[chk].size();
+        }    
+    }
+    if(new_chk == -1) {
+        error("no !empty local chunk stream list");
+        return -1;
+    }
+    current_chunk = new_chk;
+    load_new_chunk = true;
 }
 
 void ProcStatus::switch_current_chunk() {
