@@ -255,14 +255,12 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps,
         case ArrayRay: {
             ps->accumulate_recv(recv_msg->get_ray_size());
             //set itself busy
-            ps->set_proc_busy(rank);
             recv_ray_count++;
             return true; 
         }
         case StreamRay: {
             ps->accumulate_recv(recv_msg->get_ray_size());
             //set itself busy
-            ps->set_proc_busy(rank);
             recv_ray_count++;
             return true;
         }

@@ -30,6 +30,8 @@ private:
     bool rough_trace;
 public:    
     Scheduler *camera;   
+    std::mutex thread_mutex;
+    std::condition_variable thread_wakeup; 
     std::vector<int>  global_rays;
     
     ~ProcStatus(); 
@@ -99,6 +101,8 @@ public:
     void set_proc_busy(int i){ proc_idle[i] = false; }
     
     void set_proc_idle(int i){proc_idle[i] = true; }
+    
+    void set_proc_idle(){proc_idle[proc_rank] = true; }
     
     int get_dev_num() {return dev_num;}
     

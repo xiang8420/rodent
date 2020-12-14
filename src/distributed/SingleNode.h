@@ -3,7 +3,7 @@ struct SingleNode : public Node{
     
     ~SingleNode();
     
-    int load_incoming_buffer(float **, size_t, bool, int, bool) { return -1; }; 
+    int load_incoming_buffer(float **, bool, int) { return -1; }; 
     
     void save_outgoing_buffer(float *, size_t, bool){} ; 
     

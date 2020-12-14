@@ -7,7 +7,7 @@ struct SyncNode : public Node{
     
     int get_unloaded_chunk(int *);
     
-    int load_incoming_buffer(float **, size_t, bool, int, bool); 
+    int load_incoming_buffer(float **, bool, int); 
     
     void save_outgoing_buffer(float *rays, size_t size, bool primary);
     
@@ -128,7 +128,7 @@ int SyncNode::get_unloaded_chunk(int* list_size) {
     return unloaded_chunk;
 }
 
-int SyncNode::load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) {
+int SyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
     printf("load incoming buffer\n");
     comm->os<<"rthread load incoming buffer inlist size "<<inList.size()<<"\n";
     if(inList.empty()) { return -1; } 
@@ -139,12 +139,12 @@ int SyncNode::load_incoming_buffer(float **rays, size_t rays_size, bool primary,
     struct RaysStream *rays_stream;
     if(primary && inList.primary_size() > 0) {
         if(inList.secondary_size() > inList.primary_size())
-            return rays_size;
+            return 0;
         rays_stream = inList.get_primary();
     } else if (!primary && inList.secondary_size() > 0) {
         rays_stream = inList.get_secondary();
     } else {
-        return rays_size;
+        return 0;
     }
 
     statistics.start("run => work_thread => load_incoming_buffer-copy");
@@ -186,7 +186,7 @@ int SyncNode::load_incoming_buffer(float **rays, size_t rays_size, bool primary,
     delete rays_stream;
 
     statistics.end("run => work_thread => load_incoming_buffer-copy");
-    return copy_size + rays_size;
+    return copy_size;
         
 }
 

@@ -15,7 +15,7 @@ struct AllCopyNode : public Node{
 
     static void message_thread(void* tmp);
     
-    int load_incoming_buffer(float **, size_t, bool, int, bool) { }; 
+    int load_incoming_buffer(float **, bool, int) { }; 
     
     void run(Scheduler * camera);
     

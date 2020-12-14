@@ -21,6 +21,13 @@ struct RetiredRays {
         printf("new retired ray size %d width %d \n", size, width);
         memcpy((char*)data, (char*)rays, capacity * sizeof(float));
     }
+    RetiredRays(int size, bool primary)
+        :size(size), primary(primary) 
+    {
+        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
+        int capacity = size * width;
+        data = new float[capacity]; 
+    }
 
     ~RetiredRays() {
         delete[] data;
@@ -53,7 +60,7 @@ public:
 
     virtual void run(Scheduler * camera) = 0;
 
-    virtual int load_incoming_buffer(float **rays, size_t rays_size, bool primary, int thread_id, bool thread_wait) = 0;
+    virtual int load_incoming_buffer(float **rays, bool primary, int thread_id) = 0;
     
     virtual void save_outgoing_buffer(float *, size_t, bool) = 0; 
     
@@ -111,12 +118,12 @@ void Node::launch_rodent_render(Scheduler * splitter, int devNum, bool generate_
 
 void Node::loop_check(float i) {
     if(1) {    
-        int mem = physical_memory_used_by_process();
-        if(/*i> 1000 ||*/mem != pre_mem) {
-            comm->os<<i<<" memory use "<<mem<<"\n"; 
-            max_used_mem = std::max(mem, max_used_mem);
-            pre_mem = mem;
-        }
+//        int mem = physical_memory_used_by_process();
+//        if(/*i> 1000 ||*/mem != pre_mem) {
+//            comm->os<<i<<" memory use "<<mem<<"\n"; 
+//            max_used_mem = std::max(mem, max_used_mem);
+//            pre_mem = mem;
+//        }
         //printf("%d mark %f\n", comm->get_rank(), i);
     }
 }

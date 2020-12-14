@@ -2,17 +2,36 @@
 #include <fstream>
 #include "unistd.h"
 #include <sys/syscall.h>
+#include <algorithm>
+#include <functional>
+
 #define gettid() syscall(SYS_gettid)
 
 using namespace std::chrono;
+
+struct FunctionRunTime {
+    std::string name;
+    high_resolution_clock::time_point st;
+    float time;
+    int times;
+
+    FunctionRunTime(std::string s, high_resolution_clock::time_point st, float time, int times) 
+        : name(s), st(st), time(time), times(times) {}
+        
+    bool operator <(const FunctionRunTime& func) const {
+         return time < func.time;
+    }
+    
+    bool operator > (const FunctionRunTime& func) const {
+         return time > func.time;
+    }
+};
+
+
 struct TimeStatistics {
-
-    std::vector<std::string>                       func_name;
-    std::vector<high_resolution_clock::time_point> func_st;
-    std::vector<float>                             func_time;
-    std::vector<int>                               func_num_run;
-    high_resolution_clock::time_point              app_st;
-
+    
+    std::vector<FunctionRunTime> func;
+    high_resolution_clock::time_point app_st;
     std::mutex  mtx;
 
     TimeStatistics(){
@@ -20,50 +39,42 @@ struct TimeStatistics {
     }
 
     void start(const std::string &name) {
-        std::string fname = name + " " + std::to_string(gettid());
+        std::string fname = name;// + " " + std::to_string(gettid());
         std::unique_lock <std::mutex> lock(mtx); 
-        std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), fname);
-        if( iter != func_name.end() ) {
-            int pos = distance(func_name.begin(), iter);
-            func_st[pos] = std::chrono::high_resolution_clock::now(); 
-            func_num_run[pos]++;
-        } else {
-            func_name.emplace_back(fname); 
-            func_st.emplace_back(std::chrono::high_resolution_clock::now());
-            func_time.emplace_back(0.0);
-            func_num_run.emplace_back(1); 
+        int size = func.size();
+        int i = 0;
+        for(i; i < size; i++) {
+            if(func[i].name == fname) {
+                func[i].st = std::chrono::high_resolution_clock::now(); 
+                func[i].times++;
+                return;
+            } 
         }
-
-       // for(int i = 0; i < func_name.size(); i++) {
-       //     if(func_name[i] == name) {
-       //         func_st[i]
-       //         break;
-       //     }
-       // }
-       // if()
+        func.emplace_back(FunctionRunTime(fname, std::chrono::high_resolution_clock::now(), 0.0, 1));
     }
 
     void end(const std::string &name) {
-        std::string fname = name + " " + std::to_string(gettid());
+        std::string fname = name;// + " " + std::to_string(gettid());
         std::unique_lock <std::mutex> lock(mtx); 
-        std::vector<std::string>::iterator iter = find(func_name.begin(), func_name.end(), fname);
-        for(int i = 0; i < func_name.size(); i++) {
-            if(func_name[i] == fname) {
-                func_time[i] += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func_st[i]).count();
-                return ;
-            }
+        int size = func.size();
+        int i = 0;
+        for(i; i < size; i++) {
+            if(func[i].name == fname) {
+                func[i].time += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func[i].st).count();
+                func[i].times++;
+                return;
+            } 
         }
-        warn("cant find func fname\n");
-        warn(fname);
+        warn("cant find func fname ", fname, "\n");
     }
     
     void print(std::ofstream &os) {
         float all_time = duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - app_st).count();
+        sort(func.begin(), func.end(), std::greater<FunctionRunTime>());
         os<<"| Statistic : numbers of call, time \n";
-        for(int i = 0; i < func_name.size(); i++) {
-            os<<"| "<<func_name[i]<<"  ( "<<func_num_run[i]<<" , "<<func_time[i]<<" , "<<func_time[i] / all_time * 100<<"% )\n";
+        for(int i = 0; i < func.size(); i++) {
+            os<<"| "<<func[i].name<<"  ( "<<func[i].times<<" , "<<func[i].time<<" , "<<func[i].time / all_time * 100<<"% )\n";
         }     
-    
     } 
 
 };

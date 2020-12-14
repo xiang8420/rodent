@@ -40,11 +40,9 @@ extern "C" {
     fn rodent_out_stream_capacity() -> i32;
     fn rodent_light_field_resolution() -> i32;
 
-    fn rodent_get_prerender_data(&mut &mut [i32]) -> ();
     fn rodent_worker_primary_send(i32, i32) -> ();    
     fn rodent_worker_secondary_send(i32, i32) -> ();    
-    fn rodent_worker_primary_recv(i32, i32, bool, i32, bool) -> i32;
-    fn rodent_worker_secondary_recv(i32, i32, bool, i32, bool) -> i32;
+    fn rodent_rays_export(i32, i32, i32, bool, bool, i32) -> i32; 
 }
 
 // Ray streams ---------------------------------------------------------------------

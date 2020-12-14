@@ -44,7 +44,6 @@ struct RaysStream {
     void fill_array(float * ptr, int st, int copy_size, int rank) {
         int* iptr = (int*)ptr;
         int ed = size + copy_size;
-        printf("fill size %d copy_size %d logic_capacity%d store_capacity %d rank %d \n", size, copy_size, logic_capacity, store_capacity, rank);
         assert(ed <= logic_capacity);
         int pre_size = size;
         for(int i = 0; i < width; i++) {

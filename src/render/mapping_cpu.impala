@@ -702,15 +702,9 @@ fn @cpu_dis_trace( scene: Scene
                 }
                 with cpu_profile(&mut sendrecv_counter) {       
                     if primary.size == 0  && secondary.size ==0 && id == num_rays  {
-                        if(out_primary.size > 0) {
-                            rodent_worker_primary_send(-1, out_primary.size);
-                            out_primary.size = 0;
-                        }
-                        if out_secondary.size > 0 {
-                            rodent_worker_secondary_send(-1, out_secondary.size);
-                            out_secondary.size = 0;
-                        }
-                        primary.size = rodent_worker_primary_recv(-1, primary.size, true, tid, true); 
+                        primary.size = rodent_rays_export(-1, out_primary.size, out_secondary.size, true, true, tid); 
+                        out_primary.size = 0;
+                        out_secondary.size = 0;
                     }
                 }
                 if(primary.size < 0) { break() }
@@ -726,7 +720,6 @@ fn @cpu_dis_trace( scene: Scene
                     // Perform (vectorized) shading
                     with cpu_profile(&mut shading_counter) {
                         let mut begin = 0;
-                        rodent_first_primary_check(-1, primary.size, 1, true);
                         for geom_id in unroll(0, scene.num_geometries) {
                             let end = ray_ends(geom_id);
                             cpu_shade(geom_id, primary, secondary, scene, cur_chk_bbox, record_field, path_tracer, accumulate, begin, end, vector_width);
@@ -748,15 +741,9 @@ fn @cpu_dis_trace( scene: Scene
                 //check_secondary_cur_chk(secondary, scene.cur_chk, 88);
                 with cpu_profile(&mut sendrecv_counter) {
                     if primary.size ==0 && secondary.size == 0 && id == num_rays {
-                        if(out_primary.size > 0) {
-                            rodent_worker_primary_send(-1, out_primary.size);
-                            out_primary.size = 0;
-                        }
-                        if out_secondary.size > 0 {
-                            rodent_worker_secondary_send(-1, out_secondary.size);
-                            out_secondary.size = 0;
-                        }
-                        secondary.size = rodent_worker_secondary_recv(-1, secondary.size, true, tid, true); 
+                        secondary.size = rodent_rays_export(-1, out_primary.size, out_secondary.size, true, false, tid); 
+                        out_primary.size = 0;
+                        out_secondary.size = 0;
                         //rodent_secondary_check(-1, secondary.size, out_primary.size, 1, true); 
                         //check_secondary_cur_chk(secondary, scene.cur_chk, 99);
                     }

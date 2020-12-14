@@ -17,8 +17,8 @@ void rodent_update_render_light_field(int32_t*, int32_t);
 }
 #include "../driver/common.h"
 #include "statistic.h"
-#include "ProcStatus.h"
 #include "communicator.h"
+#include "ProcStatus.h"
 #include "decomposition.h"
 
 #include "Node.h"
@@ -318,9 +318,9 @@ void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
     statistics.end("run => work_thread => send");
 }
 
-int recv_rays(float **rays, size_t size, bool isPrimary, int thread_id, bool thread_wait){
+int recv_rays(float **rays, bool isPrimary, int thread_id){
     statistics.start("run => work_thread => load_incoming_buffer");
-    int res = dfw->node->load_incoming_buffer(rays, size, isPrimary, thread_id, thread_wait);
+    int res = dfw->node->load_incoming_buffer(rays, isPrimary, thread_id);
     statistics.end("run => work_thread => load_incoming_buffer");
     return res;
 }

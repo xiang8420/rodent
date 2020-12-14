@@ -113,9 +113,10 @@ inline size_t physical_memory_used_by_process() {
 #define INTERSECT_FIELD_RES 128
 #define INTERSECT_FIELD_RES 128
 #define VIS_LIGHT_FIELD true
-#define STREAM_CAPACITY 256 * 256
+#define STREAM_CAPACITY 128 * 128
 #define OUT_BUFFER_CAPACITY 1024 * 1024 
-#define OUT_BUFFER true
+#define OUT_BUFFER true 
+#define MIN_SEND_STREAM_SIZE 5
 
 
 #endif // COMMON_H

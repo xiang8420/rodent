@@ -16,7 +16,7 @@
 #include "image.h"
 #include "buffer.h"
 void send_rays(float *, size_t, size_t, bool);
-int  recv_rays(float **, size_t, bool, int, bool);
+int  recv_rays(float **, bool, int);
 void master_save_ray_batches(float*, size_t, size_t, size_t);
 
 int dfw_thread_num();
@@ -296,8 +296,9 @@ struct Interface {
         printf("light field size %d\n", light_field_res * light_field_res * 6 * dfw_chunk_size() * 2);
         int light_field_size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
         
-        cpu_record_light_field = new anydsl::Array<int32_t>[light_field_size];
-        for(int i = 0; i < dfw_thread_num(); i++)
+        int thread_num = dfw_thread_num();
+        cpu_record_light_field = new anydsl::Array<int32_t>[thread_num];
+        for(int i = 0; i < thread_num; i++)
             cpu_record_light_field[i] = anydsl::Array<int32_t>(light_field_size);
         
         host_record_light_field = anydsl::Array<int32_t>(light_field_size);
@@ -806,7 +807,7 @@ void rodent_cpu_get_record_light_field(LightField *light_field, int tid, bool cl
 }
 
 void rodent_get_render_light_field(int32_t dev, LightField *light_field) {
-    std::lock_guard <std::mutex> lock(interface->mtx); 
+    std::unique_lock <std::mutex> lock(interface->mtx); 
     auto& array = interface->render_light_field_list(dev);
     int size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
     get_light_field(*light_field, array.data()); 
@@ -1001,21 +1002,19 @@ int* rodent_get_light_field() {
 }
 
 void rodent_worker_primary_send(int32_t dev, int buffer_size) {
+    if(buffer_size == 0) return;
     if(dev == -1) {
         auto& array = interface->cpu_primary_outgoing;
-        printf("interface before send primary\n");
         send_rays(array.data(), buffer_size, array.size() / primary_width, true);
-        printf("interface after send primary\n");
     } else {
         int capacity = interface->gpu_outgoing_primary(dev) / primary_width;
         auto& array  = interface->host_outgoing_primary;
-        printf("interface before send secondary\n");
         send_rays(array.data(), buffer_size, capacity, true);
-        printf("interface after send secondary\n");
     }
 }
 
 void rodent_worker_secondary_send(int32_t dev, int buffer_size) {
+    if(buffer_size == 0) return;
     if(dev == -1) {
         auto& array = interface->cpu_secondary_outgoing;
 //            printf("array.size %d buffer size %d\n ", array.size() / secondary_width, buffer_size);
@@ -1026,38 +1025,40 @@ void rodent_worker_secondary_send(int32_t dev, int buffer_size) {
         send_rays(array.data(), buffer_size, capacity, false);
     }
 }
-
-int32_t rodent_worker_primary_recv(int32_t dev, int32_t rays_size, bool isFirst, int32_t thread_id, bool thread_wait) {
+int rodent_rays_export(int32_t dev, int32_t out_primary_size, int32_t out_secondary_size, bool isFirst, bool primary, int32_t tid) {
+    
+    rodent_worker_primary_send(dev, out_primary_size);
+    rodent_worker_secondary_send(dev, out_secondary_size);
+    
     int size_new = 0;
-    if(dev == -1){
-        float* array = interface->cpu_primary.data();
-        size_new = recv_rays(&array, rays_size, true, thread_id, thread_wait); 
+    
+    if(dev == -1) {
+        if(primary) {
+            float* array = interface->cpu_primary.data();
+            size_new = recv_rays(&array, true, tid); 
+        } else {
+            float* array = interface->cpu_secondary.data();
+            size_new = recv_rays(&array, false, tid); 
+        }
     } else {
-        float* array = interface->host_primary.data();
-        size_new = recv_rays(&array, rays_size, true, thread_id, thread_wait);
-        if(size_new > 0)
-            isFirst ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
-    }
-    return size_new;
-}
-
-void rodent_memory_check(int32_t tag) {
-    interface->os<<tag<<" "<<physical_memory_used_by_process()<<"mb \n";
-}
-
-int32_t rodent_worker_secondary_recv(int32_t dev, int32_t rays_size, bool isFirst, int32_t thread_id, bool thread_wait) {
-    int size_new = 0;
-    if(dev == -1){
-        float* array = interface->cpu_secondary.data();
-        size_new = recv_rays(&array, rays_size, false, thread_id, thread_wait); 
-    } else {
-        float* array = interface->host_secondary.data();
-        size_new = recv_rays(&array, rays_size, false, thread_id, thread_wait);
-        if(size_new > 0) {
-            isFirst ? interface->load_first_secondary(dev) : interface->load_second_secondary(dev);
+        if(primary) {
+            float* array = interface->host_primary.data();
+            size_new = recv_rays(&array, true, tid);
+            if(size_new > 0)
+                isFirst ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
+        } else {
+            float* array = interface->host_secondary.data();
+            size_new = recv_rays(&array, false, tid);
+            if(size_new > 0) {
+                isFirst ? interface->load_first_secondary(dev) : interface->load_second_secondary(dev);
+            }
         }
     }
     return size_new;
+} 
+
+void rodent_memory_check(int32_t tag) {
+    interface->os<<tag<<" "<<physical_memory_used_by_process()<<"mb \n";
 }
 
 void rodent_update_render_light_field(int32_t* new_light_field, int32_t size) {
