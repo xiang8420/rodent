@@ -17,16 +17,15 @@ void rodent_update_render_light_field(int32_t*, int32_t);
 }
 #include "../driver/common.h"
 #include "statistic.h"
+#include "scheduler.h"
 #include "communicator.h"
 #include "ProcStatus.h"
-#include "decomposition.h"
 
 #include "Node.h"
 #include "SingleNode.h"
 #include "SyncNode.h"
 #include "AllCopyNode.h"
 //#include "MasterWorker.h"
-
 #include "AsyncNode.h"
 
 static void save_image(float *result, const std::string& out_file, size_t width, size_t height, uint32_t iter) {
@@ -53,128 +52,6 @@ static void save_image(float *result, const std::string& out_file, size_t width,
     if (!save_png(out_file, img))
         error("Failed to save PNG file '", out_file, "'");
 }
-
-static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
-    int res = LIGHT_FIELD_RES;
-    ImageRgba32 img;
-    img.width = res * 6 + 20;
-    img.height = res * chunk_size;
-    img.pixels.reset(new uint8_t[img.width * img.height * 4]);
-
-    int width = img.width; 
-    int height = img.height;
-    
-    std::vector<rgb> color;
-    for(int i = 0; i < chunk_size; i++) {
-        rgb col(rand() % 255, rand() % 255, rand() % 255 ); 
-        color.emplace_back(col);
-        for(int h = 0; h < 128; h++) {
-            int ph = i * 128 + h; 
-            for(int w = 0; w < 19; w ++) {
-
-                img.pixels[4 * (ph * width + w) + 0] = col.x; 
-                img.pixels[4 * (ph * width + w) + 1] = col.y;
-                img.pixels[4 * (ph * width + w) + 2] = col.z;
-                img.pixels[4 * (ph * width + w) + 3] = 255;
-            }
-        }
-    }
-
-    rgb black(0.0, 0.0, 0.0);
-
-    int all_face_size = res * res * 6;
-    int face_size = res * res;
-    int inv_spp = 1;
-    for(int i = 0; i < chunk_size; i++) {
-        int h_st = res * i; 
-        for(int j = 0; j < 6; j++) {
-            int w_st = 20 + res * j;
-            for(int u = 0; u < res; u++) {
-                int pu = w_st + u;
-                for(int v = 0; v < res; v++) {
-                    int pv = h_st + v;
-                    if(v == res - 1 || u == res - 1) {
-                        img.pixels[4 * (pv * width + pu) + 0] = 0;
-                        img.pixels[4 * (pv * width + pu) + 1] = 255;
-                        img.pixels[4 * (pv * width + pu) + 2] = 0;
-                        img.pixels[4 * (pv * width + pu) + 3] = 255;
-                    } else { 
-                        int id = all_face_size * i + face_size * j + (res - 1 - v) * res + u;
-                        int recv_its = reduce_buffer[id];
-                    //    int its = (recv_its & 0xFF) - 1;
-                        int its = ((recv_its >> 8) & 0xFF ) - 1;
-                    //    int its = ((recv_its >> 16) & 0xFF ) - 1;
-                    //    int its = ((recv_its >> 24) & 0xFF ) - 1;
-
-                
-                        rgb *col;
-                        if(its >= 254 || its == -1) col = &black;
-                        else { 
-                            if(its < 0|| its > chunk_size - 1) {
-                                col = &black;
-                            } else
-                                col = &color[its];
-                        }
-                        img.pixels[4 * (pv * width + pu) + 0] = col->x;
-                        img.pixels[4 * (pv * width + pu) + 1] = col->y;
-                        img.pixels[4 * (pv * width + pu) + 2] = col->z;
-                        img.pixels[4 * (pv * width + pu) + 3] = 255;
-                    }
-                }
-            }
-        }
-    }
-    if (!save_png(std::string("picture/light_field_its.png"), img))
-        error("Failed to save PNG file light_field.png");
-}
-
-static void save_image_ctrb(int* reduce_buffer, int chunk_size, float spp) {
-    int res = LIGHT_FIELD_RES;
-    ImageRgba32 img;
-    img.width = res * 6;
-    img.height = res * chunk_size;
-    img.pixels.reset(new uint8_t[img.width * img.height * 4]);
-
-    int width = img.width; 
-    int height = img.height;
-    int all_face_size = res * res * 6;
-    int face_size = res * res;
-    int inv_spp = 1;//5 / spp;
-
-    for(int i = 0; i < chunk_size; i++) {
-        int h_st = res * i; 
-        for(int j = 0; j < 6; j++) {
-            int w_st = res * j;
-            for(int u = 0; u < res; u++) {
-                int pu = w_st + u;
-                for(int v = 0; v < res; v++) {
-                    int pv = h_st + v;
-                    
-                    int lu = reduce_buffer[all_face_size * i + face_size * j + (res - 1 - v) * res + u];
-                    int lu_q0 = lu & 0xFF;
-                    int lu_q1 = lu >> 8  & 0xFF;
-                    int lu_q2 = lu >> 16 & 0xFF;
-                    int lu_q3 = lu >> 24 & 0xFF;
-                    
-                    int lu_q = lu_q0;// + lu_q1 + lu_q2 + lu_q3; 
-                    img.pixels[4 * (pv * width + pu) + 0] = lu_q; // (lu_q >> 4) * inv_spp; 
-                    img.pixels[4 * (pv * width + pu) + 1] = lu_q; // ((lu_q >> 2) & 0x3) * inv_spp;
-                    img.pixels[4 * (pv * width + pu) + 2] = lu_q; // (lu_q & 0x3) * inv_spp;
-                    img.pixels[4 * (pv * width + pu) + 3] = 255;
-                    if(v == res - 1 || u == res - 1) {
-                        img.pixels[4 * (pv * width + pu) + 0] = 255;
-                        img.pixels[4 * (pv * width + pu) + 1] = 0;
-                        img.pixels[4 * (pv * width + pu) + 2] = 0;
-                        img.pixels[4 * (pv * width + pu) + 3] = 255;
-                    } 
-                } 
-            }
-        } 
-    }
-    if (!save_png(std::string("picture/light_field_ctrb.png"), img))
-        error("Failed to save PNG file light_field.png");
-}
-//
 
 struct DistributedFrameWork {
     Scheduler *scheduler;
@@ -254,8 +131,8 @@ struct DistributedFrameWork {
         
         statistics.end("run");
         statistics.start("process light lield");
-   //     if(comm->get_size() > 1)
-   //        save_light_field(rodent_get_light_field(), scheduler->get_spp());
+        if(comm->get_size() > 1)
+           save_light_field(rodent_get_light_field(), scheduler->get_spp());
         statistics.end("process light lield");
         statistics.print(comm->os);
 

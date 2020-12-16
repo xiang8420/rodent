@@ -46,11 +46,10 @@ struct TimeStatistics {
         for(i; i < size; i++) {
             if(func[i].name == fname) {
                 func[i].st = std::chrono::high_resolution_clock::now(); 
-                func[i].times++;
                 return;
             } 
         }
-        func.emplace_back(FunctionRunTime(fname, std::chrono::high_resolution_clock::now(), 0.0, 1));
+        func.emplace_back(FunctionRunTime(fname, std::chrono::high_resolution_clock::now(), 0.0, 0));
     }
 
     void end(const std::string &name) {

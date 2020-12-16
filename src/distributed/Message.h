@@ -39,11 +39,11 @@ protected:
     char *content;
 
 public:
-    Message(){ statistics.start("new MSG"); }
+    Message(){  }
     
-    Message(MessageHeader *h): header(h) { statistics.start("new MSG");}
+    Message(MessageHeader *h): header(h) {}
 
-    ~Message() { statistics.end("new MSG"); delete header; }
+    ~Message() { delete header; }
 
     // write content to a raylists
     int write_raylist(struct RayArrayList *outlist);
@@ -325,7 +325,6 @@ public:
 
     ~RecvMsg() { 
         delete[] content; 
-        statistics.end("run => message_thread => recv_message => RecvMsg => new RecvMsg");
     }
 };
 

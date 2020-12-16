@@ -998,6 +998,10 @@ void rodent_save_light_field(int32_t dev, int32_t tid) {
 }
 
 int* rodent_get_light_field() {
+    //only save cpu data!!
+    int thread_num = dfw_thread_num();
+    for(int i = 0; i < thread_num; i++) 
+        rodent_save_light_field(-1, 0); 
     interface->host_record_light_field.data();
 }
 

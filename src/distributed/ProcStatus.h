@@ -4,8 +4,6 @@
 #include "../driver/interface.h"
 #include <iostream>
 #include <thread>
-#include "decomposition.h"
-
 
 class ProcStatus {
 private:
@@ -31,7 +29,6 @@ private:
 public:    
     Scheduler *camera;   
     std::mutex thread_mutex;
-    std::condition_variable thread_wakeup; 
     std::vector<int>  global_rays;
     
     ~ProcStatus(); 
@@ -130,7 +127,7 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
 {
     work_thread_num = 8;//std::thread::hardware_concurrency();
     thread_idle.resize(work_thread_num);
-    thread_reset(); 
+    thread_reset();
     proc_reset();
      
     exit = false;

@@ -14,7 +14,7 @@
 #include "interface.h"
 #include "obj.h"
 #include "buffer.h"
-#include "../distributed/decomposition.h" 
+#include "../distributed/scheduler.h" 
 #include "simplify.h"
 #ifdef WIN32
 #include <direct.h>

@@ -1,3 +1,32 @@
+struct RetiredRays {
+    float* data;
+    int size;
+    bool primary;
+    int width;
+
+    RetiredRays(float* rays, int size, bool primary)
+        :size(size), primary(primary) 
+    {
+        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
+        int capacity = size * width;
+        data = new float[capacity]; 
+        printf("new retired ray size %d width %d \n", size, width);
+        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
+    }
+    RetiredRays(int size, bool primary)
+        :size(size), primary(primary) 
+    {
+        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
+        int capacity = size * width;
+        data = new float[capacity]; 
+    }
+
+    ~RetiredRays() {
+        delete[] data;
+    }
+};
+
+
 // Original Master-Worker mode 
 struct AsyncNode : public Node {
 
@@ -36,10 +65,9 @@ struct AsyncNode : public Node {
     RayStreamList* outlist_render;
 
     std::vector<RetiredRays*> retiredRays; 
-    std::mutex  retired_mutex;
+    std::mutex retired_mutex;
     std::condition_variable retired_cond_full; 
 
-    std::condition_variable thread_wakeup; 
     int chunk_size;
     bool wait_respond;
 };
@@ -52,6 +80,14 @@ bool AsyncNode::outList_empty() {
     return true;//retiredRays.empty();
 }
 
+void swap_array(float *rays, int k, int j, int width) {
+    int *tmp = new int[width];
+    memcpy(tmp, &rays[width * k], width * sizeof(float));
+    memcpy(&rays[width * k], &rays[width * j], width * sizeof(float));
+    memcpy(&rays[width * j], tmp, width * sizeof(float));
+    delete[] tmp; 
+}
+    
 void sort_ray_array(float* rays, int size, int chunk_size, bool primary){
     int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
     std::vector<int> end;
@@ -100,13 +136,11 @@ void AsyncNode::copy_to_inlist(int current_chunk) {
 }
 
 RayMsg* AsyncNode::export_ray_msg(int cId, int rank, int dst, bool idle, int tag) {
-    RayMsg * msg;
-    if(!OUT_BUFFER)
-        std::unique_lock <std::mutex> lock(outlist_comm[0].mutex); 
-    msg = new RayMsg(outlist_comm[cId], rank, dst, cId, idle, tag); 
+    std::unique_lock <std::mutex> lock(outlist_comm[0].mutex); 
+    RayMsg *msg = new RayMsg(outlist_comm[cId], rank, dst, cId, idle, tag); 
     return msg;
 }
-    
+
 bool AsyncNode::allList_empty() {
    // std::lock_guard <std::mutex> lock(out_mutex); 
     int chunk_size = ps->get_chunk_size(); 
@@ -128,6 +162,7 @@ AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
     for(int i = 0; i < chunk_size; i++)
         outlist_comm[i].set_capacity(logic_capacity, store_capacity);
     inlist_comm.set_capacity(logic_capacity, store_capacity);
+    inlist_render.set_capacity(logic_capacity, store_capacity);
     wait_respond = false;
 }
 
@@ -215,38 +250,26 @@ void AsyncNode::send_message() {
 
 void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
     statistics.start("run => work_thread => save_outgoing");
-    sort_ray_array(rays, size, chunk_size, primary);
 
-    if(OUT_BUFFER) {
-        printf("save to retired rays %d\n", size); 
-        RetiredRays *retired_rays = new RetiredRays(rays, size, primary);
-        std::lock_guard <std::mutex> lock(retired_mutex); 
-        retiredRays.emplace_back(retired_rays);
-    } else {
-        std::lock_guard <std::mutex> lock(outlist_comm[0].mutex); 
-        
-        statistics.start("run => work_thread => send => get_mutex");
-        RayStreamList::read_from_device_buffer(outlist_comm, rays, size, primary, chunk_size, comm->get_rank());
-        for(int i = 0; i < chunk_size; i++) 
-            printf("outstreamlist size %d p %d s %d\n", i, outlist_comm[i].primary_size(), outlist_comm[i].secondary_size());
-        statistics.end("run => work_thread => send => get_mutex");
-    }
-    statistics.end("run => work_thread => save_outgoing");
+    RetiredRays *retired_rays = new RetiredRays(rays, size, primary);
+    std::lock_guard <std::mutex> thread_lock(retired_mutex); 
+    retiredRays.emplace_back(retired_rays);
+
+    if(retiredRays.size() > 10)
+        clear_retired_rays();
 }
 
 void AsyncNode::clear_retired_rays() {
-//    statistics.start("run => message_thread => clear_retired => get mutex");
-    std::unique_lock <std::mutex> lock(retired_mutex); 
-//    while(outList_empty() && !ps->is_proc_idle()) {
-//        comm->os<<"mthread wait retired rays\n";
-//        retired_cond_full.wait(lock);
-//    }
-//    statistics.end("run => message_thread => clear_retired => get mutex");
+    statistics.start("run => message_thread => clear_retired => get mutex");
+    compact_retired_rays();       
+    std::unique_lock <std::mutex> lock(outlist_comm[0].mutex); 
     while(!retiredRays.empty()) {
         RetiredRays* rays = retiredRays.back();
         comm->os<<"retired ray size "<<rays->size<<"\n"; 
         retiredRays.pop_back();
+        statistics.start("run => message_thread => clear_retired => read_from_device");
         RayStreamList::read_from_device_buffer(outlist_comm, rays->data, rays->size, rays->primary, chunk_size, comm->get_rank());
+        statistics.end("run => message_thread => clear_retired => read_from_device");
         delete rays;
     }
 }
@@ -375,10 +398,6 @@ void AsyncNode::message_thread(void* tmp) {
         wk->loop_check(3.5);
         //clear_outlist();
         
-        statistics.start("run => message_thread => clear_retired");
-        wk->clear_retired_rays();
-        statistics.end("run => message_thread => clear_retired");
-        
         statistics.start("run => message_thread => send_message");
         wk->loop_check(3.7);
         wk->send_message();
@@ -389,7 +408,6 @@ void AsyncNode::message_thread(void* tmp) {
         statistics.end("run => message_thread => new_chunk");
 
         statistics.start("run => message_thread => sleep");
-        usleep(100);
         statistics.end("run => message_thread => sleep");
         statistics.end("run => message_thread => loop");
 	}
@@ -402,8 +420,6 @@ void AsyncNode::message_thread(void* tmp) {
              <<std::endl;
     return;
 } 
-
-
 
 void AsyncNode::run(Scheduler * camera) {
     
@@ -420,9 +436,9 @@ void AsyncNode::run(Scheduler * camera) {
         if(iter != 0) {        
             std::unique_lock <std::mutex> inlock(inlist_comm.mutex); 
             
-            //compact_retired_rays()       
-            
-            //retired_cond_full.notify_one();
+            if(!retiredRays.empty()) {
+                clear_retired_rays();
+            }
             
             if(inlist_comm.empty()) {
                 ps->set_proc_idle();
@@ -431,7 +447,6 @@ void AsyncNode::run(Scheduler * camera) {
                     inlist_comm.cond_full.wait(inlock);
                 }
                 if(ps->Exit()) {
-                //    rodent_save_light_field();
                     break;
                 }
             }

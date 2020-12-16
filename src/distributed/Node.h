@@ -1,39 +1,4 @@
 
-void swap_array(float *rays, int k, int j, int width) {
-    int *tmp = new int[width];
-    memcpy(tmp, &rays[width * k], width * sizeof(float));
-    memcpy(&rays[width * k], &rays[width * j], width * sizeof(float));
-    memcpy(&rays[width * j], tmp, width * sizeof(float));
-    delete[] tmp; 
-}
-    
-struct RetiredRays {
-    float* data;
-    int size;
-    bool primary;
-    int width;
-    RetiredRays(float* rays, int size, bool primary)
-        :size(size), primary(primary) 
-    {
-        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
-        int capacity = size * width;
-        data = new float[capacity]; 
-        printf("new retired ray size %d width %d \n", size, width);
-        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
-    }
-    RetiredRays(int size, bool primary)
-        :size(size), primary(primary) 
-    {
-        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
-        int capacity = size * width;
-        data = new float[capacity]; 
-    }
-
-    ~RetiredRays() {
-        delete[] data;
-    }
-};
-
 class Node {
 
 protected:
