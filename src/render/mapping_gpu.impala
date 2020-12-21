@@ -609,7 +609,6 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let mut first_primary = true;
 
     let num_chunks = (scene.chunk.x * scene.chunk.y * scene.chunk.z) as i32;
-    let mut idle = false; 
 
     print_i32(num_chunks);
     print_size("start rendering\n", num_rays, "\n");

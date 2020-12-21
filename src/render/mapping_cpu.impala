@@ -337,12 +337,12 @@ fn @mark_out_rays(primary: &PrimaryStream, cur_chk: i32, chk_bbox: BBox, geom: G
         
         primary.rays.tmin(i) = primary.t(i) + 0.00003f;
         if org_chks(i) == cur_chk {
-            org_chks(i) = org_chks(i) + get_light_field_coord(chk_bbox, surf.point, ray.dir, res, cpu_intrinsics); 
+            org_chks(i) = org_chks(i) + get_chunk_hit_coord(chk_bbox, surf.point, ray.dir, res, cpu_intrinsics); 
         }
     }
 }
 
-fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream, scene: Scene, chk_bbox: BBox, record_field: LightField,
+fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream, scene: Scene, chk_bbox: BBox, record_chunk_hit: LightField,
             path_tracer: PathTracer, accumulate: fn (i32, Color) -> (), begin: i32, end: i32, vector_width: i32) -> () 
 {
     fn cpu_shade_specialized(primary: &PrimaryStream, secondary: &SecondaryStream, begin: i32, end: i32) -> () {
@@ -382,11 +382,7 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
                                 rv_extract(hit_color.b, lane)
                             );
                 accumulate(j, color);
-                if primary.org_chk(i) >> 8 != 0 && primary.org_chk(i) & 0xFF != scene.cur_chk {
-                   // print_string("on_hit: "); 
-                   // print_i32(primary.org_chk(i)); 
-                    write_light_field(primary.org_chk(i), color, scene.cur_chk, record_field);                        
-                }
+                write_chunk_hit(primary.org_chk(i), color, scene.cur_chk, record_chunk_hit);
             }
 
             // Compute shadow rays
@@ -467,7 +463,7 @@ fn @cpu_primary_transfer( primary: PrimaryStream
             // if 3 4 bounce write to chunk n
             if scene.rough_trace && depth(src_id) > 1 {
                 write_next_chk(src_id, 0, num_chunks);
-            } else {     
+            } else {
                 if next_chks(src_id) == 1022  {
                     if inside_point_bbox(bbox, ray.org){
                         let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
@@ -539,11 +535,13 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
         let its = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
         let chk = vec3_mul(vec3_sub(its, bbox.min), inv_step);
         let nchk = coordinate_compress(chk, chunk_scale, bbox.max, cpu_intrinsics);
-        let ochk = scene.cur_chk + get_light_field_coord(chk_bbox, its, ray.dir, res, cpu_intrinsics); 
+        let ochk = scene.cur_chk + get_chunk_hit_coord(chk_bbox, its, ray.dir, res, cpu_intrinsics); 
         
         if secondary.next_chk(src_id) == scene.num_geometries && nchk != scene.cur_chk {
             write_next_chk(src_id, 0, nchk);
-            secondary.org_chk(src_id) = ochk; 
+            if org_chks(src_id) / 256 == 0 {
+                org_chks(src_id) = ochk; 
+            }
         } else {
             write_next_chk(src_id, 0, 255);
         }
@@ -658,7 +656,7 @@ fn @cpu_dis_trace( scene: Scene
     let logic_capacity = rodent_stream_logic_capacity();
     let store_capacity = rodent_stream_store_capacity();
     let out_stream_capacity = rodent_out_stream_capacity();
-    let light_field_res = rodent_light_field_resolution();
+    let chunk_hit_res = rodent_chunk_hit_resolution();
     print_string("start rendering\n");   
     for xmin, ymin, xmax, ymax, spp_thread, tid in cpu_parallel_tiles(scene.camera.tile, 0, false) {
         with cpu_profile(&mut total_counter) {
@@ -674,10 +672,10 @@ fn @cpu_dis_trace( scene: Scene
             rodent_cpu_get_out_ray_stream(&mut out_primary,   out_stream_capacity, true);
             rodent_cpu_get_out_ray_stream(&mut out_secondary, out_stream_capacity, false);
             
-            let mut record_field :LightField;
-            let mut render_field :LightField;
-            rodent_get_render_light_field(0, &mut render_field);
-            rodent_cpu_get_record_light_field(&mut record_field, tid, valid_camera);
+            let mut record_chunk_hit :LightField;
+            let mut render_chunk_hit :LightField;
+            rodent_get_render_chunk_hit(0, &mut render_chunk_hit);
+            rodent_cpu_get_record_chunk_hit(&mut record_chunk_hit, tid, valid_camera);
             
             let mut id = 0;
             if !valid_camera { id = num_rays; }
@@ -722,12 +720,12 @@ fn @cpu_dis_trace( scene: Scene
                         let mut begin = 0;
                         for geom_id in unroll(0, scene.num_geometries) {
                             let end = ray_ends(geom_id);
-                            cpu_shade(geom_id, primary, secondary, scene, cur_chk_bbox, record_field, path_tracer, accumulate, begin, end, vector_width);
+                            cpu_shade(geom_id, primary, secondary, scene, cur_chk_bbox, record_chunk_hit, path_tracer, accumulate, begin, end, vector_width);
                             begin = end;
                         }
                         //mark_out_rays(primary, cur_chk_bbox, begin, ray_ends(scene.num_geometries));
                         let geom_id = scene.num_geometries;
-                        mark_out_rays(primary, scene.cur_chk, cur_chk_bbox, scene.geometries(geom_id), record_field.res, begin, ray_ends(geom_id));
+                        mark_out_rays(primary, scene.cur_chk, cur_chk_bbox, scene.geometries(geom_id), record_chunk_hit.res, begin, ray_ends(geom_id));
  
                         // Filter terminated rays
                         primary.size   = ray_ends(scene.num_geometries);
@@ -762,18 +760,18 @@ fn @cpu_dis_trace( scene: Scene
                     //rodent_secondary_check(-1, secondary.size, out_primary.size, 1, true); 
                     // Add the contribution for secondary rays to the frame buffer
                     for i in range(0, secondary.size) {
-                        if secondary.prim_id(i) < 0 /* || secondary.cur_chk(i) == scene.num_geometries */{
+                        if secondary.prim_id(i) < 0 {
                             let j = secondary.rays.id(i);
                             let color = make_color(secondary.color_r(i), secondary.color_g(i), secondary.color_b(i));
-                            let org_chk = secondary.org_chk(i);
-                            let sec_chk_id = org_chk & 0xFF;
-                            if org_chk >> 8 != 0 && sec_chk_id != scene.cur_chk {
-                                write_light_field(org_chk, color, scene.cur_chk, record_field);
-                            }
-                            accumulate(j, color);
+                            accumulate(j, color); 
+                            write_chunk_hit(secondary.org_chk(i), color, scene.cur_chk, record_chunk_hit);
+                            write_chunk_hit(secondary.pri_chk(i), color, secondary.org_chk(i) & 0xFF, record_chunk_hit); //同一个光亮加了两次，不合理
+                        } else if ( !secondary.next_chk(i) == scene.num_geometries) {
+                            write_chunk_hit(secondary.org_chk(i), make_color(0 as f32, 0 as f32, 0 as f32), scene.cur_chk, record_chunk_hit);
+                            write_chunk_hit(secondary.pri_chk(i), make_color(0 as f32, 0 as f32, 0 as f32), secondary.org_chk(i) & 0xFF, record_chunk_hit);
                         }
                     }
-                    out_secondary.size = cpu_secondary_transfer(secondary, out_secondary, min_max, vector_width, id == num_rays, scene, cur_chk_bbox, light_field_res);
+                    out_secondary.size = cpu_secondary_transfer(secondary, out_secondary, min_max, vector_width, id == num_rays, scene, cur_chk_bbox, chunk_hit_res);
                     secondary.size = 0; 
                     //check_secondary_cur_chk(secondary, scene.cur_chk, 3);
                 }

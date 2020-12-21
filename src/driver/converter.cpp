@@ -12,9 +12,9 @@
 #include "embree_bvh.h"
 #endif
 #include "interface.h"
+#include "../distributed/MeshChunk.h"
 #include "obj.h"
 #include "buffer.h"
-#include "../distributed/scheduler.h" 
 #include "simplify.h"
 #ifdef WIN32
 #include <direct.h>

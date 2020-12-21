@@ -28,7 +28,7 @@ public:
 
     void reduce(float* film, float *reduce_buffer, int pixel_num);
     
-    void update_light_field(int *, int *, int);
+    void update_chunk_hit(int *, int *, int);
 
     void all_gather_float(float *a, float *res, int size); 
 
@@ -100,6 +100,7 @@ inline int get_its(int a, int b) {
 }
 
 int its_cmp(int a, int b) {
+    if(a == b) return a;
     int res = 0;
     res += get_its((a & 0xFF), (b & 0xFF));
     res += (get_its(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
@@ -108,7 +109,7 @@ int its_cmp(int a, int b) {
     return res;
 }
 
-void Communicator::update_light_field(int *org_buf, int * recv_buf, int buf_size) {
+void Communicator::update_chunk_hit(int *org_buf, int * recv_buf, int buf_size) {
     MPI_Reduce(org_buf, recv_buf, buf_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
     
     int * org_its = &org_buf[buf_size];
@@ -182,8 +183,7 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
         return 0;
     }
 
-	int tag = (MPI_TAG_UB) ? t % MPI_TAG_UB : t % 65535;
-	t++;
+	int tag = t++; //(MPI_TAG_UB) ? t % MPI_TAG_UB : t % 65535;
 
 	// If its a broadcast message, choose up to two destinations based
 	// on the broadcast root, the rank and the size.  Otherwise, just ship it.
@@ -233,7 +233,6 @@ int Communicator::Export(Message *m, ProcStatus *rs) {
 bool Communicator::process_message(Message *recv_msg, ProcStatus *ps, 
                                 RayStreamList *outStreamList) 
 {
-
     if (recv_msg->is_broadcast()) {
         Export(recv_msg, ps); 
     }

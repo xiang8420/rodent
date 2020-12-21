@@ -147,7 +147,7 @@ bool AsyncNode::allList_empty() {
     for(int i = 0; i < chunk_size; i++)
         if(!outlist_comm[i].empty()) 
             return false;
-    return inlist_comm.empty();// && retiredRays.empty();
+    return true;
 }
 
 AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
@@ -202,7 +202,6 @@ void AsyncNode::send_message() {
                 QuitMsg quit_msg(comm->get_rank(), comm->get_tag()); 
                 comm->send_message(&quit_msg, ps);
                 ps->set_exit();
-                return;
             } else {
                 if(!comm->isMaster()) {
                     statistics.start("run => message_thread => send_messagei => status");
@@ -213,7 +212,8 @@ void AsyncNode::send_message() {
                 comm->os<<"mthread send status\n";
                 wait_respond = true;
             }
-        } else if(outList_empty()) {
+        } else if (outList_empty()) {
+            statistics.start("run => message_thread => send_message => switch_chunk");
             ///load new chunk
             ps->switch_current_chunk(outlist_comm);
           //  ps->switch_current_chunk();
@@ -222,30 +222,30 @@ void AsyncNode::send_message() {
             copy_to_inlist(current_chunk);
             inlist_comm.cond_full.notify_all();
             inlist_render.cond_full.notify_all();
-            return;
         } else {
             comm->os<<"still has rays to send\n";
         }
     } 
 
     int cId = get_sent_list();
-    if (cId >= 0) {
-        comm->os<<"mthread outlist empty "<<cId<<" "<<outlist_comm[cId].size()<<"\n";
+    do {
         if(cId >= 0) {
             int dst_proc = ps->get_proc(cId);
-            comm->os<<"chunk "<<cId<<" get proc "<<dst_proc<<"\n";
             if(dst_proc >= 0) {
                 ps->set_proc_busy(dst_proc);
                 statistics.start("run => message_thread => send_message => new RayMsg");
                 RayMsg *ray_msg = export_ray_msg(cId, comm->get_rank(), dst_proc, false, comm->get_tag()); 
                 statistics.end("run => message_thread => send_message => new RayMsg");
+                statistics.start("run => message_thread => send_message => comm->send");
                 comm->send_message(ray_msg, ps);
+                statistics.end("run => message_thread => send_message => comm->send");
                 delete ray_msg;
             } else {
                 error("ray msg");
             }
         }
-    }
+        cId = get_sent_list();
+    } while(cId >= 0 && ps->is_proc_idle());
 }
 
 void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
@@ -377,9 +377,7 @@ void AsyncNode::message_thread(void* tmp) {
         
         statistics.end("run => message_thread => recv_message");
          
-        if(ps->Exit()) {
-            break;
-        }
+        if(ps->Exit()) break;
 
         wk->loop_check(1);
         statistics.start("run => message_thread => inlist not empty");
@@ -391,9 +389,7 @@ void AsyncNode::message_thread(void* tmp) {
         wk->loop_check(3);
         usleep(500);
 
-        if(ps->Exit()) {
-            break;
-        }
+        if(ps->Exit()) break;
         
         wk->loop_check(3.5);
         //clear_outlist();
@@ -404,11 +400,7 @@ void AsyncNode::message_thread(void* tmp) {
         wk->loop_check(4);
         comm->purge_completed_mpi_buffers();
         statistics.end("run => message_thread => send_message");
-        statistics.start("run => message_thread => new_chunk");
-        statistics.end("run => message_thread => new_chunk");
 
-        statistics.start("run => message_thread => sleep");
-        statistics.end("run => message_thread => sleep");
         statistics.end("run => message_thread => loop");
 	}
     wk->inlist_comm.cond_full.notify_all();
@@ -456,8 +448,9 @@ void AsyncNode::run(Scheduler * camera) {
             ps->set_proc_busy(comm->get_rank());
         }
 
-        statistics.start("run => render thread => get start ");
+        statistics.start("run => work_thread => render");
         launch_rodent_render(camera, deviceNum, iter==0);
+        statistics.end("run => work_thread => render");
 
         iter++;
     } while(!ps->Exit());

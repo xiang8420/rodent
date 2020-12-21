@@ -30,7 +30,7 @@ void dfw_time_end(std::string);
 
 const int primary_width   = PRIMARY_WIDTH;
 const int secondary_width = SECONDARY_WIDTH;
-const int light_field_res = LIGHT_FIELD_RES;
+const int chunk_hit_res = CHUNK_HIT_RES;
 
 template <typename Node, typename Tri>
 struct Bvh {
@@ -253,7 +253,7 @@ struct Interface {
         anydsl::Array<float> outgoing_secondary;
         anydsl::Array<float> film_pixels;
         
-        anydsl::Array<int32_t> cpu_render_light_field;
+        anydsl::Array<int32_t> cpu_render_chunk_hit;
     };
     std::unordered_map<int32_t, DeviceData> devices;
     
@@ -261,7 +261,7 @@ struct Interface {
     static thread_local anydsl::Array<float> cpu_secondary;
     static thread_local anydsl::Array<float> cpu_primary_outgoing;
     static thread_local anydsl::Array<float> cpu_secondary_outgoing;
-    anydsl::Array<int32_t> *cpu_record_light_field;
+    anydsl::Array<int32_t> *cpu_record_chunk_hit;
 
 #ifdef ENABLE_EMBREE_DEVICE
     EmbreeDevice embree_device;
@@ -274,8 +274,8 @@ struct Interface {
     anydsl::Array<float> host_outgoing_primary;
     anydsl::Array<float> host_outgoing_secondary;
     anydsl::Array<int32_t> host_primary_num;
-    anydsl::Array<int32_t> host_record_light_field;
-    anydsl::Array<int32_t> host_render_light_field;
+    anydsl::Array<int32_t> host_record_chunk_hit;
+    anydsl::Array<int32_t> host_render_chunk_hit;
 
     size_t film_width;
     size_t film_height;
@@ -293,18 +293,18 @@ struct Interface {
         tmp_pixels  = anydsl::Array<float>(width * height * 3);
         
         host_primary_num = anydsl::Array<int32_t>(128);
-        printf("light field size %d\n", light_field_res * light_field_res * 6 * dfw_chunk_size() * 2);
-        int light_field_size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
+        printf("light field size %d\n", chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2);
+        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
         
         int thread_num = dfw_thread_num();
-        cpu_record_light_field = new anydsl::Array<int32_t>[thread_num];
+        cpu_record_chunk_hit = new anydsl::Array<int32_t>[thread_num];
         for(int i = 0; i < thread_num; i++)
-            cpu_record_light_field[i] = anydsl::Array<int32_t>(light_field_size);
+            cpu_record_chunk_hit[i] = anydsl::Array<int32_t>(chunk_hit_size);
         
-        host_record_light_field = anydsl::Array<int32_t>(light_field_size);
-        std::fill(host_record_light_field.begin(), host_record_light_field.end(), 0);
-        host_render_light_field = anydsl::Array<int32_t>(light_field_size);
-        std::fill(host_render_light_field.begin(), host_render_light_field.end(), 0);
+        host_record_chunk_hit = anydsl::Array<int32_t>(chunk_hit_size);
+        std::fill(host_record_chunk_hit.begin(), host_record_chunk_hit.end(), 0);
+        host_render_chunk_hit = anydsl::Array<int32_t>(chunk_hit_size);
+        std::fill(host_render_chunk_hit.begin(), host_render_chunk_hit.end(), 0);
         os = std::ofstream("mem_check");
     }
 
@@ -318,9 +318,9 @@ struct Interface {
         return array;
     }
 
-    anydsl::Array<int32_t>& render_light_field_list(int32_t dev) {
-        int size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
-        return resize_array(dev, devices[dev].cpu_render_light_field, size, 1);
+    anydsl::Array<int32_t>& render_chunk_hit_list(int32_t dev) {
+        int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
+        return resize_array(dev, devices[dev].cpu_render_chunk_hit, size, 1);
     }
     
 
@@ -647,11 +647,11 @@ inline void get_out_ray_stream(OutRayStream& out, float* ptr, size_t capacity, s
     out.size = 0;
 }
 
-inline void get_light_field(LightField& light_field, int* ptr) {
-    light_field.ctrb     = ptr;
-    light_field.its      = ptr + light_field_res * light_field_res * 6 * dfw_chunk_size();
-    light_field.res      = light_field_res;
-    light_field.chk_cap  = light_field_res * light_field_res * 6;
+inline void get_chunk_hit(LightField& chunk_hit, int* ptr) {
+    chunk_hit.ctrb     = ptr;
+    chunk_hit.its      = ptr + chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
+    chunk_hit.res      = chunk_hit_res;
+    chunk_hit.chk_cap  = chunk_hit_res * chunk_hit_res * 6;
 }
 
 inline void copy_primary_ray(PrimaryStream a, PrimaryStream b, int src_id, int dst_id, bool keep_hit) {
@@ -784,13 +784,13 @@ void rodent_cpu_get_secondary_outgoing_stream(SecondaryStream* buffer, int32_t s
     get_secondary_stream(*buffer, array.data(), array.size() / secondary_width);
 }
 
-void rodent_cpu_get_record_light_field(LightField *light_field, int tid, bool clear) {
-    auto& array = interface->cpu_record_light_field[tid];
+void rodent_cpu_get_record_chunk_hit(LightField *chunk_hit, int tid, bool clear) {
+    auto& array = interface->cpu_record_chunk_hit[tid];
     if(clear) {
         interface->first_write = true;
         std::fill(array.begin(), array.end(), 0);
     }
-   //     int size = light_field_res * light_field_res * 6 * dfw_chunk_size();
+   //     int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
    //     int ed = size * 2;
    //     int chk_size = dfw_chunk_size();
    //     for (int i = size; i < ed; i++){
@@ -802,16 +802,16 @@ void rodent_cpu_get_record_light_field(LightField *light_field, int tid, bool cl
    //             }
    //         }
    //     }
-    get_light_field(*light_field, array.data()); 
+    get_chunk_hit(*chunk_hit, array.data()); 
     dfw_time_end("render prepare data");
 }
 
-void rodent_get_render_light_field(int32_t dev, LightField *light_field) {
+void rodent_get_render_chunk_hit(int32_t dev, LightField *chunk_hit) {
     std::unique_lock <std::mutex> lock(interface->mtx); 
-    auto& array = interface->render_light_field_list(dev);
-    int size = light_field_res * light_field_res * 6 * dfw_chunk_size() * 2;
-    get_light_field(*light_field, array.data()); 
-    memcpy(array.data(), interface->host_render_light_field.data(), size * sizeof(int));
+    auto& array = interface->render_chunk_hit_list(dev);
+    int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
+    get_chunk_hit(*chunk_hit, array.data()); 
+    memcpy(array.data(), interface->host_render_chunk_hit.data(), size * sizeof(int));
 }
 
 //gpu
@@ -936,9 +936,8 @@ int32_t rodent_out_stream_capacity() {
     return dfw_out_stream_capacity(); 
 }
 
-int32_t rodent_light_field_resolution() {
-    dfw_time_end("run => render thread => get start ");
-    return LIGHT_FIELD_RES;
+int32_t rodent_chunk_hit_resolution() {
+    return CHUNK_HIT_RES;
 }
 
 inline int get_its(int a, int b) {
@@ -956,12 +955,12 @@ int its_cmp(int a, int b) {
     return res;
 }
 
-void rodent_save_light_field(int32_t dev, int32_t tid) {
+void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
     if(dev == -1) {
         std::lock_guard <std::mutex> lock(interface->mtx); 
-        int* array = interface->cpu_record_light_field[tid].data();
-        int* host = interface->host_record_light_field.data();
-        int size = light_field_res * light_field_res * 6 * dfw_chunk_size();
+        int* array = interface->cpu_record_chunk_hit[tid].data();
+        int* host = interface->host_record_chunk_hit.data();
+        int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
         if(interface->first_write) {
             memcpy(host, array, 2 * size * sizeof(int));
             interface->first_write = false;
@@ -997,12 +996,12 @@ void rodent_save_light_field(int32_t dev, int32_t tid) {
     }
 }
 
-int* rodent_get_light_field() {
+int* rodent_get_chunk_hit() {
     //only save cpu data!!
     int thread_num = dfw_thread_num();
     for(int i = 0; i < thread_num; i++) 
-        rodent_save_light_field(-1, 0); 
-    interface->host_record_light_field.data();
+        rodent_save_chunk_hit(-1, 0); 
+    interface->host_record_chunk_hit.data();
 }
 
 void rodent_worker_primary_send(int32_t dev, int buffer_size) {
@@ -1065,8 +1064,8 @@ void rodent_memory_check(int32_t tag) {
     interface->os<<tag<<" "<<physical_memory_used_by_process()<<"mb \n";
 }
 
-void rodent_update_render_light_field(int32_t* new_light_field, int32_t size) {
-    memcpy(interface->host_record_light_field.data(), new_light_field, size * sizeof(int));
+void rodent_update_render_chunk_hit(int32_t* new_chunk_hit, int32_t size) {
+    memcpy(interface->host_record_chunk_hit.data(), new_chunk_hit, size * sizeof(int));
 }
 
 void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t size) {

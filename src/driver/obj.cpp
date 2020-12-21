@@ -7,7 +7,6 @@
 
 #include "common.h"
 #include "obj.h"
-#include "../distributed/scheduler.h"
 namespace obj {
 
 struct TriIdx {

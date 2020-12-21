@@ -29,7 +29,7 @@ set(RODENT_SRCS
     core/sort.impala
     core/vector.impala
     core/file.impala
-    render/light_field.impala
+    render/chunk_hit.impala
     render/image.impala
     render/camera.impala
     render/geometry.impala
@@ -52,7 +52,6 @@ set(DRIVER_SRCS
     driver/interface.cpp
     distributed/Node.h 
     distributed/ProcStatus.h
-    distributed/decomposition.h
     driver/driver.cpp
     driver/obj.cpp
     driver/obj.h

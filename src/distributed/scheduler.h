@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <memory>
+#include <cstring>
 #include <mutex>
 #include <utility>
 #include "../driver/float3.h"
@@ -8,84 +9,12 @@
 #include "../driver/obj.h"
 #include "../driver/image.h"
 #include "../driver/interface.h"
+#include "MeshChunk.h"
 
 #ifndef PI 
 #define PI 3.14159265359f
 #endif
 
-inline void splat(size_t n, float* grid, int d) {
-    for(int i = 0; i < d; i++) 
-        grid[i] = 1; 
-
-    int axit = 0;
-    int cur_n = n;
-    //choose longest axit splat
-    while(cur_n != 1){
-        grid[axit] *= 2;
-        axit = ++axit % d;
-        cur_n /= 2;
-    }
-}
-
-//Splitting bounding box for distributed computing
-
-struct MeshChunk{
-    std::vector<BBox>      list;
-    BBox                   bbox;
-    float3                 scale;
-    float3                 step; 
-    int                    size;
-
-    MeshChunk(BBox bbox, int grid_num):bbox(bbox) {
-        splat(grid_num, &scale[0], 3);
-        chunk_division();
-        size = scale[0] * scale[1] * scale[2];
-    }
-    
-    MeshChunk() {
-        bbox  = BBox(get_bbox());
-        scale = float3(get_chunk());
-        chunk_division();
-        size = get_chunk_num();
-    }
-    
-    bool chunk_division() {
-        
-        // shortest axis and cut it
-        float3 length = {bbox.max.x - bbox.min.x, bbox.max.y - bbox.min.y, bbox.max.z - bbox.min.z};
-        int axis = 0;
-        float minlength = length[0];
-        for(int i = 1; i< 3; i++){
-           if(minlength > length[i]){
-               minlength = length[i];
-               axis = i;
-           }
-        }
-        for(int i = 0; i < 3; i++){
-            step[i] = length[i] / scale[i];
-        }
-
-        for(int i = 0; i < scale[0]; i++){
-            float x = bbox.min.x + i * step.x;
-            for(int j = 0; j < scale[1]; j++){
-                float y = bbox.min.y + j * step.y;
-                for(int k = 0; k < scale[2]; k++){
-                    float z = bbox.min.z + k * step.z;
-                    struct BBox bb;
-                    bb.min.x = x - 0.001f;
-                    bb.min.y = y - 0.001f;
-                    bb.min.z = z - 0.001f;
-                    bb.max.x = std::min(bbox.max.x, x + step.x + 0.001f);
-                    bb.max.y = std::min(bbox.max.y, y + step.y + 0.001f);
-                    bb.max.z = std::min(bbox.max.z, z + step.z + 0.001f);
-                    list.push_back(bb);  //emplace_back
-                }
-            }
-        }
-        return true;
-    }
-};
-  
 static void write_project_result(int width, int height, int* domain) {
     ImageRgba32 img;
     img.width = width;
@@ -113,7 +42,7 @@ static void write_project_result(int width, int height, int* domain) {
 }
 
 static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
-    int res = LIGHT_FIELD_RES;
+    int res = CHUNK_HIT_RES;
     ImageRgba32 img;
     img.width = res * 6 + 20;
     img.height = res * chunk_size;
@@ -182,12 +111,12 @@ static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
             }
         }
     }
-    if (!save_png(std::string("picture/light_field_its.png"), img))
-        error("Failed to save PNG file light_field.png");
+    if (!save_png(std::string("picture/chunk_hit_its.png"), img))
+        error("Failed to save PNG file chunk_hit.png");
 }
 
 static void save_image_ctrb(int* reduce_buffer, int chunk_size, float spp) {
-    int res = LIGHT_FIELD_RES;
+    int res = CHUNK_HIT_RES;
     ImageRgba32 img;
     img.width = res * 6;
     img.height = res * chunk_size;
@@ -229,8 +158,8 @@ static void save_image_ctrb(int* reduce_buffer, int chunk_size, float spp) {
             }
         } 
     }
-    if (!save_png(std::string("picture/light_field_ctrb.png"), img))
-        error("Failed to save PNG file light_field.png");
+    if (!save_png(std::string("picture/chunk_hit_ctrb.png"), img))
+        error("Failed to save PNG file chunk_hit.png");
 }
 //
 struct ImageBlock {
@@ -294,29 +223,19 @@ struct Camera {
 };
 
 // Grid hierarchy for scheduling
-struct Scheduler {
-    float2 scale;
-    
-    int width, height, spp, proc_spp;
-    int block_count; 
-    
-    //multi process load same chunk. 
-    ImageBlock render_block, chunk_project_block; 
-
-    std::vector<int>   domain;
-    std::vector<float> depth;
-    std::vector<ImageBlock> blockList;
-
-    Camera* camera;
-    std::vector<std::pair<int, int>> chunk_map;
-
-    Scheduler(){}
-
+class Scheduler {
+public:
     ImageBlock project_cube_to_image(Camera *camera, BBox box, int chunk, bool Record, ImageBlock image);
 
+    void get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image, bool simple_mesh); 
+
+    void process_left_chunk(int, bool);
+    
     void image_domain_decomposition(Camera *cam, int block, int proc_rank, int proc_size, bool simple_mesh, bool sync);
     
     void split_image_block(Camera *cam, int block, int proc_rank, int proc_size);
+    
+    void chunk_reallocation(int* reduce_buffer); 
     
     int chunk_loaded(int chunk); 
 
@@ -333,7 +252,41 @@ struct Scheduler {
     int get_spp() { return spp; }
     
     Scheduler( int width, int height, int spp);
+    
+    ~Scheduler();
+
+    Camera* camera;
+private:    
+    int width, height, spp, proc_spp;
+    int block_count; 
+    float2 scale;
+    bool load_chunk_hit;
+
+    //multi process load same chunk. 
+    ImageBlock render_block, chunk_project_block; 
+    MeshChunk chunks;
+
+    std::vector<int>   domain;
+    std::vector<float> depth;
+    std::vector<ImageBlock> blockList;
+
+    std::vector<std::pair<int, int>> chunk_map;
+    std::vector<int> send_recv_map;
 };
+
+Scheduler::Scheduler( int width, int height, int spp)
+       : width(width), height(height), spp(spp) 
+{
+    domain.resize(width * height);
+    std::fill(domain.begin(), domain.end(), -1);
+    depth.resize(width * height);    
+    int chunk_size = chunks.size;
+    send_recv_map.resize(chunk_size * chunk_size);
+    load_chunk_hit = false;
+}
+
+Scheduler::~Scheduler() {
+}
 
 int Scheduler::chunk_loaded(int chunk) {
     int i = 0;
@@ -361,13 +314,9 @@ int Scheduler::get_most_unloaded_chunk(int *block, int chunk_size) {
             if(chunks[i] > max ) {
                 max = chunks[i];
                 c = i;
-            } else {
-                //这是个随意的unloaded
-                unloaded = i;
             }
         }
     }
-    c = c==-1 ? unloaded : c;
     return c;
 }
 
@@ -385,20 +334,8 @@ void Scheduler::write_chunk_proc(int* chunk_proc) {
     chunk_proc[i * 2] = -1;
 }
 
-void Scheduler::image_domain_decomposition(Camera *cam, int block, int proc_rank, int proc_size, bool simple_mesh, bool sync) {
-    camera = cam;
-    ImageBlock image(width, height);
-    block_count = block;
-    MeshChunk chunks;//MeshChunk get bbox automaticly
+void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image, bool simple_mesh) {
     int chunk_size = chunks.size; 
-    if (block_count == 1) {
-        spp = spp / proc_size;
-        for(int i = 0; i < chunks.size; i++) {
-            chunk_map.push_back(std::make_pair(i, i));
-        }
-        return;
-    } 
-
     for(int i = 0; i < width * height; i++)
         domain[i] = -1;
     
@@ -410,13 +347,13 @@ void Scheduler::image_domain_decomposition(Camera *cam, int block, int proc_rank
         project_cube_to_image(camera, chunks.list[i], i, true, image);
     }
    
-    //global available block 
+    //global available block
     ImageBlock gblock = project_cube_to_image(camera, chunks.bbox, 0, false, image);
 
     // int step_width = width / scale[0];
-    // int step_height = height / scale[1];   
+    // int step_height = height / scale[1];
     int step_width = (gblock.xmax - gblock.xmin) / scale[0];
-    int step_height = (gblock.ymax - gblock.ymin) / scale[1];   
+    int step_height = (gblock.ymax - gblock.ymin) / scale[1];
 
     for(int i = 0; i < proc_size; i++) {
         int x = i % int(scale[0]);
@@ -439,39 +376,239 @@ void Scheduler::image_domain_decomposition(Camera *cam, int block, int proc_rank
         } else {
             error("chunk size ", chunk_size, " proc size ", proc_size, "invalid");
         }
-       
-        if(chunk != -1){ 
-            chunk_map.push_back(std::make_pair(chunk, i));
-            printf("make pair %d %d\n", chunk, i);
-            blockList.emplace_back(block);
-        }
+      
+        //if no chunk project to this image block, push (-1, proc_rank)  
+        chunk_map.push_back(std::make_pair(chunk, i));
+        blockList.emplace_back(block);
+        
         if(i == proc_rank) {
             render_block = block; 
         }
     }
-    if(proc_size < chunk_size) {
-        std::vector<int> unloaded_chunk;
+}
+
+struct ChunkHitInfo {
+    int id;
+    int send_count, send_rank;
+    int recv_count, recv_rank;
+    int center;
+    //int divergence_rank;
+};
+
+bool send_greater_mark(const ChunkHitInfo& a, const ChunkHitInfo& b) {
+    return a.send_count > b.send_count;
+}
+ 
+bool recv_greater_mark(const ChunkHitInfo& a, const ChunkHitInfo& b) {
+    return a.recv_count > b.recv_count;
+}
+
+void Scheduler::process_left_chunk(int proc_size, bool sync) {
+    
+    int chunk_size = chunks.size; 
+    if(chunk_map.size() >= chunk_size) return;
+   
+    // find unloaded chunk 
+    std::vector<int> unloaded_chunk;
+    for(int i = 0; i < chunk_size; i++) {
+        bool find = false;
+        for(auto& iter: chunk_map) 
+            if(iter.first == i) { 
+                find = true; break; 
+            }
+
+        if(!find)
+            unloaded_chunk.emplace_back(i);
+    }
+
+    // put left chunk to proc
+    if(!sync && load_chunk_hit) {
+        printf(" process left chunk second frame\n");
+        //[2 * i] count, [2 * i + 1] divergence degree 
+        std::vector<ChunkHitInfo> chunk_hit_info(chunk_size);
+        memset(chunk_hit_info.data(), 0, sizeof(ChunkHitInfo) * chunk_size);
+        //get recv / send, 
         for(int i = 0; i < chunk_size; i++) {
-            bool find = false;
-            for(auto& iter: chunk_map) { 
-                if(iter.first == i) {
-                    find = true;
-                    break;
+            int st = i * chunk_size; 
+            chunk_hit_info[i].id = i;
+            chunk_hit_info[i].center = -1;
+            for(int j = 0; j < chunk_size; j ++) {
+                if(send_recv_map[st + j] > 0 ) {
+                    chunk_hit_info[i].send_count += send_recv_map[st + j];
+                    if(j != i) {
+                        chunk_hit_info[j].recv_count += send_recv_map[st + j];
+                    }
                 }
             }
-            if(!find) 
-                unloaded_chunk.emplace_back(i);
         }
+        
+        sort(chunk_hit_info.begin(), chunk_hit_info.end(), recv_greater_mark);
+        for(int i = 0; i < chunk_size; i++)
+            chunk_hit_info[i].recv_rank = i;
+
+        sort(chunk_hit_info.begin(), chunk_hit_info.end(), send_greater_mark);
+        for(int i = 0; i < chunk_size; i++)
+            chunk_hit_info[i].send_rank = i;
+        
+        for(int i = 0; i < chunk_size; i++) {
+            ChunkHitInfo& chk = chunk_hit_info[i];
+            printf("chunk_hit_info chunk %d send %d rank %d  recv %d rank %d\n", 
+                    chk.id, chk.send_count, chk.send_rank, chk.recv_count, chk.recv_rank);
+        }
+        //Get cluster center
+        std::vector<int> center;
+        for(auto& chk_proc: chunk_map) {
+            if(chk_proc.second != -1) {
+                for(int i = 0; i < chunk_size; i ++) {
+                    if(chunk_hit_info[i].id == chk_proc.first) {
+                        chunk_hit_info[i].center = chk_proc.first;
+                        center.emplace_back(chk_proc.first);
+                        break;
+                    }
+                }
+                
+            }
+        }
+        
+        printf("cluster center : ");
+        for(int i = 0; i < proc_size; i++)
+            printf(" %d |", center[i]);
+        printf("\n");
+        
+        // Avoid center empty, push most send chunk to center
+        if(center.empty()) {
+            center.emplace_back(chunk_hit_info[0].id);
+            chunk_hit_info[0].center = 0;
+        }
+
+        printf("new chunk allocation :");
+        for(auto& chk: chunk_hit_info) {
+            printf("%d  %d | ", chk.id, chk.center); 
+        }
+        while(center.size() < proc_size) {
+            int max_dis = 0, cand_chk = -1;
+            for(int i = 0; i < chunk_size; i++) {
+                // Find the most frequent data transfer with center, to fill centers
+                std::vector<int>::iterator it = find(center.begin(), center.end(), i);
+                if (it != center.end()) continue; // it is already in centers
+                
+                int dis = 0;
+                for(auto& cent_chk : center) {
+                     dis += send_recv_map[i * chunk_size + cent_chk];
+                     dis += send_recv_map[cent_chk * chunk_size + i];
+                }
+                if(dis > max_dis) {
+                    max_dis = dis;
+                    cand_chk = i;
+                }
+            }
+            center.emplace_back(cand_chk);
+            chunk_hit_info[cand_chk].center = cand_chk; // set cluster center
+        }
+        printf("cluster center : ");
+        for(int i = 0; i < proc_size; i++)
+            printf(" %d |", center[i]);
+        printf("\n");
+
+        //然后，根据传输关系分配剩余的块 均衡下总发送和传输数量？
+        //求块归属哪个center的距离公i式
+        //1. 计算总的发送和接收，尽量平衡
+        //2. 彼此双向通信越少越好
+        //   min(send_recv_map[i * chunk_size + cent_chk], send_recv_map[cent_chk * chunk_size + i])
+        //3. 保证加载的chk数量一样, 各个中心轮流找最近的块
+        
+
+        printf("\n");
+        std::vector<int> cluster_size(chunk_size);
+        int max_cluster_size = chunk_size / proc_size - 1;
+        for(int chk = 0; chk < chunk_size; chk ++) {
+            //计算到各个聚类的距离 
+            if(chunk_hit_info[chk].center == -1) {
+                int min_dist = (1<<31)-1; 
+                int cand_center = -1;
+                for(auto& cent_chk : center) {
+                    int dist = 0; 
+                    for(int clst_chk = 0; clst_chk < chunk_size; clst_chk ++) {
+                        if(chunk_hit_info[chk].center == cent_chk)
+                            dist += send_recv_map[chk * chunk_size + clst_chk] + send_recv_map[cent_chk * chunk_size + clst_chk];
+                    }
+                    
+                    if(dist < min_dist && cluster_size[cent_chk] < max_cluster_size) {
+                        min_dist = dist;
+                        cand_center = cent_chk;
+                    }
+                }
+                cluster_size[cand_center] ++;
+                chunk_hit_info[chk].center = cand_center;
+            }
+        }
+
+        printf("\nnew chunk allocation :");
+        for(auto& chk: chunk_hit_info) {
+            printf("%d  %d | ", chk.id, chk.center); 
+        }
+        printf("\n");
+    
+        for(int i = 0; i < center.size(); i++) {
+            int cent_chk = center[i];
+            for(auto& chk: chunk_hit_info) {
+                if(chk.center == cent_chk)
+                    chunk_map.push_back(std::make_pair(chk.id, i));
+            }
+        }
+        for(auto& chk :chunk_map) 
+            printf("chunk %d loaded by %d \n", chk.first, chk.second);
+        printf("\n");
+
+    } else {
+        printf(" process left chunk first frame\n");
         int proc = 0;
-        for(auto& iter :unloaded_chunk) {
-            if(sync)
-                chunk_map.push_back(std::make_pair(iter, -1));
-            else 
-                chunk_map.push_back(std::make_pair(iter, proc % proc_size));
-            proc++;
-        } 
+        bool no_proc_empty = false;
+        for(auto& chk :unloaded_chunk) {
+            if(!no_proc_empty) {
+                no_proc_empty = true;
+                for(auto& chk_proc: chunk_map) {
+                    if(chk_proc.first == -1) {
+                        chk_proc.first = chk;
+                        no_proc_empty = false;
+                        break; 
+                    }
+                }
+            }
+            if(no_proc_empty) {
+                if(sync)
+                    chunk_map.push_back(std::make_pair(chk, -1));
+                else 
+                    chunk_map.push_back(std::make_pair(chk, proc % proc_size));
+                proc++;
+            }
+        }
+        for(auto& chk :chunk_map) 
+            printf("chunk %d loaded by %d \n", chk.first, chk.second);
+        printf("\n");
     }
-//        printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
+}
+
+void Scheduler::image_domain_decomposition(Camera *cam, int block, int proc_rank, int proc_size, bool simple_mesh, bool sync) {
+    camera = cam;
+    ImageBlock image(width, height);
+    block_count = block;
+    int chunk_size = chunks.size; 
+    if (block_count == 1) {
+        //Allcopy mode
+        spp = spp / proc_size;
+        for(int i = 0; i < chunks.size; i++) {
+            chunk_map.push_back(std::make_pair(i, i));
+        }
+        return;
+    } 
+    
+    chunk_map.clear();
+
+    get_projected_chunk(proc_rank, proc_size, image, simple_mesh);
+   
+    //得到聚类中心 
+    process_left_chunk(proc_size, sync);
     //write_project_result(width, height, domain.data()); 
 }
 
@@ -567,11 +704,57 @@ void Scheduler::split_image_block(Camera *cam, int block, int proc_rank, int pro
 //        printf("renderblock %d %d %d %d\n", render_block[0], render_block[1], render_block[2], render_block[3]);
     //write_project_result(width, height, domain.data()); 
 }
+
+inline void record_send(int * send, int self, int its_compact) {
     
-Scheduler::Scheduler( int width, int height, int spp)
-       : width(width), height(height), spp(spp) 
-{
-    domain.resize(width * height);
-    std::fill(domain.begin(), domain.end(), -1);
-    depth.resize(width * height);    
+    int its = (its_compact & 0xFF) - 1;
+    if(its == 254)  send[self] ++; 
+    else if(its >= 0)  send[its] ++; 
+
+    its = ((its_compact >> 8) & 0xFF ) - 1;
+    if(its == 254)  send[self] ++; else if(its >= 0)  send[its] ++;
+    
+    its = ((its_compact >> 16) & 0xFF ) - 1;
+    if(its == 254)  send[self] ++; else if(its >= 0)  send[its] ++; 
+    
+    its = ((its_compact >> 24) & 0xFF ) - 1;
+    if(its == 254)  send[self] ++; else if(its >= 0)  send[its] ++;
 }
+
+void Scheduler::chunk_reallocation(int* reduce_buffer) {
+    int chunk_size = chunks.size; 
+    int res = CHUNK_HIT_RES;
+    int size = res * res * 6 * chunk_size;
+    int face_size = CHUNK_HIT_RES * CHUNK_HIT_RES;
+    int* its = &reduce_buffer[size];
+    
+    for(int c = 0; c < chunk_size; c++) {
+        int * send = new int[chunk_size];
+        memset(send, 0, sizeof(int) * chunk_size);
+        int cst = c * face_size * 6;
+        for(int f = 0; f < 6; f++) {
+            int fst = cst + f * face_size;
+            for(int u = 0; u < res; u++) {  //may be not u, but whatever
+                int ust = fst + u * res;
+                for(int v = 0; v < res; v++) {
+                    int id = ust + v;
+                    record_send(send, c, its[ust + v]);
+                }
+            }
+        }
+//        printf("chk %d :", c);
+        for(int i = 0; i < chunk_size; i++) { 
+            send_recv_map[c * chunk_size + i] = send[i];
+//            printf("  %d  |", send[i]);
+        }
+//        printf("\n");
+        delete[] send;
+    }
+   
+
+    load_chunk_hit = true;
+    printf("chunk_reallocation\n");
+}
+
+
+

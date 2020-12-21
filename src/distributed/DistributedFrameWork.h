@@ -12,8 +12,8 @@
 extern "C" {
 void rodent_present(int32_t dev);
 void rodent_unload_chunk_data(int32_t dev ); 
-int* rodent_get_light_field();
-void rodent_update_render_light_field(int32_t*, int32_t);
+int* rodent_get_chunk_hit();
+void rodent_update_render_chunk_hit(int32_t*, int32_t);
 }
 #include "../driver/common.h"
 #include "statistic.h"
@@ -88,35 +88,37 @@ struct DistributedFrameWork {
         delete comm;
     }
     
-    void save_light_field(int* light_field, float spp) {
-        int size = LIGHT_FIELD_RES * LIGHT_FIELD_RES * 6 * ps->get_chunk_size();
+    void save_chunk_hit(int* chunk_hit, float spp) {
+        int size = CHUNK_HIT_RES * CHUNK_HIT_RES * 6 * ps->get_chunk_size();
         int *reduce_buffer = new int[size * 2];
         printf("start reduce %d\n", comm->get_rank());
         {
             statistics.start("run => light field => bcast ");
-            comm->update_light_field(light_field, reduce_buffer, size);
+            comm->update_chunk_hit(chunk_hit, reduce_buffer, size);
             MPI_Bcast(reduce_buffer, size * 2, MPI_INT, 0, MPI_COMM_WORLD);
             statistics.end("run => light field => bcast ");
         }
         //reduce ctib 存在了reduce 里
-            statistics.start("run => light field => save img  ");
-        if(comm->get_rank() == 0 && VIS_LIGHT_FIELD) { 
+        statistics.start("run => light field => save img  ");
+        if(comm->get_rank() == 0 && VIS_CHUNK_HIT) { 
             save_image_ctrb(reduce_buffer, ps->get_chunk_size(), spp);
             save_image_its(&reduce_buffer[size], ps->get_chunk_size(), spp);
         }
-            statistics.end("run => light field => save img  ");
-        rodent_update_render_light_field(reduce_buffer, size);
-        //cpy to interface light
+        statistics.end("run => light field => save img  ");
+        
+        //updata render light field
+        rodent_update_render_chunk_hit(reduce_buffer, size);
+        scheduler->chunk_reallocation(reduce_buffer);
         
         delete[] reduce_buffer;
     }
 
     void run(Camera *camera) {
-        statistics.start("run");
         printf("dis frame worker run\n");
         int proc_rank = comm->get_rank();
         int proc_size = comm->get_size(); 
         /*block size equels proc size*/
+        statistics.start("schedule");
         std::cout<<"run type "<<type<<"\n";
         if( type == "AllCopy" || type == "Single") {
             int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
@@ -127,13 +129,17 @@ struct DistributedFrameWork {
         }
         scheduler->write_chunk_proc(ps->get_chunk_proc());
         ps->updata_local_chunk();
+        statistics.end("schedule");
+
+        statistics.start("run");
         node->run(scheduler);
         
         statistics.end("run");
         statistics.start("process light lield");
-        if(comm->get_size() > 1)
-           save_light_field(rodent_get_light_field(), scheduler->get_spp());
-        statistics.end("process light lield");
+        if(type == "Async" && comm->get_size() > 1) {
+            save_chunk_hit(rodent_get_chunk_hit(), scheduler->get_spp());
+            statistics.end("process light lield");
+        }
         statistics.print(comm->os);
 
         ps->reset();
