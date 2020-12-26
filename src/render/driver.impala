@@ -2,47 +2,35 @@
 
 extern "C" {
     fn rodent_get_film_data(i32, &mut &mut [f32], &mut i32, &mut i32, bool) -> ();
-    fn rodent_cpu_get_primary_stream(&mut PrimaryStream, i32) -> ();
-    fn rodent_cpu_get_primary_income_stream(&mut PrimaryStream, i32) -> ();
-    fn rodent_cpu_get_secondary_stream(&mut SecondaryStream, i32) -> ();
-    fn rodent_cpu_get_secondary_income_stream(&mut SecondaryStream, i32) -> ();
     fn rodent_initial_gpu_host_data(i32) -> ();
-    fn rodent_gpu_get_first_primary_stream(i32, &mut PrimaryStream, i32) -> ();
-    fn rodent_gpu_get_second_primary_stream(i32, &mut PrimaryStream, i32) -> ();
-    fn rodent_gpu_get_first_secondary_stream(i32, &mut SecondaryStream, i32) -> ();
-    fn rodent_gpu_get_second_secondary_stream(i32, &mut SecondaryStream, i32) -> ();
-    fn rodent_gpu_get_tmp_buffer(i32, &mut &mut [i32], i32) -> ();
-    fn rodent_first_primary_save(i32, i32, i32, bool) -> i32;
-    fn rodent_gpu_first_primary_load(i32, &mut PrimaryStream, i32) -> i32;
     fn rodent_load_buffer(i32, &[u8]) -> &[i8];
     fn rodent_load_bvh2_tri1(i32, &[u8], &mut &[Node2], &mut &[Tri1]) -> ();
     fn rodent_load_bvh4_tri4(i32, &[u8], &mut &[Node4], &mut &[Tri4]) -> ();
     fn rodent_load_bvh8_tri4(i32, &[u8], &mut &[Node8], &mut &[Tri4]) -> ();
     fn rodent_load_png(i32, &[u8], &mut &[u8], &mut i32, &mut i32) -> ();
     fn rodent_load_jpg(i32, &[u8], &mut &[u8], &mut i32, &mut i32) -> ();
-    fn rodent_cpu_intersect_primary_embree(&PrimaryStream, i32, i32) -> ();
-    fn rodent_cpu_intersect_secondary_embree(&SecondaryStream) -> ();
     fn rodent_present(i32) -> ();
 
-    fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
-    fn rodent_secondary_check(i32, i32, i32, i32, bool) -> ();
-    fn rodent_memory_check(i32) -> ();
-
-    fn rodent_cpu_get_out_ray_stream(&mut OutRayStream, i32, bool) -> ();
-    fn rodent_gpu_get_out_ray_stream(i32, &mut OutRayStream, i32, bool) -> ();
-
-    fn rodent_get_render_chunk_hit(i32, &mut LightField) -> ();
-    fn rodent_cpu_get_record_chunk_hit(&mut LightField, i32, bool) -> ();
+    fn rodent_cpu_get_thread_data(&mut PrimaryStream, &mut SecondaryStream
+                                , &mut OutRayStream, &mut OutRayStream
+                                , &mut ChunkHit, &mut ChunkHit
+                                , i32, i32, bool) -> ();
     
+    fn rodent_gpu_get_data( &mut PrimaryStream, &mut PrimaryStream, &mut SecondaryStream
+                          , &mut OutRayStream, &mut OutRayStream
+                          , &mut &mut [i32]
+                          , i32) -> ();
+
     fn rodent_cpu_thread_num() -> i32;
-    fn rodent_stream_logic_capacity() -> i32;
-    fn rodent_stream_store_capacity() -> i32;
-    fn rodent_out_stream_capacity() -> i32;
     fn rodent_chunk_hit_resolution() -> i32;
 
     fn rodent_worker_primary_send(i32, i32) -> ();    
     fn rodent_worker_secondary_send(i32, i32) -> ();    
     fn rodent_rays_export(i32, i32, i32, bool, bool, i32) -> i32; 
+    
+    fn rodent_first_primary_check(i32, i32, i32, bool) -> ();
+    fn rodent_secondary_check(i32, i32, i32, i32, bool) -> ();
+    fn rodent_memory_check(i32) -> ();
 }
 
 // Ray streams ---------------------------------------------------------------------
@@ -74,6 +62,7 @@ struct PrimaryStream {
     contrib_g: &mut [f32],
     contrib_b: &mut [f32],
     depth: &mut [i32],
+    capacity: i32,
     size: i32
 }
 
@@ -86,6 +75,7 @@ struct SecondaryStream {
     color_r: &mut [f32],
     color_g: &mut [f32],
     color_b: &mut [f32],
+    capacity: i32,
     size: i32
 }
 
@@ -105,11 +95,17 @@ struct PreprocessRecord {
     chunk:  i32
 }
 
-struct LightField {
+struct ChunkHit {
     ctrb: &mut[i32],
     its:  &mut[i32],
     res:  i32,
     chk_cap: i32
+}
+
+struct PassRecord {
+    send: &mut[i32],
+    recv: &mut[i32],
+    chunk_size: i32
 }
 
 fn @write_out_primary( primary: PrimaryStream

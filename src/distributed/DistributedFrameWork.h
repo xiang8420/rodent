@@ -11,9 +11,10 @@
 
 extern "C" {
 void rodent_present(int32_t dev);
-void rodent_unload_chunk_data(int32_t dev ); 
+void rodent_unload_chunk_data(int32_t chk, int32_t dev); 
 int* rodent_get_chunk_hit();
 void rodent_update_render_chunk_hit(int32_t*, int32_t);
+int* rodent_get_render_chunk_hit_data(); 
 }
 #include "../driver/common.h"
 #include "statistic.h"
@@ -98,16 +99,17 @@ struct DistributedFrameWork {
             MPI_Bcast(reduce_buffer, size * 2, MPI_INT, 0, MPI_COMM_WORLD);
             statistics.end("run => light field => bcast ");
         }
+        
+        //updata render light field
+        rodent_update_render_chunk_hit(reduce_buffer, 2 * size);
         //reduce ctib 存在了reduce 里
         statistics.start("run => light field => save img  ");
         if(comm->get_rank() == 0 && VIS_CHUNK_HIT) { 
-            save_image_ctrb(reduce_buffer, ps->get_chunk_size(), spp);
-            save_image_its(&reduce_buffer[size], ps->get_chunk_size(), spp);
+            int* render_chunk_hit = rodent_get_render_chunk_hit_data();
+            save_image_ctrb(render_chunk_hit, ps->get_chunk_size(), spp);
+            save_image_its(&render_chunk_hit[size], ps->get_chunk_size(), spp);
         }
         statistics.end("run => light field => save img  ");
-        
-        //updata render light field
-        rodent_update_render_chunk_hit(reduce_buffer, size);
         scheduler->chunk_reallocation(reduce_buffer);
         
         delete[] reduce_buffer;

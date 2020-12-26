@@ -71,24 +71,18 @@ fn @get_chunk_hit_coord(bbox: BBox, its: Vec3, dir: Vec3, res: i32, math: Intrin
     result
 }
 
-fn write_chunk_hit(org_chk: i32, color: Color, cur_chk:i32, chunk_hit: LightField) -> () {
+fn write_chunk_hit(org_chk: i32, color: Color, cur_chk:i32, chunk_hit: ChunkHit) -> () {
     let chk_id = org_chk & 0xFF;
     let in_chk_id = (org_chk >> 8) & 0xFFFFF;
     
     if in_chk_id == 0 || chk_id == cur_chk { return () }
 
-    let lu = color_luminance(color);
-    //if(lu <= 0 as f32) { return() }
-    let lu_i32 = (lu * 255 as f32) as i32; //((color.r * 4 as f32) as i32 << 4) + ((color.g * 4 as f32) as i32 << 2) + (color.b * 4 as f32) as i32;
-    
     let sign = (org_chk >> 28) & 0xF;
     let sign_bit = sign * 8;
     let chunk_hit_id = chk_id * chunk_hit.chk_cap + in_chk_id;
-
     let rec_chk = ((chunk_hit.its(chunk_hit_id) >> sign_bit) & 0xFF) - 1;
     
     if(rec_chk != cur_chk && rec_chk != 254) {
-    
         if(rec_chk == -1) {
             chunk_hit.its(chunk_hit_id) += ((cur_chk + 1) << sign_bit);
         } else {
@@ -96,6 +90,12 @@ fn write_chunk_hit(org_chk: i32, color: Color, cur_chk:i32, chunk_hit: LightFiel
         }
         let its = ((chunk_hit.its(chunk_hit_id) >> sign_bit) & 0xFF) - 1; 
     }
-    chunk_hit.ctrb(chunk_hit_id) += (lu_i32 << sign_bit);
+    // ctrb used as hit times
+    chunk_hit.ctrb(chunk_hit_id) += 1;
+
+//    let lu = color_luminance(color);
+//    let lu_i32 = (lu * 255 as f32) as i32; 
+//    let ctrb = (chunk_hit.ctrb(chunk_hit_id) >> sign_bit) & 0xFF;
+//    chunk_hit.ctrb(chunk_hit_id) += if ctrb + lu_i32 > 255 { 255 } else { ctrb + lu_i32 };
 }
 

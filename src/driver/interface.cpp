@@ -262,6 +262,7 @@ struct Interface {
     static thread_local anydsl::Array<float> cpu_primary_outgoing;
     static thread_local anydsl::Array<float> cpu_secondary_outgoing;
     anydsl::Array<int32_t> *cpu_record_chunk_hit;
+    anydsl::Array<int32_t> *cpu_pass_record;
 
 #ifdef ENABLE_EMBREE_DEVICE
     EmbreeDevice embree_device;
@@ -273,9 +274,13 @@ struct Interface {
     anydsl::Array<float> host_secondary;
     anydsl::Array<float> host_outgoing_primary;
     anydsl::Array<float> host_outgoing_secondary;
+
+    //gpu & cpu
     anydsl::Array<int32_t> host_primary_num;
     anydsl::Array<int32_t> host_record_chunk_hit;
     anydsl::Array<int32_t> host_render_chunk_hit;
+    
+    anydsl::Array<int32_t> host_pass_record;
 
     size_t film_width;
     size_t film_height;
@@ -291,20 +296,30 @@ struct Interface {
         
         host_pixels = anydsl::Array<float>(width * height * 3);
         tmp_pixels  = anydsl::Array<float>(width * height * 3);
-        
+       
+        int chunk_size = dfw_chunk_size();
         host_primary_num = anydsl::Array<int32_t>(128);
-        printf("light field size %d\n", chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2);
-        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
+        printf("light field size %d\n", chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2);
         
         int thread_num = dfw_thread_num();
+        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2;
+        int pass_record_size = chunk_size * (chunk_size + 3); // chunk_size * (send size of dst chunk, recv and no_hit)
         cpu_record_chunk_hit = new anydsl::Array<int32_t>[thread_num];
-        for(int i = 0; i < thread_num; i++)
+        cpu_pass_record      = new anydsl::Array<int32_t>[thread_num];
+
+        for(int i = 0; i < thread_num; i++) {
             cpu_record_chunk_hit[i] = anydsl::Array<int32_t>(chunk_hit_size);
-        
+            cpu_pass_record[i] = anydsl::Array<int32_t>(pass_record_size);
+        }
         host_record_chunk_hit = anydsl::Array<int32_t>(chunk_hit_size);
         std::fill(host_record_chunk_hit.begin(), host_record_chunk_hit.end(), 0);
+        
         host_render_chunk_hit = anydsl::Array<int32_t>(chunk_hit_size);
         std::fill(host_render_chunk_hit.begin(), host_render_chunk_hit.end(), 0);
+
+        host_pass_record = anydsl::Array<int32_t>(pass_record_size);
+        std::fill(host_pass_record.begin(), host_pass_record.end(), 0);
+
         os = std::ofstream("mem_check");
     }
 
@@ -342,8 +357,8 @@ struct Interface {
     }
 
     //gpu
-    void initial_gpu_host_data(size_t size) {
-        auto capacity = (size & ~((1 << 5) - 1)) + 32;
+    void initial_gpu_host_data() {
+        auto capacity = dfw_stream_store_capacity();
         resize_array(0, host_primary,  capacity, primary_width); 
         resize_array(0, host_outgoing_primary, capacity, primary_width); 
         resize_array(0, host_secondary,  capacity, secondary_width); 
@@ -403,11 +418,13 @@ struct Interface {
         return bvh8_tri4[filename] = std::move(load_bvh<Node8, Tri4>(dev, filename));
     }
    
-    void unload_chunk_data(int32_t dev) {
+    void unload_chunk_data(int32_t chunk, int32_t dev) {
         printf("unload bvh\n");
-        devices[dev].bvh4_tri4.clear();
-        devices[dev].bvh4_tri4.clear();
-        devices[dev].bvh2_tri1.clear();
+        std::string chunk_path = "data/";
+        chunk_path  += (chunk > 9 ? "0" : "00") + std::to_string(chunk) + "/";
+        devices[dev].bvh4_tri4.erase(chunk_path + "bvh_sse");
+        devices[dev].bvh8_tri4.erase(chunk_path + "bvh_avx");
+        devices[dev].bvh2_tri1.erase(chunk_path + "bvh_nvvm.bin");
     }
 
     template <typename T>
@@ -624,6 +641,7 @@ inline void get_primary_stream(PrimaryStream& primary, float* ptr, size_t capaci
     primary.contrib_b = ptr + 20 * capacity;
     primary.depth     = (int*)ptr + 21 * capacity;
     primary.size = 0;
+    primary.capacity = dfw_stream_logic_capacity();
 }
 
 inline void get_secondary_stream(SecondaryStream& secondary, float* ptr, size_t capacity) {
@@ -636,6 +654,7 @@ inline void get_secondary_stream(SecondaryStream& secondary, float* ptr, size_t 
     secondary.color_g = ptr + 14 * capacity;
     secondary.color_b = ptr + 15 * capacity;
     secondary.size = 0;
+    secondary.capacity = dfw_stream_logic_capacity();
 }
 
 inline void get_out_ray_stream(OutRayStream& out, float* ptr, size_t capacity, size_t width) {
@@ -647,7 +666,7 @@ inline void get_out_ray_stream(OutRayStream& out, float* ptr, size_t capacity, s
     out.size = 0;
 }
 
-inline void get_chunk_hit(LightField& chunk_hit, int* ptr) {
+inline void get_chunk_hit(ChunkHit& chunk_hit, int* ptr) {
     chunk_hit.ctrb     = ptr;
     chunk_hit.its      = ptr + chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
     chunk_hit.res      = chunk_hit_res;
@@ -757,102 +776,98 @@ void rodent_load_bvh8_tri4(int32_t dev, const char* file, Node8** nodes, Tri4** 
 }
 
 //cpu
-void rodent_cpu_get_primary_stream(PrimaryStream* primary, int32_t size) {
+
+//void rodent_cpu_get_pass_record(PassRecord *pass_record, int tid, int chk_id, bool clear) {
+//    auto& array = interface->cpu_pass_record[tid];
+////    if(clear) {
+////        interface->first_write = true;
+////        std::fill(array.begin(), array.end(), 0);
+////    }
+////    get_chunk_hit(*chunk_hit, array.data()); 
+////    dfw_time_end("render prepare data");
+//}
+
+void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* secondary
+                               , OutRayStream * out_primary, OutRayStream * out_secondary
+                               , ChunkHit *render_chunk_hit, ChunkHit *record_chunk_hit
+                               , int dev, int tid, bool new_camera
+                               ) 
+{
     dfw_time_start("render prepare data");
-    auto& array = interface->cpu_primary_stream(size);
-    get_primary_stream(*primary, array.data(), array.size() / primary_width);
-}
+    
+    int rays_capacity = dfw_stream_store_capacity(); 
+    auto& array_primary = interface->cpu_primary_stream(rays_capacity);
+    get_primary_stream(*primary, array_primary.data(), array_primary.size() / primary_width);
+    auto& array_secondary = interface->cpu_secondary_stream(rays_capacity);
+    get_secondary_stream(*secondary, array_secondary.data(), array_secondary.size() / secondary_width);
 
-void rodent_cpu_get_out_ray_stream(OutRayStream * stream, int32_t capacity, bool primary) {
-    int store_capacity = (capacity & ~((1 << 5) - 1)) + 32; // round to 32
-    if(primary) {
-        auto& array = interface->cpu_primary_outgoing_stream(store_capacity);
-        get_out_ray_stream(*stream, array.data(), capacity, primary_width);
-    } else {
-        auto& array = interface->cpu_secondary_outgoing_stream(store_capacity);
-        get_out_ray_stream(*stream, array.data(), capacity, secondary_width);
-    }
-}
+    int out_size = dfw_out_stream_capacity(); 
+    int out_capacity = (out_size & ~((1 << 5) - 1)) + 32; // round to 32
+    
+    auto& array_out_primary = interface->cpu_primary_outgoing_stream(out_capacity);
+    get_out_ray_stream(*out_primary, array_out_primary.data(), out_size, primary_width);
+    auto& array_out_secondary = interface->cpu_secondary_outgoing_stream(out_capacity);
+    get_out_ray_stream(*out_secondary, array_out_secondary.data(), out_size, secondary_width);
 
-void rodent_cpu_get_secondary_stream(SecondaryStream* secondary, int32_t size) {
-    auto& array = interface->cpu_secondary_stream(size);
-    get_secondary_stream(*secondary, array.data(), array.size() / secondary_width);
-}
-
-void rodent_cpu_get_secondary_outgoing_stream(SecondaryStream* buffer, int32_t size) {
-    auto& array = interface->cpu_secondary_outgoing_stream(size);
-    get_secondary_stream(*buffer, array.data(), array.size() / secondary_width);
-}
-
-void rodent_cpu_get_record_chunk_hit(LightField *chunk_hit, int tid, bool clear) {
-    auto& array = interface->cpu_record_chunk_hit[tid];
-    if(clear) {
+    auto& array_record_chunk_hit = interface->cpu_record_chunk_hit[tid];
+    if(new_camera) {
         interface->first_write = true;
-        std::fill(array.begin(), array.end(), 0);
+        std::fill(array_record_chunk_hit.begin(), array_record_chunk_hit.end(), 0);
     }
-   //     int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
-   //     int ed = size * 2;
-   //     int chk_size = dfw_chunk_size();
-   //     for (int i = size; i < ed; i++){
-   //         int its = ((array[i] >> 8) & 0xFF ) - 1;
-   //         if(its >= 254 || its == -1) continue; 
-   //         else { 
-   //             if(its < 0|| its > chk_size - 1) {
-   //                 printf("get rocord error its %d\n", its);
-   //             }
-   //         }
-   //     }
-    get_chunk_hit(*chunk_hit, array.data()); 
+    get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
     dfw_time_end("render prepare data");
+    
+   // std::unique_lock <std::mutex> lock(interface->mtx); 
+   // auto& array_render_chunk_hit = interface->render_chunk_hit_list(dev);
+   // int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
+   // get_chunk_hit(*render_chunk_hit, array_render_chunk_hit.data()); 
+   // memcpy(array_render_chunk_hit.data(), interface->host_render_chunk_hit.data(), size * sizeof(int));
+
+    // all thread share
+    get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
 }
 
-void rodent_get_render_chunk_hit(int32_t dev, LightField *chunk_hit) {
-    std::unique_lock <std::mutex> lock(interface->mtx); 
-    auto& array = interface->render_chunk_hit_list(dev);
-    int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
-    get_chunk_hit(*chunk_hit, array.data()); 
-    memcpy(array.data(), interface->host_render_chunk_hit.data(), size * sizeof(int));
-}
 
 //gpu
-void rodent_initial_gpu_host_data(int32_t size) {
-    interface->initial_gpu_host_data(size); 
-}
 
-void rodent_gpu_get_tmp_buffer(int32_t dev, int32_t** buf, int32_t size) {
-    *buf = interface->gpu_tmp_buffer(dev, size).data();
-}
+void rodent_gpu_get_data( PrimaryStream* primary, PrimaryStream* other_primary, SecondaryStream* secondary
+                        , OutRayStream * out_primary, OutRayStream * out_secondary
+                        , ChunkHit *render_chunk_hit, ChunkHit *record_chunk_hit
+                        , int dev, int tid, bool new_camera) 
+{
+    int rays_capacity = dfw_stream_store_capacity(); 
+    interface->initial_gpu_host_data(); 
+    
+    auto& array_first_primary = interface->gpu_first_primary_stream(dev, rays_capacity);
+    get_primary_stream(*primary, array_first_primary.data(), array_first_primary.size() / primary_width);
+    
+    auto& array_second_primary = interface->gpu_second_primary_stream(dev, rays_capacity);
+    get_primary_stream(*primary, array_second_primary.data(), array_second_primary.size() / primary_width);
+        
+    auto& array_first_secondary = interface->gpu_first_secondary_stream(dev, rays_capacity);
+    get_secondary_stream(*secondary, array_first_secondary.data(), array_first_secondary.size() / secondary_width);
 
-void rodent_gpu_get_first_primary_stream(int32_t dev, PrimaryStream* primary, int32_t size) {
-    auto& array = interface->gpu_first_primary_stream(dev, size);
-    get_primary_stream(*primary, array.data(), array.size() / primary_width);
-}
+//    auto& array_second_secondary = interface->gpu__secondary_stream(dev, size);
+//    get_secondary_stream(*secondary, array_first_secondary.data(), array_first_secondary.size() / secondary_width);
 
-void rodent_gpu_get_second_primary_stream(int32_t dev, PrimaryStream* primary, int32_t size) {
-    auto& array = interface->gpu_second_primary_stream(dev, size);
-    get_primary_stream(*primary, array.data(), array.size() / primary_width);
-}
-
-void rodent_gpu_get_first_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
-    auto& array = interface->gpu_first_secondary_stream(dev, size);
-    get_secondary_stream(*secondary, array.data(), array.size() / secondary_width);
-}
-
-void rodent_gpu_get_second_secondary_stream(int32_t dev, SecondaryStream* secondary, int32_t size) {
-    auto& array = interface->gpu_second_secondary_stream(dev, size);
-    get_secondary_stream(*secondary, array.data(), array.size() / secondary_width);
-}
-
-void rodent_gpu_get_out_ray_stream(int32_t dev, OutRayStream * stream, int32_t capacity, bool primary) {
-    if(primary) {
-        auto& array = interface->gpu_outgoing_primary_stream(dev, capacity);
-        get_out_ray_stream(*stream, array.data(), capacity, primary_width);
-    } else {
-        auto& array = interface->gpu_outgoing_secondary_stream(dev, capacity);
-        get_out_ray_stream(*stream, array.data(), capacity, secondary_width);
+    int out_size = dfw_out_stream_capacity(); 
+    int out_capacity = (out_size & ~((1 << 5) - 1)) + 32; // round to 32
+    auto& array_out_primary = interface->gpu_outgoing_primary_stream(dev, out_capacity);
+    get_out_ray_stream(*out_primary, array_out_primary.data(), out_size, primary_width);
+    auto& array_out_secondary = interface->gpu_outgoing_secondary_stream(dev, out_capacity);
+    get_out_ray_stream(*out_secondary, array_out_secondary.data(), out_size, secondary_width);
+    
+    auto& array_record_chunk_hit = interface->cpu_record_chunk_hit[0];
+    if(new_camera) {
+        interface->first_write = true;
+        std::fill(array_record_chunk_hit.begin(), array_record_chunk_hit.end(), 0);
     }
-}
+    get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
 
+//  should write to dev buffer    
+//    get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
+    dfw_time_end("render prepare data");
+}
 //embree
 #ifdef ENABLE_EMBREE_DEVICE
 void rodent_cpu_intersect_primary_embree(PrimaryStream* primary, int32_t invalid_id, int32_t coherent) {
@@ -910,30 +925,10 @@ void rodent_first_primary_check(int32_t dev, int primary_size, int32_t print_mar
     }
 }
 
-int rodent_first_primary_save(int32_t dev, int primary_size, int32_t chunk_num, bool is_first_primary) {
-    int capacity = is_first_primary? interface->save_first_primary(dev) / primary_width : interface->save_second_primary(dev) / primary_width;
-    auto&  array = interface->host_primary;
-    int size_new = 0; //rays_transfer(array.data(), primary_size, capacity);
-    is_first_primary ? interface->load_first_primary(dev) : interface->load_second_primary(dev);
-    return size_new;
-}
-
 //worker
 
 int32_t rodent_cpu_thread_num() {
     return dfw_thread_num();
-}
-
-int32_t rodent_stream_logic_capacity() {
-    return dfw_stream_logic_capacity(); 
-}
-
-int32_t rodent_stream_store_capacity() {
-    return dfw_stream_store_capacity(); 
-}
-
-int32_t rodent_out_stream_capacity() {
-    return dfw_out_stream_capacity(); 
 }
 
 int32_t rodent_chunk_hit_resolution() {
@@ -1065,18 +1060,16 @@ void rodent_memory_check(int32_t tag) {
 }
 
 void rodent_update_render_chunk_hit(int32_t* new_chunk_hit, int32_t size) {
-    memcpy(interface->host_record_chunk_hit.data(), new_chunk_hit, size * sizeof(int));
+    memcpy(interface->host_render_chunk_hit.data(), new_chunk_hit, size * sizeof(int));
 }
 
-void rodent_gpu_first_primary_load(int32_t dev, PrimaryStream* primary, int32_t size) {
-    auto& array = interface->load_gpu_primary_stream(dev, size, "data/primary.bin");
-    size = array.size() / primary_width;
-    get_primary_stream(*primary, array.data(), size);
+int* rodent_get_render_chunk_hit_data() {
+    interface->host_render_chunk_hit.data();
 }
 
-void rodent_unload_chunk_data(int32_t dev ) {
+void rodent_unload_chunk_data(int32_t chk, int32_t dev ) {
     printf("rodent unload \n");
-    interface->unload_chunk_data(dev);
+    interface->unload_chunk_data(chk, dev);
 }
 
 void rodent_present(int32_t dev) {

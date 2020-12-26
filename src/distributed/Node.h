@@ -66,7 +66,7 @@ void Node::launch_rodent_render(Scheduler * splitter, int devNum, bool generate_
         };
         int rnd = camera->iter * (comm->get_rank() + 1) * devNum + i;
 
-        workThread.emplace_back(render, &settings, rnd, i, cur_chk, generate_rays);
+        workThread.emplace_back(render, &settings, rnd, i, cur_chk, ps->get_next_chunk(), generate_rays);
     }
 
     render_start.notify_all(); 
@@ -77,7 +77,7 @@ void Node::launch_rodent_render(Scheduler * splitter, int devNum, bool generate_
     comm->os<<comm->get_rank()<<" before set render start"<<"\n";
     // dynamic schedule for multi chunks    
     for(int i = 0; i < devNum; i++) 
-        rodent_unload_chunk_data(i); 
+        rodent_unload_chunk_data(cur_chk, i); 
 }
 
 

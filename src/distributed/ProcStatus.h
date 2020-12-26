@@ -14,8 +14,8 @@ private:
 
     //domain settings
     int chunk_proc[MAX_CHUNK * MAX_PROC];
-    std::vector<int> local_chunks;
-    int chunk_size, current_chunk;
+    std::vector<int> local_chunks; //2 * i chunk id, 2 * i + 1 发送率
+    int chunk_size, current_chunk, next_chunk;
 
     //global capacity settings
     int stream_logic_capacity;
@@ -110,6 +110,8 @@ public:
     void switch_current_chunk();
 
     int switch_current_chunk(RayStreamList *); 
+    
+    int get_next_chunk() { return next_chunk; };
 
     void set_exit() {exit = true;}
     
@@ -140,6 +142,8 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev, bool ro
     
     out_stream_capacity = OUT_BUFFER_CAPACITY; 
     global_rays.resize(proc_size * proc_size);
+
+    next_chunk = -1;
 }
 
 void ProcStatus::reset() {
@@ -157,19 +161,34 @@ ProcStatus::~ProcStatus() {
 
 int ProcStatus::switch_current_chunk(RayStreamList * outlist) {
     int local_size = local_chunks.size();
-    int max = 0, new_chk = -1;
+    if(next_chunk != -1) {
+        current_chunk = next_chunk;
+    } else {
+        int max = 0, new_chk = -1;
+        printf(" %d local chunk ", proc_rank );
+        for(int i = 0; i < local_size; i++) {
+            int chk = local_chunks[i];
+            printf(" %d size %d |", chk, outlist[chk].size());
+            if(chk != current_chunk && outlist[chk].size() > max) {
+                new_chk = chk;
+                max = outlist[chk].size();
+            }    
+        }
+        current_chunk = new_chk;
+        if(new_chk == -1) {
+            error("no !empty local chunk stream list");
+            return -1;
+        }
+    }
+    int max = 0, next_chunk = -1;
     for(int i = 0; i < local_size; i++) {
         int chk = local_chunks[i];
         if(chk != current_chunk && outlist[chk].size() > max) {
-            new_chk = chk;
+            next_chunk = chk;
             max = outlist[chk].size();
         }    
     }
-    if(new_chk == -1) {
-        error("no !empty local chunk stream list");
-        return -1;
-    }
-    current_chunk = new_chk;
+    
     load_new_chunk = true;
 }
 

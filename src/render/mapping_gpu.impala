@@ -201,7 +201,6 @@ fn @gpu_sort_primary( primary: PrimaryStream
 }
 
 fn @gpu_generate_rays( primary: PrimaryStream
-                     , capacity: i32
                      , acc: Accelerator
                      , intrinsics: Intrinsics
                      , on_emit: RayEmitter
@@ -213,7 +212,7 @@ fn @gpu_generate_rays( primary: PrimaryStream
     let block_w  = 64;
     let first_ray_id = *id;
     let first_dst_id = primary.size;
-    let num_rays = intrinsics.min(spp * film_width * film_height - first_ray_id, capacity - first_dst_id);
+    let num_rays = intrinsics.min(spp * film_width * film_height - first_ray_id, primary.capacity - first_dst_id);
     let film_div = make_fast_div(film_width as u32);
 
     let ray_ids     = primary.rays.id;
@@ -392,7 +391,6 @@ fn @gpu_primary_transfer( primary: PrimaryStream
                         , other_primary: PrimaryStream
                         , buffer: OutRayStream
                         , chunk: i32
-                        , capacity: i32
                         , acc: Accelerator
                         , intrinsics: Intrinsics
                         , atomics: Atomics
@@ -425,7 +423,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
     runtime_copy(dev_id, gpu_tmp as &[i8], 0i64, 0, &mut size as &[i8], 0i64, sizeof[i32]() * 2 as i64);
      
     // if buffer full 
-    if size(0) + buffer.size >= capacity {
+    if size(0) + buffer.size >= buffer.capacity {
         rodent_worker_primary_send(dev_id, buffer.size);
         size(1) = 0;
     }
@@ -502,7 +500,6 @@ fn @gpu_secondary_chunk( secondary: SecondaryStream
 fn @gpu_secondary_transfer( secondary: SecondaryStream
                           , buffer: OutRayStream
                           , chunk: i32
-                          , capacity: i32
                           , acc: Accelerator
                           , intrinsics: Intrinsics
                           , atomics: Atomics
@@ -537,7 +534,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
     // if buffer full 
 //    print_string("new buffer :");
 //    print_i32(size(0)); 
-    if size(0) + buffer.size >= capacity {
+    if size(0) + buffer.size >= buffer.capacity {
 //        print_string("send buffer2 size: ");
 //        print_i32(buffer.size);
         rodent_worker_secondary_send(dev_id, buffer.size);
@@ -585,41 +582,34 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let image = scene.camera.tile;
     let spp = image.spp;
     let num_rays = spp * (image.ymax - image.ymin) * (image.xmax - image.xmin);
-    let logic_capcacity = rodent_stream_logic_capacity();
-    let store_capcacity = rodent_stream_store_capacity();
-    
-    let mut primary   : PrimaryStream;
-    let mut other_primary : PrimaryStream;
-    let mut secondary : SecondaryStream;
-    rodent_initial_gpu_host_data(film_width * film_height);
-    rodent_gpu_get_first_primary_stream(dev_id, &mut primary, store_capcacity);
-    rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, store_capcacity);
-    rodent_gpu_get_first_secondary_stream(dev_id, &mut secondary, store_capcacity);
 
+    let mut primary         : PrimaryStream;
+    let mut other_primary   : PrimaryStream;
+    let mut secondary       : SecondaryStream;
     let mut out_primary     : OutRayStream;
     let mut out_secondary   : OutRayStream;
-    let out_capcacity = rodent_out_stream_capacity();
-    rodent_gpu_get_out_ray_stream(dev_id, &mut out_primary,   out_capcacity, true);
-    rodent_gpu_get_out_ray_stream(dev_id, &mut out_secondary, out_capcacity, false);
+    let mut gpu_tmp         : &mut [i32];
+    
+    rodent_gpu_get_data( &mut primary, &mut other_primary, &mut secondary
+                       , &mut out_primary, &mut out_secondary
+                       , &mut gpu_tmp
+                       , dev_id);
 
-    let mut gpu_tmp : &mut [i32];
-    rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
 
     let mut id = 0;
     let mut first_primary = true;
-
     let num_chunks = (scene.chunk.x * scene.chunk.y * scene.chunk.z) as i32;
 
     print_i32(num_chunks);
     print_size("start rendering\n", num_rays, "\n");
     while true {
         // Regenerate rays
-        if primary.size < logic_capcacity && id < num_rays {
-             primary.size = gpu_generate_rays(primary, logic_capcacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
+        if primary.size < primary.capacity && id < num_rays {
+             primary.size = gpu_generate_rays(primary, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
         }
 //        rodent_first_primary_check(1, primary.size, 1, true);     
         gpu_primary_chunk(primary, acc, intrinsics, atomics, min_max, scene); 
-        let (primary_size, out_primary_size) = gpu_primary_transfer(primary, other_primary, out_primary, scene.cur_chk, logic_capcacity, acc, intrinsics,
+        let (primary_size, out_primary_size) = gpu_primary_transfer(primary, other_primary, out_primary, scene.cur_chk, acc, intrinsics,
                                                                 atomics, dev_id, gpu_tmp, first_primary, id == num_rays);
         gpu_swap_primary(&mut primary, &mut other_primary, &mut first_primary);
         primary.size = primary_size; 
@@ -697,27 +687,24 @@ fn @gpu_streaming_trace( dev_id: i32
                        ) -> () {
     let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
 
-    let logic_capacity = rodent_stream_logic_capacity(); 
-    let store_capacity = rodent_stream_store_capacity(); 
-    let mut primary;
-    let mut other_primary;
-    let mut secondary;
-    rodent_gpu_get_first_primary_stream(dev_id, &mut primary, store_capacity);
-    rodent_gpu_get_second_primary_stream(dev_id, &mut other_primary, store_capacity);
-    rodent_gpu_get_first_secondary_stream(dev_id, &mut secondary,store_capacity);
+    let mut primary         : PrimaryStream;
+    let mut other_primary   : PrimaryStream;
+    let mut secondary       : SecondaryStream;
+    let mut out_primary     : OutRayStream;
+    let mut out_secondary   : OutRayStream;
+    let mut gpu_tmp         : &mut [i32];
     
-    let mut gpu_tmp : &mut [i32];
-    rodent_gpu_get_tmp_buffer(dev_id, &mut gpu_tmp, 1024);
+    rodent_gpu_get_data( &mut primary, &mut other_primary, &mut secondary
+                       , &mut out_primary, &mut out_secondary
+                       , &mut gpu_tmp
+                       , dev_id);
 
     let mut id = 0;
     let num_rays = spp * film_width * film_height;
-        print_string("num ryas  ");
-        print_i32(num_rays);
-        print_string("\n ");
     while id < num_rays || primary.size > 0 {
         // Regenerate rays
-        if primary.size < logic_capacity && id < num_rays {
-             primary.size = gpu_generate_rays(primary, logic_capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
+        if primary.size < primary.capacity && id < num_rays {
+             primary.size = gpu_generate_rays(primary, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
         }
         print_string("primary size ");
         print_i32(primary.size);
@@ -865,33 +852,6 @@ fn @gpu_mega_kernel_trace(dev_id: i32, acc: Accelerator, intrinsics: Intrinsics,
     acc.sync()
 }
 
-fn @gpu_ray_batching( dev_id: i32
-                     , camera: Camera 
-                     , acc: Accelerator
-                     , intrinsics: Intrinsics
-                     , atomics: Atomics
-                     , min_max: MinMax
-                     , scene: Scene
-                     , path_tracer: PathTracer
-                     , spp: i32
-                     ) -> () {
-    let (film_pixels, film_width, film_height) = gpu_get_film_data(dev_id);
-
-    let logic_capacity = rodent_stream_logic_capacity(); 
-    let store_capacity = rodent_stream_store_capacity(); 
-    let mut primary;
-    rodent_gpu_get_first_primary_stream(dev_id, &mut primary, store_capacity);
-    
-    let mut id = 0;
-    let num_rays = spp * film_width * film_height;
-    while id < num_rays || primary.size > 0 {
-        // Regenerate rays
-        if primary.size < logic_capacity && id < num_rays {
-             primary.size = gpu_generate_rays(primary, logic_capacity, acc, intrinsics, path_tracer.on_emit, &mut id, film_width, film_height, spp);
-        }
-        // Traverse primary rays
-    }
-}
 // GPU device ----------------------------------------------------------------------
 
 fn @make_gpu_device( dev_id: i32
