@@ -41,7 +41,7 @@ static void write_project_result(int width, int height, int* domain) {
 //        error("Failed to save PNG file\n");
 }
 
-static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
+static void save_image_its(int* reduce_buffer, int chunk_size) {
     int res = CHUNK_HIT_RES;
     ImageRgba32 img;
     img.width = res * 6 + 20;
@@ -115,7 +115,7 @@ static void save_image_its(int* reduce_buffer, int chunk_size, float spp) {
         error("Failed to save PNG file chunk_hit.png");
 }
 
-static void save_image_ctrb(int* reduce_buffer, int chunk_size, float spp) {
+static void save_image_ctrb(int* reduce_buffer, int chunk_size) {
     int res = CHUNK_HIT_RES;
     ImageRgba32 img;
     img.width = res * 6;
@@ -413,7 +413,7 @@ void Scheduler::process_left_chunk(int proc_size, bool sync) {
     for(int i = 0; i < chunk_size; i++) {
         bool find = false;
         for(auto& iter: chunk_map) 
-            if(iter.first == i) { 
+            if(iter.first == i) {
                 find = true; break; 
             }
 

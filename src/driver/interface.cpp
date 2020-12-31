@@ -302,10 +302,10 @@ struct Interface {
         printf("light field size %d\n", chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2);
         
         int thread_num = dfw_thread_num();
-        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2;
-        int pass_record_size = chunk_size * (chunk_size + 3); // chunk_size * (send size of dst chunk, recv and no_hit)
         cpu_record_chunk_hit = new anydsl::Array<int32_t>[thread_num];
+        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2;
         cpu_pass_record      = new anydsl::Array<int32_t>[thread_num];
+        int pass_record_size = chunk_size * (chunk_size + 3); // chunk_size * (send size of dst chunk, recv and no_hit)
 
         for(int i = 0; i < thread_num; i++) {
             cpu_record_chunk_hit[i] = anydsl::Array<int32_t>(chunk_hit_size);
@@ -777,16 +777,6 @@ void rodent_load_bvh8_tri4(int32_t dev, const char* file, Node8** nodes, Tri4** 
 
 //cpu
 
-//void rodent_cpu_get_pass_record(PassRecord *pass_record, int tid, int chk_id, bool clear) {
-//    auto& array = interface->cpu_pass_record[tid];
-////    if(clear) {
-////        interface->first_write = true;
-////        std::fill(array.begin(), array.end(), 0);
-////    }
-////    get_chunk_hit(*chunk_hit, array.data()); 
-////    dfw_time_end("render prepare data");
-//}
-
 void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* secondary
                                , OutRayStream * out_primary, OutRayStream * out_secondary
                                , ChunkHit *render_chunk_hit, ChunkHit *record_chunk_hit
@@ -810,21 +800,17 @@ void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* second
     get_out_ray_stream(*out_secondary, array_out_secondary.data(), out_size, secondary_width);
 
     auto& array_record_chunk_hit = interface->cpu_record_chunk_hit[tid];
+    get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
+    dfw_time_end("render prepare data");
+    
+    // all thread share
+    get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
+
     if(new_camera) {
         interface->first_write = true;
         std::fill(array_record_chunk_hit.begin(), array_record_chunk_hit.end(), 0);
     }
-    get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
-    dfw_time_end("render prepare data");
     
-   // std::unique_lock <std::mutex> lock(interface->mtx); 
-   // auto& array_render_chunk_hit = interface->render_chunk_hit_list(dev);
-   // int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size() * 2;
-   // get_chunk_hit(*render_chunk_hit, array_render_chunk_hit.data()); 
-   // memcpy(array_render_chunk_hit.data(), interface->host_render_chunk_hit.data(), size * sizeof(int));
-
-    // all thread share
-    get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
 }
 
 

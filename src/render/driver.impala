@@ -102,12 +102,6 @@ struct ChunkHit {
     chk_cap: i32
 }
 
-struct PassRecord {
-    send: &mut[i32],
-    recv: &mut[i32],
-    chunk_size: i32
-}
-
 fn @write_out_primary( primary: PrimaryStream
                      , out_buffer: OutRayStream
                      , src: i32

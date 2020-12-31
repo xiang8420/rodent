@@ -139,11 +139,10 @@ namespace Simplify
 	std::vector<Triangle> triangles;
 	std::vector<Vertex> vertices;
 	std::vector<Ref> refs;
-    std::string mtllib;
-    std::vector<std::string> materials;
 
 	// Helper functions
 
+    void convert_obj_file(const obj::File& file, const obj::MaterialLib& mtl_lib, size_t mtl_offset); 
 	float vertex_error(SymetricMatrix q, float x, float y, float z);
 	float calculate_error(int id_v1, int id_v2, float3 &p_result);
 	bool flipped(float3 p,int i0,int i1,Vertex &v0,Vertex &v1,std::vector<int> &deleted);
@@ -151,9 +150,9 @@ namespace Simplify
 	void update_triangles(int i0,Vertex &v,std::vector<int> &deleted,int &deleted_triangles);
 	void update_mesh(int iteration);
 	void compact_mesh();
-	void simplify_mesh(int target_count, float agressiveness, bool verbose);
+	void simplify_mesh(const obj::MaterialLib &mtl_lib, int target_count, float agressiveness, bool verbose);
 	obj::TriMesh simplify_TriMesh(struct TriMesh *tri_mesh);
-	//
+	
 	// Main simplification function
 	// target_count  : target nr. of triangles
 	// agressiveness : sharpness to increase the threshold.
@@ -164,21 +163,19 @@ namespace Simplify
 	    triangles.clear();
         vertices.clear();
 	    refs.clear();
-        materials.clear();
     }
 
-	obj::TriMesh simplify(float agressiveness=7, bool verbose=false) {
+	obj::TriMesh simplify(const obj::File& obj_file, const obj::MaterialLib& mtl_lib, float agressiveness=7, bool verbose=false) {
+        printf("fine mesh size %ld\n", triangles.size());
 
-        int target_count; 
-        if(triangles.size() < 10000) {
-            target_count = round((float)triangles.size() * 0.1);
-        } else {
-            target_count = round((float)triangles.size() * 0.01);
-        } 
-
+        //if(fine_mesh.indices.size() < 4000000) return fine_mesh;
+        
+        convert_obj_file(obj_file, mtl_lib, 0); 
+        int target_count = 30000;//1000000; 
+       
 		printf("Input: %zu vertices, %zu triangles (target %d)\n", Simplify::vertices.size(), Simplify::triangles.size(), target_count);
-	
-		simplify_mesh(target_count, agressiveness, verbose);
+
+		simplify_mesh(mtl_lib, target_count, agressiveness, verbose);
 		
 		obj::TriMesh simple_mesh;
 		simple_mesh.indices.resize(4 * triangles.size());
@@ -211,11 +208,22 @@ namespace Simplify
         return simple_mesh;
 	}
 
-	void simplify_mesh(int target_count, float agressiveness=7, bool verbose=false)
+	void simplify_mesh(const obj::MaterialLib &mtl_lib, int target_count, float agressiveness=7, bool verbose=false)
 	{
 		// init
 		loopi(0,triangles.size())
             triangles[i].deleted=0;
+
+        bool *light_list = new bool[mtl_lib.list.size()];
+        for (int i = 0; i < mtl_lib.list.size(); i++) {
+            // Stop at the first simple material (they have been moved to the end of the array)
+            auto &mtl_name = mtl_lib.list[i];
+            auto it = mtl_lib.map.find(mtl_name);
+            assert(it != mtl_lib.map.end());
+
+            auto& mat = it->second;
+            light_list[i] = mat.ke != rgb(0.0f) || mat.map_ke != "";
+        }
 
 		// main iteration loop
 		int deleted_triangles=0;
@@ -253,7 +261,8 @@ namespace Simplify
 			loopi(0,triangles.size())
 			{
 				Triangle &t=triangles[i];
-				if(t.err[3]>threshold) continue;
+				if(light_list[t.v[3]]/* || t.attr & TEXCOORD*/) continue;
+                if(t.err[3]>threshold) continue;
 				if(t.deleted) continue;
 				if(t.dirty) continue;
 
@@ -274,11 +283,11 @@ namespace Simplify
 
 					if( flipped(p,i1,i0,v1,v0,deleted1) ) continue;
 
-//					if ( (t.v[3] & TEXCOORD) == TEXCOORD  )
-//					{
-//						update_uvs(i0,v0,p,deleted0);
-//						update_uvs(i0,v1,p,deleted1);
-//					}
+					if ( (t.attr & TEXCOORD) == TEXCOORD  )
+					{
+						update_uvs(i0,v0,p,deleted0);
+						update_uvs(i0,v1,p,deleted1);
+					}
 
 					// not flipped, so remove edge
 					v0.p=p;
@@ -307,6 +316,7 @@ namespace Simplify
 				if(triangle_count-deleted_triangles<=target_count)break;
 			}
 		}
+        delete[] light_list;
 		// clean up mesh
 		compact_mesh();
 	} //simplify_mesh()
@@ -553,7 +563,7 @@ namespace Simplify
 		// compute interpolated vertex
 
 		SymetricMatrix q = vertices[id_v1].q + vertices[id_v2].q;
-		bool   border = vertices[id_v1].border & vertices[id_v2].border;
+		bool  border = vertices[id_v1].border & vertices[id_v2].border;
 		float error=0;
 		float det = q.det(0, 1, 2, 1, 4, 5, 2, 5, 7);
 		if ( det != 0 && !border )
@@ -603,148 +613,44 @@ namespace Simplify
 		return str;
 	}
 
-	//Option : Load OBJ
-	bool load_obj(const char* filename, obj::MaterialLib &mtl_lib, bool process_uv=false){
+    void convert_obj_file(const obj::File& obj_file, const obj::MaterialLib& mtl_lib, size_t mtl_offset) {
+
 		vertices.clear();
 		triangles.clear();
-		//printf ( "Loading Objects %s ... \n",filename);
-		FILE* fn;
-		if(filename==NULL)		return -1;
-		if((char)filename[0]==0)	return -1;
-		if ((fn = fopen(filename, "rb")) == NULL)
-		{
-			printf ( "File %s not found!\n" ,filename );
-			return 0;
-		}
-		char line[1000];
-		memset ( line,0,1000 );
-		//int material = -1;
-        int cur_mtl = 0;
-		std::map<std::string, int> material_map;
-		std::vector<float3> uvs;
-		std::vector<std::vector<int> > uvMap;
+       
+        for (auto& obj: obj_file.objects) {
+            // Convert the faces to triangles & build the new list of indices
 
-		while(fgets( line, 1000, fn ) != NULL)
-		{
-			Vertex v;
-			float3 uv;
+            bool has_normals = false;
+            bool has_texcoords = false;
+            for (auto& group : obj.groups) {
+                for (auto& face : group.faces) {
+                    int v[] = {0, 1, 2};
+                    for (size_t i = 1; i < face.indices.size() - 1; i++) {
+		                v[2] = i + 1;
+                        Triangle t;
+                        for(int k = 0; k < 3; k++) {
+                            t.v[k] = face.indices[v[k]].v;
+                            int tid = face.indices[v[k]].t;
+                            if(tid != 0) {
+                                t.uvs[k].x = obj_file.texcoords[tid].x;
+                                t.uvs[k].y = obj_file.texcoords[tid].y;
+						        t.attr = TEXCOORD;
+                            }
+                        }
+                        t.v[3] = face.material + mtl_offset;
+                        triangles.emplace_back(t);
+                        v[1] = v[2]; //prev = next;
+                    }
+                }
+            }
+        }
+        for(auto& p : obj_file.vertices) {  
+            Vertex v;
+            v.p = p;
+            vertices.emplace_back(v);
+        }
 
-			if (strncmp(line, "mtllib", 6) == 0)
-			{
-				mtllib = trimwhitespace(&line[7]);
-			}
-			if (strncmp(line, "usemtl", 6) == 0)
-			{
-			//	std::string usemtl = trimwhitespace(&line[7]);
-			//	if (material_map.find(usemtl) == material_map.end())
-			//	{
-			//		material_map[usemtl] = materials.size();
-			//		materials.push_back(usemtl);
-			//	}
-		    //	material = material_map[usemtl];
-				std::string mtl_name = trimwhitespace(&line[7]);
-                cur_mtl = mtl_lib.ids.find(mtl_name)->second;
-			}
-
-			if ( line[0] == 'v' && line[1] == 't' )
-			{
-				if ( line[2] == ' ' )
-				if(sscanf(line,"vt %f %f",
-					&uv.x,&uv.y)==2)
-				{
-					uv.z = 0;
-					uvs.push_back(uv);
-				} else
-				if(sscanf(line,"vt %f %f %f",
-					&uv.x,&uv.y,&uv.z)==3)
-				{
-					uvs.push_back(uv);
-				}
-			}
-			else if ( line[0] == 'v' )
-			{
-				if ( line[1] == ' ' )
-				if(sscanf(line,"v %f %f %f",
-					&v.p.x,	&v.p.y,	&v.p.z)==3)
-				{
-					vertices.push_back(v);
-				}
-			}
-			int integers[9];
-			if ( line[0] == 'f' )
-			{
-				Triangle t;
-				bool tri_ok = false;
-                bool has_uv = false;
-
-				if(sscanf(line,"f %d %d %d",
-					&integers[0],&integers[1],&integers[2])==3)
-				{
-					tri_ok = true;
-				}else
-				if(sscanf(line,"f %d// %d// %d//",
-					&integers[0],&integers[1],&integers[2])==3)
-				{
-					tri_ok = true;
-				}else
-				if(sscanf(line,"f %d//%d %d//%d %d//%d",
-					&integers[0],&integers[3],
-					&integers[1],&integers[4],
-					&integers[2],&integers[5])==6)
-				{
-					tri_ok = true;
-				}else
-				if(sscanf(line,"f %d/%d/%d %d/%d/%d %d/%d/%d",
-					&integers[0],&integers[6],&integers[3],
-					&integers[1],&integers[7],&integers[4],
-					&integers[2],&integers[8],&integers[5])==9)
-				{
-					tri_ok = true;
-					has_uv = true;
-				}
-				else
-				{
-					printf("unrecognized sequence\n");
-					printf("%s\n",line);
-					while(1);
-				}
-				if ( tri_ok )
-				{
-                    for(int i = 0; i < 3; i ++)     
-					    t.v[i] = integers[i]-1;
-					t.attr = 0;
-
-					if ( process_uv && has_uv )
-					{
-						std::vector<int> indices;
-						indices.push_back(integers[6]-1);
-						indices.push_back(integers[7]-1);
-						indices.push_back(integers[8]-1);
-						uvMap.push_back(indices);
-						t.attr |= TEXCOORD;
-					}
-
-					t.v[4] = cur_mtl;
-					//geo.triangles.push_back ( tri );
-					triangles.push_back(t);
-					//state_before = state;
-					//state ='f';
-				}
-			}
-		}
-
-		if ( process_uv && uvs.size() )
-		{
-			loopi(0,triangles.size())
-			{
-				loopj(0,3)
-				triangles[i].uvs[j] = uvs[uvMap[i][j]];
-			}
-		}
-
-		fclose(fn);
-        return 1;
-		//printf("load_obj: vertices = %lu, triangles = %lu, uvs = %lu\n", vertices.size(), triangles.size(), uvs.size() );
-	} // load_obj()
+    }
 
 };

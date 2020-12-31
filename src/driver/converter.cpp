@@ -728,7 +728,6 @@ void mpi_gather_light( std::vector<int>   &light_ids
     std::vector<rgb>    new_light_colors;
     std::vector<float>  new_light_areas;
 
-    printf("end gather %d ooo \n", global_light_size);
     std::vector<int> light_ids_map(global_light_size * 2);
     for(int i = 0 /*light_verts.size() / 3*/; i < global_light_size; i++) {
         auto& v0 = light_verts[i * 3 + 0];
@@ -742,33 +741,23 @@ void mpi_gather_light( std::vector<int>   &light_ids
                v2 == new_light_verts[vert_id + 2])
                 break;
         } 
-        printf("%d %d $$ ", light_ids[i], find_light);
         light_ids_map[i * 2] = light_ids[i];
         light_ids_map[i * 2 + 1] = find_light;
-        printf("%d %d", light_ids_map[i * 2], light_ids_map[i * 2 + 1]);
         if(find_light != new_light_areas.size()) {
             continue;
         }
 
         new_light_verts.emplace_back(v0);
-        printf("v0 %f %f %f ", v0.x, v0.y, v0.z);
         new_light_verts.emplace_back(v1);
-        printf("v1 %f %f %f ", v1.x, v1.y, v1.z);
         new_light_verts.emplace_back(v2);
-        printf("v2 %f %f %f ", v2.x, v2.y, v2.z);
         new_light_norms.emplace_back(light_norms[i]);
-        printf("normal %f %f %f ", light_norms[i].x, light_norms[i].y, light_norms[i].z);
         new_light_areas.emplace_back(light_areas[i]);
-        printf("area %f ", light_areas[i]);
         new_light_colors.emplace_back(light_colors[i]);
-        printf("color %f %f %f ", light_colors[i].x, light_colors[i].y, light_colors[i].z);
-        printf("nn\n");
     }
     std::swap(new_light_verts,  light_verts);
     std::swap(new_light_norms,  light_norms);
     std::swap(new_light_colors, light_colors);
     std::swap(new_light_areas,  light_areas);
-    printf("light areas size %ld\n", light_areas.size());
 
     int n = 0;
     printf("num lights %ld\n", num_lights.size());
@@ -793,41 +782,52 @@ void mpi_gather_light( std::vector<int>   &light_ids
     printf("end mpi light gather\n");
 }
 
-bool convert_simple_mesh(const std::string& file_name, obj::MaterialLib &mtl_lib, obj::Light &light, size_t dev_num, 
+bool convert_simple_mesh(const obj::ScenePath& obj_file_paths, obj::MaterialLib &mtl_lib, obj::Light &light, size_t dev_num, 
                         Target* target_list, size_t* dev_list, size_t chunk_size, int padding_flag) 
 {
-    info("Simplify and convert OBJ file '", file_name, "'");
-   
     //set simple mesh 
     obj::TriMesh simple_mesh; 
     //get xml/obj file path 
-    std::vector<std::string> obj_file_paths;
-    obj::read_obj_paths(file_name, obj_file_paths);
-    std::cout<<obj_file_paths[0]<<"\n";
-
+    BBox global_bbox;
     auto ticks = std::chrono::high_resolution_clock::now();
-    // Read all mtls 
-    for( int j = 0; j < obj_file_paths.size(); j ++) {
-        std::string file_name =  obj_file_paths[j] + ".obj";
-        if (!Simplify::load_obj(file_name.c_str(), mtl_lib)) {
-            error("Invalid OBJ file '", file_name, "'");
-            return false;
+    if(obj_file_paths.simple.empty()) {
+        printf("No simple mesh given, simplify origin mesh!\n");
+        // Read all mtls 
+        for( int j = 0; j < obj_file_paths.mesh.size(); j ++) {
+            obj::File obj_file;
+            std::string file_name =  obj_file_paths.mesh[j] + ".obj";
+            if (!obj::load_obj(file_name, obj_file, mtl_lib)) {
+                error("Invalid OBJ file '", file_name, "'");
+                return false;
+            }
+            if(j == 0) {
+                simple_mesh = Simplify::simplify(obj_file, mtl_lib, 7, false);
+            } else {
+                auto sub_mesh = Simplify::simplify(obj_file, mtl_lib, 7, false);
+                obj::mesh_add(simple_mesh, sub_mesh);
+            }
         }
-        /*only for cbox debug*/
-        if(Simplify::triangles.size() < 100)
-            return false;
-        if(j == 0) {
-            simple_mesh = Simplify::simplify(7, false);
-        } else {
-            auto sub_mesh = Simplify::simplify(7, false);
-            obj::mesh_add(simple_mesh, sub_mesh);
+    } else {
+        printf("Load simple mesh\n");
+        for(int j = 0; j < obj_file_paths.simple.size(); j ++) {
+            obj::File obj_file;
+            std::string file_name =  obj_file_paths.simple[j] + ".obj";
+            if (!obj::load_obj(file_name, obj_file, mtl_lib)) {
+                error("Invalid OBJ file '", file_name, "'");
+                return false;
+            }
+            if(j == 0) {
+                global_bbox = obj_file.bbox;
+                simple_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, global_bbox, false);
+            } else {
+                auto sub_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, global_bbox, false);
+                obj::mesh_add(simple_mesh, sub_mesh);
+            }
         }
     }
     float elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
     // only proc 0 process the left part
     printf("simplify time %f\n", elapsed_ms);
-
-    //obj::write_obj(simple_mesh, mtl_lib, 99); //
 
     ticks = std::chrono::high_resolution_clock::now();
 
@@ -900,15 +900,13 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     }
     
     //get xml/obj file path 
-    std::vector<std::string> obj_file_paths;
-    obj::read_obj_paths(file_name, obj_file_paths);
-    std::cout<<obj_file_paths[0]<<"\n";
+    obj::ScenePath obj_file_paths(file_name);
     
     // Read all mtls 
     obj::MaterialLib mtl_lib;
     // .mtl must has the same name of obj
-    for(int i = 0; i < obj_file_paths.size(); i ++) {
-        auto mtl_name = obj_file_paths[i] + ".mtl";
+    for(int i = 0; i < obj_file_paths.mesh.size(); i ++) {
+        auto mtl_name = obj_file_paths.mesh[i] + ".mtl";
         std::cout<<"read mtl "<<mtl_name <<" ";
         if (!obj::load_mtl(mtl_name, mtl_lib)) {
             error("Invalid MTL file '", mtl_name, "'");
@@ -965,7 +963,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     if(proc_size != chunk_size && proc_size != 1) 
         error("chunk size must equals to proc size\n");
 
-
     obj::TriMesh tri_mesh;
     for(int i = proc_rank; i < chunk_size; i+=proc_size) {
         int &chunk_num_lights = num_lights[i]; 
@@ -975,9 +972,9 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         chunk_path += (i > 9 ? "0" : "00") + std::to_string(i) + "/";
         create_directory(chunk_path.c_str());
         
-        for(int j = 0; j < obj_file_paths.size(); j ++) {
+        for(int j = 0; j < obj_file_paths.mesh.size(); j ++) {
             obj::File obj_file;
-            std::string file_name =  obj_file_paths[j] + ".obj";
+            std::string file_name =  obj_file_paths.mesh[j] + ".obj";
             if (!obj::load_obj(file_name, obj_file, mtl_lib)) {
                 error("Invalid OBJ file '", file_name, "'");
                 return false;
@@ -1299,7 +1296,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "    }\n"
        << "}\n\n";
     
-    os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, generate_rays: bool) -> () { \n"   
+    os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, next_chunk: i32, generate_rays: bool) -> () { \n"   
        << "    let renderer = make_path_tracing_renderer( "<<max_path_len<<" /*path length*/, " << spp << " /*spp*/); \n";
     for(int dev_id = 0; dev_id < dev_num; dev_id++){                            
                                                                                 
@@ -1335,7 +1332,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         } else {
             os << "        let scene  = make_scene(device, settings, make_file_path(1, chunk), chunk, generate_rays);\n";    
         }
-        os << "        renderer(scene, device, iter);\n"
+        os << "        for i in parallel(2, 0, 2) {\n"
+           << "            if i == 0 && next_chunk >= 0 { device.load_bvh(make_file_path(1, next_chunk).bvh); } \n"
+           << "            if i == 1 { renderer(scene, device, iter);} \n"
+           << "        }\n"
            << "        //device.present();\n"
            << "    }\n";
     }
@@ -1346,10 +1346,10 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
     os << "extern fn get_chunk() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";
 
-    bool export_simplify_mesh = false;
+    bool export_simplify_mesh = true;//false;
     // if use simple mesh
     if (export_simplify_mesh)
-        convert_simple_mesh(file_name, mtl_lib, light, dev_num, target_list, dev_list, chunk_size, padding_flag); 
+        convert_simple_mesh(obj_file_paths, mtl_lib, light, dev_num, target_list, dev_list, chunk_size, padding_flag); 
 
     info("Scene was converted successfully");
     return true;

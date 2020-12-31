@@ -94,6 +94,14 @@ bool chunk_division(File& file);
 
 void compute_vertex_normals(const std::vector<uint32_t>& ,const std::vector<float3>&, std::vector<float3>&, size_t);
 void compute_face_normals(const std::vector<uint32_t>&, const std::vector<float3>&, std::vector<float3>&, size_t);
+
+struct ScenePath {
+    std::vector<std::string> mesh;
+    std::vector<std::string> simple;
+    
+    ScenePath(std::string file_path);
+    ~ScenePath() {mesh.clear(); simple.clear();}
+};
 } // namespace obj
 
 #endif // LOAD_OBJ_H

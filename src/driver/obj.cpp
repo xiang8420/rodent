@@ -412,19 +412,20 @@ void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 						<< tri_mesh.vertices[i].z<<std::endl; 
 	}
 
-//	for(int i = 0; i < vtx_size; i++) {
-//		outfile << "vn " <<std::fixed<<std::setprecision(4) 
-//						<< tri_mesh->normals[i].x << " " 
-//						<< tri_mesh->normals[i].y << " " 
-//						<< tri_mesh->normals[i].z<<std::endl; 
-//	}
-//	for(int i = 0; i < size * 3; i++) {
-//		outfile << "vt " <<std::fixed<<std::setprecision(4) 
-//						<< tri_mesh->texcoords[i].x << " " 
-//						<< tri_mesh->texcoords[i].y << " "
-//						<< 0.0 << std::endl; 
-//	}
-	
+	for(int i = 0; i < vtx_size; i++) {
+		outfile << "vn " <<std::fixed<<std::setprecision(4) 
+						<< tri_mesh.normals[i].x << " " 
+						<< tri_mesh.normals[i].y << " " 
+						<< tri_mesh.normals[i].z<<std::endl; 
+	}
+	for(int i = 0; i < vtx_size; i++) {
+		outfile << "vt " <<std::fixed<<std::setprecision(4) 
+						<< tri_mesh.texcoords[i].x << " " 
+						<< tri_mesh.texcoords[i].y << " "
+						<< 0.0 << std::endl; 
+	}
+
+    int cur_mtl = -1;    
 	for(int i = 0; i < trx_size; i++){
 //		if (has_uv)
 //		{
@@ -436,8 +437,13 @@ void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 			outfile << "f " << tri_mesh.indices[i * 4] + 1 <<" "
 					        << tri_mesh.indices[i * 4 + 1] + 1 <<" "
 							<< tri_mesh.indices[i * 4 + 2] + 1<<std::endl;
+        
+            if(cur_mtl != tri_mesh.indices[i * 4 + 3]) {
+			    cur_mtl = tri_mesh.indices[i * 4 + 3];
+                outfile << "mtl " <<cur_mtl<<" "<< mtl_lib.list[cur_mtl] <<"\n";
+                 
+            }
             
-			outfile << "mtl " <<tri_mesh.indices[i * 4 + 3]<<" "<< mtl_lib.list[tri_mesh.indices[i * 4 + 3]] <<"\n";
 //		}
 		//fprintf(file, "f %d// %d// %d//\n", triangles[i].v[0]+1, triangles[i].v[1]+1, triangles[i].v[2]+1); //more compact: remove trailing zeros
 	}
@@ -536,7 +542,7 @@ void mesh_add(TriMesh &tri_mesh, TriMesh &sub_mesh) {
     memcpy(&tri_mesh.vertices[vtx_offset], sub_mesh.vertices.data(), vtx_increment * sizeof(float3)); 
     memcpy(&tri_mesh.normals[vtx_offset], sub_mesh.normals.data(), vtx_increment * sizeof(float3)); 
     memcpy(&tri_mesh.texcoords[vtx_offset], sub_mesh.texcoords.data(), vtx_increment * sizeof(float2)); 
-    memcpy(&tri_mesh.face_normals[idx_offset], sub_mesh.face_normals.data(), idx_increment * sizeof(float2)); 
+    memcpy(&tri_mesh.face_normals[idx_offset], sub_mesh.face_normals.data(), idx_increment * sizeof(float3)); 
 }
 
 void virtual_face(TriMesh &tri_mesh, size_t mtl_size, BBox& bbox, int axis) {
@@ -729,10 +735,10 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
     return tri_mesh;
 }
 
-void read_obj_paths(std::string path, std::vector<std::string> &obj_files) {
+ScenePath::ScenePath(std::string path) {
     std::string suffix = path.substr(path.size() - 3, path.size());
     if(suffix == "obj") {
-        obj_files.emplace_back(path.substr(0, path.size() - 4));
+        mesh.emplace_back(path.substr(0, path.size() - 4));
         std::cout<<" "<<path.substr(0, path.size() - 4)<<"\n";
     } else {
         std::ifstream stream;
@@ -751,7 +757,10 @@ void read_obj_paths(std::string path, std::vector<std::string> &obj_files) {
                     if(s == "scene") {
                         break;
                     } else if (s == "mesh") {
-                        obj_files.push_back(tmp.back());
+                        mesh.push_back(tmp.back());
+                        std::cout<<s<<" "<<tmp.back()<<"\n";
+                    } else if (s == "simple") {
+                        simple.push_back(tmp.back());
                         std::cout<<s<<" "<<tmp.back()<<"\n";
                     } else {
                         std::cout<<"error tag "<<s<<"\n";
@@ -771,7 +780,7 @@ void read_obj_paths(std::string path, std::vector<std::string> &obj_files) {
                 tmp.emplace_back(s);
             }
         }
-        std::cout<<" "<<obj_files[0]<<"\n";
+        std::cout<<" "<<mesh[0]<<"\n";
     }
 }
 

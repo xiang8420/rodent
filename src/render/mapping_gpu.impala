@@ -662,7 +662,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
             // Trace secondary rays
             gpu_traverse_secondary(secondary, acc, intrinsics, atomics, min_max, scene, film_pixels, spp);
             gpu_secondary_chunk(secondary, acc, intrinsics, atomics, min_max, scene); 
-            let (secondary_size, out_secondary_size) = gpu_secondary_transfer(secondary, out_secondary, scene.cur_chk, logic_capcacity, acc, intrinsics,
+            let (secondary_size, out_secondary_size) = gpu_secondary_transfer(secondary, out_secondary, scene.cur_chk, acc, intrinsics,
                                                                     atomics, dev_id, gpu_tmp, true, id == num_rays);
             secondary.size = secondary_size; 
             out_secondary.size = out_secondary_size;

@@ -5,7 +5,7 @@ struct AllCopyNode : public Node{
     std::mutex  block_mutex;
     std::condition_variable block_cond; //
     
-    AllCopyNode(struct Communicator *comm, struct ProcStatus *ps);
+    AllCopyNode(Communicator *comm, ProcStatus *ps, Scheduler*);
     
     ~AllCopyNode();
     
@@ -21,8 +21,8 @@ struct AllCopyNode : public Node{
     
 };
 
-AllCopyNode::AllCopyNode(struct Communicator *comm, struct ProcStatus *ps)
-    :Node(comm, ps)
+AllCopyNode::AllCopyNode(Communicator *comm, ProcStatus *ps, Scheduler* scheduler)
+    :Node(comm, ps, scheduler)
 {}
 
 AllCopyNode::~AllCopyNode() {

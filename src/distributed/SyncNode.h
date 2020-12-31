@@ -1,7 +1,7 @@
 // Synchronize Dynamic  
 struct SyncNode : public Node{
 
-    SyncNode(struct Communicator *comm, struct ProcStatus *ps);
+    SyncNode(Communicator *comm, ProcStatus *ps, Scheduler*);
     
     ~SyncNode();
     
@@ -31,8 +31,8 @@ struct SyncNode : public Node{
     RayStreamList inList;  
 };
 //每一轮光线全部给master然后 master发送调度消息给各个节点 各个节点读取新场景， 接受光线
-SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps)
-    :Node(comm, ps)
+SyncNode::SyncNode(struct Communicator *comm, struct ProcStatus *ps, Scheduler *scheduler)
+    :Node(comm, ps, scheduler)
 {
     int chunk_size = ps->get_chunk_size();
     outArrayList = new RayArrayList[chunk_size];

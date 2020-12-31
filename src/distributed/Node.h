@@ -4,6 +4,7 @@ class Node {
 protected:
     Communicator *comm;
     ProcStatus *ps;
+    Scheduler *scheduler;
 
     std::mutex  thread_mutex;
     
@@ -13,7 +14,7 @@ protected:
 public: 
     int max_used_mem, pre_mem;
     
-    Node(Communicator *comm, ProcStatus *ps);
+    Node(Communicator *comm, ProcStatus *ps, Scheduler *scheduler);
 
     ~Node();
 
@@ -32,7 +33,9 @@ public:
     void loop_check(float i); 
 };
 
-Node::Node(Communicator *comm, ProcStatus *ps) : comm(comm), ps(ps) {
+Node::Node(Communicator *comm, ProcStatus *ps, Scheduler *scheduler) 
+    : comm(comm), ps(ps), scheduler(scheduler)
+{
     pre_mem = 0;
     max_used_mem = 0;
 }

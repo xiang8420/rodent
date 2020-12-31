@@ -74,11 +74,11 @@ struct DistributedFrameWork {
             type = "Single";
         std::cout<<"new type "<<type<<" "<<chunk<<" "<<comm->get_size()<<"\n";
 
-        if(type == "Single") node = new SingleNode(comm, ps);
-        else if(type == "Sync") node = new SyncNode(comm, ps);
+        if(type == "Single") node = new SingleNode(comm, ps, scheduler);
+        else if(type == "Sync") node = new SyncNode(comm, ps, scheduler);
 //        else if(type == "MasterWorker") node = new MWNode(comm, ps);
-        else if(type == "Async") node = new AsyncNode(comm, ps);
-        else if(type == "AllCopy") node = new AllCopyNode(comm, ps); 
+        else if(type == "Async") node = new AsyncNode(comm, ps, scheduler);
+        else if(type == "AllCopy") node = new AllCopyNode(comm, ps, scheduler); 
         else error("Unknown node type");
     }
 
@@ -89,31 +89,6 @@ struct DistributedFrameWork {
         delete comm;
     }
     
-    void save_chunk_hit(int* chunk_hit, float spp) {
-        int size = CHUNK_HIT_RES * CHUNK_HIT_RES * 6 * ps->get_chunk_size();
-        int *reduce_buffer = new int[size * 2];
-        printf("start reduce %d\n", comm->get_rank());
-        {
-            statistics.start("run => light field => bcast ");
-            comm->update_chunk_hit(chunk_hit, reduce_buffer, size);
-            MPI_Bcast(reduce_buffer, size * 2, MPI_INT, 0, MPI_COMM_WORLD);
-            statistics.end("run => light field => bcast ");
-        }
-        
-        //updata render light field
-        rodent_update_render_chunk_hit(reduce_buffer, 2 * size);
-        //reduce ctib 存在了reduce 里
-        statistics.start("run => light field => save img  ");
-        if(comm->get_rank() == 0 && VIS_CHUNK_HIT) { 
-            int* render_chunk_hit = rodent_get_render_chunk_hit_data();
-            save_image_ctrb(render_chunk_hit, ps->get_chunk_size(), spp);
-            save_image_its(&render_chunk_hit[size], ps->get_chunk_size(), spp);
-        }
-        statistics.end("run => light field => save img  ");
-        scheduler->chunk_reallocation(reduce_buffer);
-        
-        delete[] reduce_buffer;
-    }
 
     void run(Camera *camera) {
         printf("dis frame worker run\n");
@@ -136,12 +111,6 @@ struct DistributedFrameWork {
         statistics.start("run");
         node->run(scheduler);
         
-        statistics.end("run");
-        statistics.start("process light lield");
-        if(type == "Async" && comm->get_size() > 1) {
-            save_chunk_hit(rodent_get_chunk_hit(), scheduler->get_spp());
-            statistics.end("process light lield");
-        }
         statistics.print(comm->os);
 
         ps->reset();

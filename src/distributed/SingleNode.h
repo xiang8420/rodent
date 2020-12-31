@@ -1,5 +1,5 @@
 struct SingleNode : public Node{
-    SingleNode(struct Communicator *comm, struct ProcStatus *ps);
+    SingleNode(Communicator *comm, ProcStatus *ps, Scheduler *scheduler); 
     
     ~SingleNode();
     
@@ -11,8 +11,8 @@ struct SingleNode : public Node{
 
 };
 
-SingleNode::SingleNode(struct Communicator *comm, struct ProcStatus *ps)
-    :Node(comm, ps)
+SingleNode::SingleNode( Communicator *comm, ProcStatus *ps, Scheduler * scheduler)
+    :Node(comm, ps, scheduler)
 {
     printf("new SingleNode\n");
     printf("Memory %ld kb \n", physical_memory_used_by_process());

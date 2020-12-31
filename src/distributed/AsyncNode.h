@@ -26,11 +26,69 @@ struct RetiredRays {
     }
 };
 
+struct PassRecord {
+    int * data; //(chunk_size + 2) * chunk_size [cur_chk] miss
+    int * reduce_data;
+    int * cur_chk_send;
+    int * cur_chk_recv; //[0] recv 
+    int chunk_size;
+    
+    PassRecord(int chunk_size) 
+        : chunk_size(chunk_size) 
+    {
+        data = new int[(chunk_size + 1) * chunk_size];
+        reduce_data = new int[(chunk_size + 1) * chunk_size]; 
+    }
+
+    ~PassRecord(){
+        delete[] data;
+        delete[] reduce_data;
+    }
+
+    void set_cur_chk(int chk) {
+        cur_chk_send = data + (chunk_size + 1) * chk; 
+        cur_chk_recv = cur_chk_send + chunk_size; 
+    }
+
+    void write_send(float * rays, int size,  bool primary) {
+        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
+        int *iptr = (int*) rays;
+        for(int i = 0; i < size; i++) {
+            int org_chk = iptr[i * width + 10] & 0xFF;;
+            cur_chk_send[org_chk] ++;
+        }
+    }
+
+    void write_recv(int n) {
+        cur_chk_recv[0] += n;
+    }
+
+    void print() {
+        printf("pass record : \n");
+        int col = chunk_size + 1;
+        for(int i = 0; i < chunk_size; i++) {
+            for(int j = 0; j < chunk_size + 1; j++) {
+                printf(" %d |", data[i * col + j]);
+                data[i * col + j] = 0;
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+    
+    
+    void gather() {
+        MPI_Reduce(data, reduce_data, (chunk_size + 1) * chunk_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
+        int* tmp = data;
+        data = reduce_data;
+        reduce_data = tmp;
+    }
+};
 
 // Original Master-Worker mode 
 struct AsyncNode : public Node {
 
-    AsyncNode(struct Communicator *comm, struct ProcStatus *ps);
+    AsyncNode(Communicator *, ProcStatus *, Scheduler *);
     
     ~AsyncNode();
 
@@ -52,6 +110,8 @@ struct AsyncNode : public Node {
     
     int load_incoming_buffer(float **, bool, int); 
     
+    void save_chunk_hit(int* chunk_hit); 
+    
     void run(Scheduler * camera);
 
     bool outList_empty(); 
@@ -59,10 +119,12 @@ struct AsyncNode : public Node {
     bool allList_empty();
 
     RayStreamList  inlist_comm;  
-    RayStreamList* outlist_comm;
+    RayStreamList * outlist_comm;
     
     RayStreamList inlist_render;  
-    RayStreamList* outlist_render;
+    RayStreamList * outlist_render;
+
+    PassRecord * pass_record;
 
     std::vector<RetiredRays*> retiredRays; 
     std::mutex retired_mutex;
@@ -150,8 +212,8 @@ bool AsyncNode::allList_empty() {
     return true;
 }
 
-AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
-    :Node(comm, ps)
+AsyncNode::AsyncNode(Communicator *comm, ProcStatus *ps, Scheduler* scheduler)
+    :Node(comm, ps, scheduler)
 {
     printf("new AsyncNode\n");
     int store_capacity = ps->get_stream_store_capacity();
@@ -163,6 +225,9 @@ AsyncNode::AsyncNode(struct Communicator *comm, struct ProcStatus *ps)
         outlist_comm[i].set_capacity(logic_capacity, store_capacity);
     inlist_comm.set_capacity(logic_capacity, store_capacity);
     inlist_render.set_capacity(logic_capacity, store_capacity);
+    
+    pass_record = new PassRecord(chunk_size);
+
     wait_respond = false;
 }
 
@@ -253,6 +318,9 @@ void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
 
     RetiredRays *retired_rays = new RetiredRays(rays, size, primary);
     std::lock_guard <std::mutex> thread_lock(retired_mutex); 
+    
+    pass_record->write_send(rays, size, primary); 
+
     retiredRays.emplace_back(retired_rays);
 
     if(retiredRays.size() > 10)
@@ -351,7 +419,9 @@ int AsyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
     int width = rays_stream->width;
     printf("copy primary size %d\n", copy_size);
     memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
-    
+   
+    pass_record->write_recv(copy_size);
+
     delete rays_stream;
     statistics.end("run => work_thread => load_incoming_buffer-copy");
     return copy_size;
@@ -418,14 +488,16 @@ void AsyncNode::run(Scheduler * camera) {
     comm->os <<" start run message thread \n";
 
     int deviceNum = ps->get_dev_num();
-    int iter = 0; 
-   
+    int iter = 0;
+  
     std::thread mthread(message_thread, this);
     do {
         //load new chunk;
         int current_chunk = ps->get_current_chunk();
+        pass_record->set_cur_chk(current_chunk);
+
         comm->os<<"rthread start  " << current_chunk << "\n";
-        if(iter != 0) {        
+        if(iter != 0) {
             std::unique_lock <std::mutex> inlock(inlist_comm.mutex); 
             
             if(!retiredRays.empty()) {
@@ -438,6 +510,7 @@ void AsyncNode::run(Scheduler * camera) {
                     comm->os<<"rthread waiting \n";
                     inlist_comm.cond_full.wait(inlock);
                 }
+                pass_record->set_cur_chk(current_chunk);
                 if(ps->Exit()) {
                     break;
                 }
@@ -456,6 +529,37 @@ void AsyncNode::run(Scheduler * camera) {
     } while(!ps->Exit());
     comm->os<<" render thread times "<<iter<<"\n";
     mthread.join();
+            
+    save_chunk_hit(rodent_get_chunk_hit());
+
+    pass_record->gather();
+    if(comm->get_rank() == 0)
+        pass_record->print();
     return;
 }
 
+void AsyncNode::save_chunk_hit(int* chunk_hit) {
+    int size = CHUNK_HIT_RES * CHUNK_HIT_RES * 6 * ps->get_chunk_size();
+    int *reduce_buffer = new int[size * 2];
+    printf("start reduce %d\n", comm->get_rank());
+    {
+        statistics.start("run => light field => bcast ");
+        comm->update_chunk_hit(chunk_hit, reduce_buffer, size);
+        MPI_Bcast(reduce_buffer, size * 2, MPI_INT, 0, MPI_COMM_WORLD);
+        statistics.end("run => light field => bcast ");
+    }
+    
+    //updata render light field
+    rodent_update_render_chunk_hit(reduce_buffer, 2 * size);
+    //reduce ctib 存在了reduce 里
+    statistics.start("run => light field => save img  ");
+    if(comm->get_rank() == 0 && VIS_CHUNK_HIT) { 
+        int* render_chunk_hit = rodent_get_render_chunk_hit_data();
+        save_image_ctrb(render_chunk_hit, ps->get_chunk_size());
+        save_image_its(&render_chunk_hit[size], ps->get_chunk_size());
+    }
+    statistics.end("run => light field => save img  ");
+    scheduler->chunk_reallocation(reduce_buffer);
+    
+    delete[] reduce_buffer;
+}

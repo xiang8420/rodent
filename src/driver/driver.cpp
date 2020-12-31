@@ -131,8 +131,8 @@ int main(int argc, char** argv) {
     std::vector<double> samples_sec;
     float elapsed_ms = 1;  //avoid div 0
    
-    bool animation = false; 
-    int frame = 2;
+    bool animation = true;//false; 
+    int frame = 1;
     for(int i = 0; i < frame; i++) {
         auto ticks = std::chrono::high_resolution_clock::now();
         //camera.rotate(0.4f, 0.0f);
@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
             auto film = get_pixels();
             dfw_save_image(out_file, film, i, frame, width, height);
             clear_pixels();
-            camera.rotate(0.1f, 0.0f);
+            //camera.rotate(0.1f, 0.0f);
         }
         camera.iter++;
     }
