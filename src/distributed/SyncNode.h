@@ -25,7 +25,7 @@ struct SyncNode : public Node{
     
     static void message_thread(void* tmp);
     
-    void run(Scheduler * camera);
+    void run();
    
     RayArrayList * outArrayList;
     RayStreamList inList;  
@@ -108,11 +108,12 @@ int SyncNode::get_unloaded_chunk(int* list_size) {
     int unloaded_chunk = -1;
     int max_ray_size = 0;
     int chunk_size = ps->get_chunk_size();
-    chunk_size = ps->get_rough_trace() ? chunk_size - 1 : chunk_size;
+    bool simple_mesh = ps->get_simple_trace();
+    chunk_size = simple_mesh ? chunk_size - 1 : chunk_size;
  
-    if(ps->get_rough_trace()) { 
+    if(simple_mesh) { 
         int simple_mesh = chunk_size - 1; 
-        if(ps->get_rough_trace() && list_size[simple_mesh] / 2 > max_ray_size ) { 
+        if(simple_mesh && list_size[simple_mesh] / 2 > max_ray_size ) { 
             unloaded_chunk = simple_mesh;
             max_ray_size   = list_size[simple_mesh] / 2;
         }
@@ -208,10 +209,6 @@ void SyncNode::schedule(int * list_size) {
              //proc_[i] load new chunk 
          } 
     } 
-    int* chunk_proc =  ps->get_chunk_proc();
-    for(int i = 0; i < chunk_size; i++)
-        printf("%d %d |", chunk_proc[i*2], chunk_proc[i*2+1]);
-    printf("\n");
 }
 
 void SyncNode::synchronize () {
@@ -261,7 +258,7 @@ void SyncNode::synchronize () {
     printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), inList.size());
 }
 
-void SyncNode::run(Scheduler * camera) {
+void SyncNode::run() {
     
     comm->os <<" start run message thread \n";
 
@@ -298,7 +295,7 @@ void SyncNode::run(Scheduler * camera) {
         //    clear_outlist();
         }
 
-        launch_rodent_render(camera, deviceNum, iter==0);
+        launch_rodent_render(deviceNum, iter==0);
         std::cout<<"rthread rank " << comm->get_rank()<<" generate rays "<<ps->generate_rays()<<"\n";
         statistics.start("run => synchronize");
         synchronize();

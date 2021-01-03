@@ -112,7 +112,7 @@ struct AsyncNode : public Node {
     
     void save_chunk_hit(int* chunk_hit); 
     
-    void run(Scheduler * camera);
+    void run();
 
     bool outList_empty(); 
 
@@ -209,7 +209,8 @@ bool AsyncNode::allList_empty() {
     for(int i = 0; i < chunk_size; i++)
         if(!outlist_comm[i].empty()) 
             return false;
-    return true;
+    comm->os<<" all list empty "<<inlist_comm.empty()<<" "<<retiredRays.empty()<<"\n";
+    return true;//inlist_comm.empty();// && retiredRays.empty();
 }
 
 AsyncNode::AsyncNode(Communicator *comm, ProcStatus *ps, Scheduler* scheduler)
@@ -288,10 +289,9 @@ void AsyncNode::send_message() {
             inlist_comm.cond_full.notify_all();
             inlist_render.cond_full.notify_all();
         } else {
-            comm->os<<"still has rays to send\n";
+            //outlist need to send
         }
-    } 
-
+    }
     int cId = get_sent_list();
     do {
         if(cId >= 0) {
@@ -483,7 +483,7 @@ void AsyncNode::message_thread(void* tmp) {
     return;
 } 
 
-void AsyncNode::run(Scheduler * camera) {
+void AsyncNode::run() {
     
     comm->os <<" start run message thread \n";
 
@@ -522,7 +522,7 @@ void AsyncNode::run(Scheduler * camera) {
         }
 
         statistics.start("run => work_thread => render");
-        launch_rodent_render(camera, deviceNum, iter==0);
+        launch_rodent_render(deviceNum, iter==0);
         statistics.end("run => work_thread => render");
 
         iter++;

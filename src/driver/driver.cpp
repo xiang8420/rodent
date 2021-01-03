@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
     uint64_t timing = 0;
     uint32_t frames = 0;
     uint32_t iter = 0;
-    setup_distributed_framework(distributedMode, get_chunk_num(), get_dev_num(), width, height, spp); 
+    setup_distributed_framework(distributedMode, width, height, spp); 
     setup_interface(width, height);
     
     // inital process setting and status  

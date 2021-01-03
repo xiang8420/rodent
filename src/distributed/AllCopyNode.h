@@ -17,7 +17,7 @@ struct AllCopyNode : public Node{
     
     int load_incoming_buffer(float **, bool, int) { }; 
     
-    void run(Scheduler * camera);
+    void run();
     
 };
 
@@ -34,12 +34,11 @@ void AllCopyNode::message_thread(void* tmp) {
     AllCopyNode *wk = (struct AllCopyNode*)tmp;
     Communicator * comm = wk->comm; 
     ProcStatus * ps = wk->ps;
-    Scheduler * camera = ps->get_camera();
 
     printf("%d message thread\n", comm->get_rank());
     comm->os<<"message thread\n";
     
-    size_t block_count = camera->get_block_count();
+    size_t block_count = wk->scheduler->get_block_count();
     int i = comm->get_size();
     printf("comm size %d block count %ld\n", comm->get_size(), block_count);
     while(i < block_count) {
@@ -47,7 +46,7 @@ void AllCopyNode::message_thread(void* tmp) {
         //master waiting
         if(ps->is_proc_idle()) {
             printf("master mthread self schedule %d\n", i);
-            camera->set_render_block(i++);
+            wk->scheduler->set_render_block(i++);
             ps->set_proc_busy(comm->get_rank());
             wk->block_cond.notify_all();
             continue;
@@ -79,19 +78,17 @@ void AllCopyNode::message_thread(void* tmp) {
     return;
 } 
 
-void AllCopyNode::run(Scheduler * camera) {
+void AllCopyNode::run() {
    
     comm->os <<" start image decomposition  \n";
     //start rendering with origin tile
     //recv camera
     int deviceNum = ps->get_dev_num();
 
-    ps->camera = camera;
-
     std::vector<std::thread> workThread;
     if(comm->isMaster()) {
         std::thread mthread(message_thread, this);
-        launch_rodent_render(camera, deviceNum, true);
+        launch_rodent_render(deviceNum, true);
         while(!ps->Exit()) {
             
             ps->set_proc_idle(comm->get_rank());
@@ -102,12 +99,12 @@ void AllCopyNode::run(Scheduler * camera) {
                 block_cond.wait(lock);
                 printf("get block\n");
             }
-            launch_rodent_render(camera, deviceNum, true);
+            launch_rodent_render(deviceNum, true);
         }
         mthread.join();
 
     } else {
-        launch_rodent_render(camera, deviceNum, true);
+        launch_rodent_render(deviceNum, true);
         while(!ps->Exit()) {
 
             int new_block;
@@ -119,8 +116,8 @@ void AllCopyNode::run(Scheduler * camera) {
             printf("mthread worker  %d recv %d\n", comm->get_rank(), new_block);
             if(new_block == -1)
                 break;
-            camera->set_render_block(new_block);
-            launch_rodent_render(camera, deviceNum, true);
+            scheduler->set_render_block(new_block);
+            launch_rodent_render(deviceNum, true);
         }
         printf("worker %d exit\n", comm->get_rank());
     }

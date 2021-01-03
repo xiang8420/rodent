@@ -843,7 +843,7 @@ fn @make_cpu_device(  use_embree: bool
     Device {
         intrinsics: cpu_intrinsics,
         trace: @ |scene, path_tracer, spp| {
-            cpu_dis_trace(scene, path_tracer, min_max, single, 
+            cpu_dis_trace(scene, path_tracer, min_max, false/*single*/, 
                  spp, vector_width, use_embree, vector_compact)
         },
         present: @ || rodent_present(0),

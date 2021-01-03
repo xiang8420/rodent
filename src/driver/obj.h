@@ -81,17 +81,13 @@ struct Light {
     std::vector<Material>      mats;
 };
 
-
 bool load_obj(const std::string, File&, MaterialLib&);
 bool load_mtl(const FilePath&, MaterialLib&);
 void write_obj(const TriMesh&, const MaterialLib&, int);
 void mesh_add(TriMesh&, TriMesh&);
 TriMesh compute_tri_mesh(const File&, const MaterialLib&, size_t, BBox&, bool);
-void read_obj_paths(std::string, std::vector<std::string> &); 
 void write_light_obj(std::vector<float3> verts); 
-
 bool chunk_division(File& file);
-
 void compute_vertex_normals(const std::vector<uint32_t>& ,const std::vector<float3>&, std::vector<float3>&, size_t);
 void compute_face_normals(const std::vector<uint32_t>&, const std::vector<float3>&, std::vector<float3>&, size_t);
 

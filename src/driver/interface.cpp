@@ -671,6 +671,7 @@ inline void get_chunk_hit(ChunkHit& chunk_hit, int* ptr) {
     chunk_hit.its      = ptr + chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
     chunk_hit.res      = chunk_hit_res;
     chunk_hit.chk_cap  = chunk_hit_res * chunk_hit_res * 6;
+    chunk_hit.chk_size = dfw_chunk_size();
 }
 
 inline void copy_primary_ray(PrimaryStream a, PrimaryStream b, int src_id, int dst_id, bool keep_hit) {
@@ -813,9 +814,7 @@ void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* second
     
 }
 
-
 //gpu
-
 void rodent_gpu_get_data( PrimaryStream* primary, PrimaryStream* other_primary, SecondaryStream* secondary
                         , OutRayStream * out_primary, OutRayStream * out_secondary
                         , ChunkHit *render_chunk_hit, ChunkHit *record_chunk_hit

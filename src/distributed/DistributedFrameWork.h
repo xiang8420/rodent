@@ -18,9 +18,10 @@ int* rodent_get_render_chunk_hit_data();
 }
 #include "../driver/common.h"
 #include "statistic.h"
+#include "Message.h"
 #include "scheduler.h"
-#include "communicator.h"
 #include "ProcStatus.h"
+#include "communicator.h"
 
 #include "Node.h"
 #include "SingleNode.h"
@@ -59,20 +60,24 @@ struct DistributedFrameWork {
     Node *node;
     Communicator *comm;
     ProcStatus *ps;
-    bool rough_trace;
 
     std::string type;
 
-    DistributedFrameWork(std::string dis_type, int chunk, int dev, int width, int height, int spp):  type(dis_type) 
+    DistributedFrameWork(std::string dis_type, int width, int height, int spp):  type(dis_type) 
     {
-        scheduler = new Scheduler(width, height, spp);
-        comm = new Communicator();
-        rough_trace = false; //true || (comm->get_size() % 2 == 1 && comm->get_size() > 1);
-        ps = new ProcStatus(comm->get_rank(), comm->get_size(), chunk, dev, rough_trace);
+        int chunk_size = get_chunk_num();
+        int dev = get_dev_num();
+
+        comm          = new Communicator();
+        scheduler     = new Scheduler(width, height, spp, comm->get_rank(), comm->get_size());
+        ps            = new ProcStatus(comm->get_rank(), comm->get_size(), chunk_size, dev);
+        ps->chunk_manager = scheduler->chunk_manager;
+
+
         // mpi
-        if(chunk == 1 && comm->get_size() == 1 ) 
+        if(chunk_size == 1 && comm->get_size() == 1 ) 
             type = "Single";
-        std::cout<<"new type "<<type<<" "<<chunk<<" "<<comm->get_size()<<"\n";
+        std::cout<<"new type "<<type<<" "<<chunk_size<<" "<<comm->get_size()<<"\n";
 
         if(type == "Single") node = new SingleNode(comm, ps, scheduler);
         else if(type == "Sync") node = new SyncNode(comm, ps, scheduler);
@@ -87,9 +92,9 @@ struct DistributedFrameWork {
         delete node;
         delete ps;
         delete comm;
+        delete scheduler;
     }
     
-
     void run(Camera *camera) {
         printf("dis frame worker run\n");
         int proc_rank = comm->get_rank();
@@ -102,14 +107,13 @@ struct DistributedFrameWork {
             scheduler->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
         } else {
             int block = comm->get_size();
-            scheduler->image_domain_decomposition(camera, block, proc_rank, proc_size, rough_trace, type == "Sync");
+            scheduler->image_domain_decomposition(camera, block, proc_rank, proc_size, ps->get_simple_trace(), type == "Sync");
         }
-        scheduler->write_chunk_proc(ps->get_chunk_proc());
-        ps->updata_local_chunk();
+        scheduler->generate_chunk_manager();
         statistics.end("schedule");
 
         statistics.start("run");
-        node->run(scheduler);
+        node->run();
         
         statistics.print(comm->os);
 
@@ -143,14 +147,15 @@ struct DistributedFrameWork {
             else 
                 save_image(reduce_buffer, out + ".png", width, height, 1);
         }
+        delete[] reduce_buffer;
     }
 
 };
 
 static std::unique_ptr<DistributedFrameWork> dfw;
 
-void setup_distributed_framework(std::string type, int chunk, int dev, int w, int h, int spp) {
-    dfw.reset(new DistributedFrameWork(type, chunk, dev, w, h, spp));
+void setup_distributed_framework(std::string type, int w, int h, int spp) {
+    dfw.reset(new DistributedFrameWork(type, w, h, spp));
 }
 
 void cleanup_distributed_framework() {

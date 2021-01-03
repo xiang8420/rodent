@@ -99,7 +99,8 @@ struct ChunkHit {
     ctrb: &mut[i32],
     its:  &mut[i32],
     res:  i32,
-    chk_cap: i32
+    chk_cap: i32,
+    chk_size: i32
 }
 
 fn @write_out_primary( primary: PrimaryStream

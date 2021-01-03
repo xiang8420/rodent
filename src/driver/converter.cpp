@@ -1346,7 +1346,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f] }\n";
     os << "extern fn get_chunk() -> &[f32] { &[" << chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f] }\n";
 
-    bool export_simplify_mesh = true;//false;
+    bool export_simplify_mesh = SIMPLE_TRACE;
     // if use simple mesh
     if (export_simplify_mesh)
         convert_simple_mesh(obj_file_paths, mtl_lib, light, dev_num, target_list, dev_list, chunk_size, padding_flag); 

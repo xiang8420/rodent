@@ -222,45 +222,174 @@ struct Camera {
     }
 };
 
+struct ChunkProcs {
+    std::vector<int> proc_list;
+    int iter;
+    
+    ChunkProcs () { iter = 0; }
+    int get_proc() { return proc_list[iter++ % proc_list.size()]; }
+    int set_proc(int proc) { proc_list.emplace_back(proc); }
+    int size() {return proc_list.size(); }
+    int back() {return proc_list.back(); }
+};
+
+struct Chunk {
+    int id;
+    int priority;
+    Chunk(int id, int priority)
+        :id(id), priority(priority) 
+    {}
+};
+
+struct LocalChunks {
+    std::vector<Chunk> chunks;
+    
+    std::vector<int> history;
+    int current, next;
+    bool new_loaded;
+    
+    LocalChunks() {
+        new_loaded= true;
+        next = -1;
+    }
+
+    int size() { return chunks.size(); }
+    
+    bool find(int chk) {
+        for(int i = 0; i < chunks.size(); i++) {
+            if(chk == chunks[i].id)
+                return true;
+        }
+        return false;
+    }
+    
+    void insert(int chk, int pri) {
+        chunks.push_back(Chunk(chk, pri));
+    }
+
+    Chunk& get_chunk(int i) {
+        return chunks[i];
+    }
+
+    void init() {
+        printf("local chunk: \n ");
+        for(int i = 0; i < chunks.size(); i ++) {
+            Chunk& chk = chunks[i];
+            printf("chunk %d priority %d \n ", chk.id, chk.priority);
+            if(chk.priority == 0) 
+                current = chk.id;
+            if(chk.priority == 1)
+                next = -1;//iter.first;
+        } 
+        printf("current %d  next %d\n", current, next);
+        new_loaded = true;
+    }
+    
+    int select_new_chunk(RayStreamList * outlist) {
+        int max = 0, new_chk = -1;
+        int weight = 1;
+        for(int i = 0; i < chunks.size(); i ++) {
+            Chunk& chk = chunks[i]; 
+            int cur_size = outlist[chk.id].size();
+            cur_size = cur_size > 100 ? weight * cur_size : cur_size;
+            weight *= 0.8; // 简单的weight 不断减少
+            if(chk.id != current && cur_size > max) {
+                new_chk = chk.id;
+                max = outlist[chk.id].size();
+            }    
+        }
+        if(next == -1) {
+            current = new_chk;
+        } else {
+            current = next;        
+            next = new_chk;
+        }
+        new_loaded = true;
+        
+    }
+    void set_new_loaded(bool a) { new_loaded = a; }
+    bool get_new_loaded() { return new_loaded; }
+};
+
+struct ChunkManager {
+    ChunkProcs * chunk_list;
+    LocalChunks local_chunks;  // chunk id, chunk priority
+    int chunk_size;
+
+    ChunkManager(int size) : chunk_size(size) {
+        chunk_list = new ChunkProcs[chunk_size];
+    }
+
+    ~ChunkManager() {
+        delete[] chunk_list;
+    }
+
+    int switch_current_chunk(RayStreamList * outlist) {
+        local_chunks.select_new_chunk(outlist);
+    }
+    
+    int get_proc(int c) {
+        if(c >= chunk_size) { 
+            warn(c, " chunk not loaded");
+            return -1;
+        }
+        printf("get chunk %d  proc %d \n", c, chunk_list[c].get_proc());
+        return chunk_list[c].get_proc();
+    }
+
+    bool is_local_chunk(int c) {
+        return local_chunks.find(c);
+    }
+    
+    bool update_chunk(int* schedule, int proc_rank) {
+        error("function update chunk not implement");
+    }
+
+    bool update_chunk(int candidate_proc, int candidate_chunk, int proc_rank) {
+        error("check function update chunk first.");
+        chunk_list[candidate_chunk].set_proc(candidate_proc);
+        if(candidate_proc == proc_rank) {
+            local_chunks.insert(candidate_chunk, 1/*priority*/);
+            local_chunks.set_new_loaded(true);
+        }
+        return local_chunks.get_new_loaded();
+    }
+
+    void get_start_chunk() { local_chunks.init(); }
+    int get_next_chunk() {return local_chunks.next;}
+    int get_current_chunk() {return local_chunks.current;}
+};
+
 // Grid hierarchy for scheduling
 class Scheduler {
 public:
     ImageBlock project_cube_to_image(Camera *camera, BBox box, int chunk, bool Record, ImageBlock image);
 
-    void get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image, bool simple_mesh); 
-
-    void process_left_chunk(int, bool);
-    
+    void get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image); 
+    void process_left_chunk(int, bool, bool);
     void image_domain_decomposition(Camera *cam, int block, int proc_rank, int proc_size, bool simple_mesh, bool sync);
-    
     void split_image_block(Camera *cam, int block, int proc_rank, int proc_size);
-    
     void chunk_reallocation(int* reduce_buffer); 
-    
     int chunk_loaded(int chunk); 
-
     int get_most_unloaded_chunk(int *block, int chunk_size);
-   
-    void write_chunk_proc(int* chunk_proc); 
+    void generate_chunk_manager();
 
     int* get_render_block() { return &render_block[0]; }
-    
     void set_render_block(int i) { render_block = blockList[i]; }
-
     size_t get_block_count() { return block_count; }
-    
     int get_spp() { return spp; }
-    
-    Scheduler( int width, int height, int spp);
+    Scheduler( int, int, int, int, int);
     
     ~Scheduler();
 
     Camera* camera;
+    ChunkManager * chunk_manager;
 private:    
     int width, height, spp, proc_spp;
     int block_count; 
     float2 scale;
     bool load_chunk_hit;
+    int proc_size, proc_rank;
 
     //multi process load same chunk. 
     ImageBlock render_block, chunk_project_block; 
@@ -274,18 +403,20 @@ private:
     std::vector<int> send_recv_map;
 };
 
-Scheduler::Scheduler( int width, int height, int spp)
-       : width(width), height(height), spp(spp) 
+Scheduler::Scheduler( int width, int height, int spp, int prank, int psize)
+       : width(width), height(height), spp(spp), proc_rank(prank), proc_size(psize) 
 {
     domain.resize(width * height);
     std::fill(domain.begin(), domain.end(), -1);
-    depth.resize(width * height);    
+    depth.resize(width * height);
     int chunk_size = chunks.size;
     send_recv_map.resize(chunk_size * chunk_size);
     load_chunk_hit = false;
+    chunk_manager = new ChunkManager(SIMPLE_TRACE ? chunk_size + 1 : chunk_size);
 }
 
 Scheduler::~Scheduler() {
+    //delete chunk_manager;
 }
 
 int Scheduler::chunk_loaded(int chunk) {
@@ -320,21 +451,19 @@ int Scheduler::get_most_unloaded_chunk(int *block, int chunk_size) {
     return c;
 }
 
-void Scheduler::write_chunk_proc(int* chunk_proc) {
-    int i = 0;
+void Scheduler::generate_chunk_manager() {
+    int priority = 0;
     for(auto& iter: chunk_map) {
-        chunk_proc[i * 2] = iter.first;
-        chunk_proc[i * 2 + 1] = iter.second;
-        i++;
+        chunk_manager->chunk_list[iter.first].set_proc(iter.second);
+        printf("%d %d |", iter.first, chunk_manager->chunk_list[iter.first].back());
+        if(iter.second == proc_rank) {
+            chunk_manager->local_chunks.insert(iter.first, priority++/*priority*/);
+        }
     }
-    
-    for(int j = 0; j < i; j++) 
-        printf("chunk map %d %d\n", chunk_proc[j * 2], chunk_proc[j * 2 + 1]);
-
-    chunk_proc[i * 2] = -1;
+    chunk_manager->get_start_chunk(); 
 }
 
-void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image, bool simple_mesh) {
+void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image) {
     int chunk_size = chunks.size; 
     for(int i = 0; i < width * height; i++)
         domain[i] = -1;
@@ -403,26 +532,15 @@ bool recv_greater_mark(const ChunkHitInfo& a, const ChunkHitInfo& b) {
     return a.recv_count > b.recv_count;
 }
 
-void Scheduler::process_left_chunk(int proc_size, bool sync) {
+void Scheduler::process_left_chunk(int proc_size, bool sync, bool simple_trace) {
     
     int chunk_size = chunks.size; 
     if(chunk_map.size() >= chunk_size) return;
    
-    // find unloaded chunk 
-    std::vector<int> unloaded_chunk;
-    for(int i = 0; i < chunk_size; i++) {
-        bool find = false;
-        for(auto& iter: chunk_map) 
-            if(iter.first == i) {
-                find = true; break; 
-            }
-
-        if(!find)
-            unloaded_chunk.emplace_back(i);
-    }
 
     // put left chunk to proc
     if(!sync && load_chunk_hit) {
+//    if(false) {
         printf(" process left chunk second frame\n");
         //[2 * i] count, [2 * i + 1] divergence degree 
         std::vector<ChunkHitInfo> chunk_hit_info(chunk_size);
@@ -561,6 +679,21 @@ void Scheduler::process_left_chunk(int proc_size, bool sync) {
         printf("\n");
 
     } else {
+        // find unloaded chunk 
+        std::vector<int> unloaded_chunk;
+        for(int i = 0; i < chunk_size; i++) {
+            bool find = false;
+            for(auto& iter: chunk_map) 
+                if(iter.first == i) {
+                    find = true; break; 
+                }
+
+            if(!find)
+                unloaded_chunk.emplace_back(i);
+        }
+        if(simple_trace)
+            unloaded_chunk.emplace_back(chunk_size);
+
         printf(" process left chunk first frame\n");
         int proc = 0;
         bool no_proc_empty = false;
@@ -605,10 +738,10 @@ void Scheduler::image_domain_decomposition(Camera *cam, int block, int proc_rank
     
     chunk_map.clear();
 
-    get_projected_chunk(proc_rank, proc_size, image, simple_mesh);
+    get_projected_chunk(proc_rank, proc_size, image);
    
     //得到聚类中心 
-    process_left_chunk(proc_size, sync);
+    process_left_chunk(proc_size, sync, simple_mesh);
     //write_project_result(width, height, domain.data()); 
 }
 

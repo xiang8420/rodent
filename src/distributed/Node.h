@@ -22,9 +22,9 @@ public:
 
     Communicator * get_communicator(){ return comm; }
 
-    void launch_rodent_render(Scheduler *, int, bool); 
+    void launch_rodent_render(int, bool); 
 
-    virtual void run(Scheduler * camera) = 0;
+    virtual void run() = 0;
 
     virtual int load_incoming_buffer(float **rays, bool primary, int thread_id) = 0;
     
@@ -44,10 +44,10 @@ Node::~Node() {
     printf("%d delete Node\n", comm->get_rank());
 }
 
-void Node::launch_rodent_render(Scheduler * splitter, int devNum, bool generate_rays) {
+void Node::launch_rodent_render(int devNum, bool generate_rays) {
 
-    Camera *camera = splitter->camera;
-    int sppProc = splitter->get_spp(); 
+    Camera *camera = scheduler->camera;
+    int sppProc = scheduler->get_spp(); 
     int sppDev = sppProc / devNum;
     int cur_chk = ps->get_current_chunk();
 
@@ -56,7 +56,7 @@ void Node::launch_rodent_render(Scheduler * splitter, int devNum, bool generate_
 
     std::vector<std::thread> workThread;
     for(int i = 0; i < devNum; i++) {
-        int* region = splitter->get_render_block();
+        int* region = scheduler->get_render_block();
         Settings settings {
             Vec3 { camera->eye.x, camera->eye.y, camera->eye.z },
             Vec3 { camera->dir.x, camera->dir.y, camera->dir.z },
@@ -65,7 +65,7 @@ void Node::launch_rodent_render(Scheduler * splitter, int devNum, bool generate_
             camera->w, camera->h,
             Vec4_i32 { region[0], region[1], region[2], region[3]},
             sppDev,
-            ps->get_rough_trace()
+            ps->get_simple_trace()
         };
         int rnd = camera->iter * (comm->get_rank() + 1) * devNum + i;
 

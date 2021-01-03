@@ -116,6 +116,6 @@ inline size_t physical_memory_used_by_process() {
 #define STREAM_CAPACITY 256 * 256
 #define OUT_BUFFER_CAPACITY 1024 * 1024 
 #define MIN_SEND_STREAM_SIZE 10
-
+#define SIMPLE_TRACE true
 
 #endif // COMMON_H

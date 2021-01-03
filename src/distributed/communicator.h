@@ -1,6 +1,4 @@
 #include "mpi.h"
-#include "Message.h"
-#include "ProcStatus.h"
 #include <fstream>
 
 struct mpi_send_buffer {

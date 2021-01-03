@@ -7,7 +7,7 @@ struct SingleNode : public Node{
     
     void save_outgoing_buffer(float *, size_t, bool){} ; 
     
-    void run(Scheduler * camera);
+    void run();
 
 };
 
@@ -22,12 +22,12 @@ SingleNode::~SingleNode() {
     printf("delete SingleNode\n");
 }
 
-void SingleNode::run(Scheduler * camera) {
+void SingleNode::run() {
     
     comm->os <<" start run message thread \n";
     int deviceNum = ps->get_dev_num();
     int iter = 0; 
-    launch_rodent_render(camera, deviceNum, iter==0);
+    launch_rodent_render(deviceNum, iter==0);
     printf("run SingleNode\n");
     return;
 }
