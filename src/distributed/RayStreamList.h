@@ -99,11 +99,11 @@ public:
     int primary_size(){ return primary.size();}    
     int secondary_size(){ return secondary.size();}    
     
-    int get_head_primary_size() { return primary.size() > 0 ? primary.front()->get_size() : 0; }
-    int get_head_secondary_size() { return secondary.size() > 0 ? secondary.front()->get_size() : 0; }
+    int get_head_primary_size() { return primary.empty() ? 0 : primary.front()->get_size(); }
+    int get_head_secondary_size() { return secondary.empty() ? 0 : secondary.front()->get_size(); }
     
-    int get_back_primary_left() { return primary.size() > 0 ? logic_capacity - primary.back()->get_size() : 0; }
-    int get_back_secondary_left() { return secondary.size() > 0 ? logic_capacity - secondary.back()->get_size() : 0; }
+    int get_back_primary_left() { return primary.empty() ? 0 : logic_capacity - primary.back()->get_size(); }
+    int get_back_secondary_left() { return secondary.empty() ? 0 : logic_capacity - secondary.back()->get_size(); }
     
     int size() { return primary.size() + secondary.size(); }
     int get_logic_capacity() {return logic_capacity; }
@@ -226,7 +226,7 @@ void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size
         } else {
             RaysStream * rays   = new struct RaysStream(src_ptr, logic_capacity, store_capacity, SECONDARY_WIDTH, num, true);
             secondary.push(rays);
-        } 
+        }
         src_ptr += store_capacity * SECONDARY_WIDTH * sizeof(float); 
     }
     statistics.end("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");

@@ -825,6 +825,9 @@ bool convert_simple_mesh(const obj::ScenePath& obj_file_paths, obj::MaterialLib 
             }
         }
     }
+
+    std::cout<<obj_file_paths.mesh[0]<<"\n";
+
     float elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
     // only proc 0 process the left part
     printf("simplify time %f\n", elapsed_ms);
@@ -868,7 +871,7 @@ bool convert_simple_mesh(const obj::ScenePath& obj_file_paths, obj::MaterialLib 
     // only proc 0 process the left part
     printf("convert simplify time %f\n", elapsed_ms);
 
-    //obj::write_obj(simple_mesh, mtl_lib, chunk_size); 
+    obj::write_obj(simple_mesh, mtl_lib, chunk_size); 
     return true;
 }
 
@@ -1056,7 +1059,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light.colors.emplace_back(mat.ke);
             }
         }
-        //obj::write_obj(tri_mesh, mtl_lib, i);
+        obj::write_obj(tri_mesh, mtl_lib, i);
         chunk_num_tris = tri_mesh.indices.size() / 4;
     }
     mpi_gather_light(tri_lights, num_lights, num_tris, light.verts, light.norms, light.areas, light.colors, proc_rank, proc_size);
@@ -1101,7 +1104,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "    height: f32,\n"
        << "    image_region: Vec4_i32,\n"
        << "    spp: i32,\n"
-       << "    rough_trace: bool\n" 
+       << "    simple_trace: bool\n" 
        << "};\n";
     os << "\nextern fn get_spp() -> i32 { " << spp << " } \n"
        << "extern fn get_dev_num() -> i32{ " << dev_num << " }\n"
@@ -1292,7 +1295,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                                                          << bbox.max.x << "f, " << bbox.max.y << "f, " << bbox.max.z << "f))),\n"
        << "        chunk:          make_vec3("<< chunks->scale.x <<"f, "<<chunks->scale.y << "f, "<< chunks->scale.z <<"f),\n"     
        << "        cur_chk:        chunk, \n"
-       << "        rough_trace:    settings.rough_trace\n"
+       << "        simple_trace:    settings.simple_trace\n"
        << "    }\n"
        << "}\n\n";
     

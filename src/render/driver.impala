@@ -75,6 +75,7 @@ struct SecondaryStream {
     color_r: &mut [f32],
     color_g: &mut [f32],
     color_b: &mut [f32],
+    depth:   &mut [i32],
     capacity: i32,
     size: i32
 }
@@ -152,6 +153,7 @@ fn @write_out_secondary( secondary: SecondaryStream
     out_buffer.fptr(dst * width + 13) = secondary.color_r(src);
     out_buffer.fptr(dst * width + 14) = secondary.color_g(src);
     out_buffer.fptr(dst * width + 15) = secondary.color_b(src);
+    out_buffer.iptr(dst * width + 16) = secondary.depth(src);
 }
 
 fn @copy_primary_ray( primary: PrimaryStream
@@ -189,25 +191,26 @@ fn @copy_primary_ray( primary: PrimaryStream
 
 fn @copy_secondary_ray( secondary: SecondaryStream
                       , other_secondary: SecondaryStream
-                      , src_id: i32
-                      , dst_id: i32
+                      , src: i32
+                      , dst: i32
                       ) -> () {
-    other_secondary.rays.id(dst_id)    = secondary.rays.id(src_id);
-    other_secondary.rays.org_x(dst_id) = secondary.rays.org_x(src_id);
-    other_secondary.rays.org_y(dst_id) = secondary.rays.org_y(src_id);
-    other_secondary.rays.org_z(dst_id) = secondary.rays.org_z(src_id);
-    other_secondary.rays.dir_x(dst_id) = secondary.rays.dir_x(src_id);
-    other_secondary.rays.dir_y(dst_id) = secondary.rays.dir_y(src_id);
-    other_secondary.rays.dir_z(dst_id) = secondary.rays.dir_z(src_id);
-    other_secondary.rays.tmin(dst_id)  = secondary.rays.tmin(src_id);
-    other_secondary.rays.tmax(dst_id)  = secondary.rays.tmax(src_id);
-    other_secondary.next_chk(dst_id)   = secondary.next_chk(src_id);
-    other_secondary.org_chk(dst_id)    = secondary.org_chk(src_id);
-    other_secondary.pri_chk(dst_id)    = secondary.pri_chk(src_id);
-    other_secondary.prim_id(dst_id) = secondary.prim_id(src_id);
-    other_secondary.color_r(dst_id)  = secondary.color_r(src_id);
-    other_secondary.color_g(dst_id)  = secondary.color_g(src_id);
-    other_secondary.color_b(dst_id)  = secondary.color_b(src_id);
+    other_secondary.rays.id(dst)    = secondary.rays.id(src);
+    other_secondary.rays.org_x(dst) = secondary.rays.org_x(src);
+    other_secondary.rays.org_y(dst) = secondary.rays.org_y(src);
+    other_secondary.rays.org_z(dst) = secondary.rays.org_z(src);
+    other_secondary.rays.dir_x(dst) = secondary.rays.dir_x(src);
+    other_secondary.rays.dir_y(dst) = secondary.rays.dir_y(src);
+    other_secondary.rays.dir_z(dst) = secondary.rays.dir_z(src);
+    other_secondary.rays.tmin(dst)  = secondary.rays.tmin(src);
+    other_secondary.rays.tmax(dst)  = secondary.rays.tmax(src);
+    other_secondary.next_chk(dst)   = secondary.next_chk(src);
+    other_secondary.org_chk(dst)    = secondary.org_chk(src);
+    other_secondary.pri_chk(dst)    = secondary.pri_chk(src);
+    other_secondary.prim_id(dst)    = secondary.prim_id(src);
+    other_secondary.color_r(dst)    = secondary.color_r(src);
+    other_secondary.color_g(dst)    = secondary.color_g(src);
+    other_secondary.color_b(dst)    = secondary.color_b(src);
+    other_secondary.depth(dst)      = secondary.depth(src);
 }
 
 fn @make_ray_stream_reader(rays: RayStream, vector_width: i32) -> fn (i32, i32) -> Ray {

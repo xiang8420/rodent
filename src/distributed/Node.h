@@ -71,16 +71,16 @@ void Node::launch_rodent_render(int devNum, bool generate_rays) {
 
         workThread.emplace_back(render, &settings, rnd, i, cur_chk, ps->get_next_chunk(), generate_rays);
     }
-
-    render_start.notify_all(); 
+    render_start.notify_all();
 
     for(auto &thread: workThread)
         thread.join();
     
     comm->os<<comm->get_rank()<<" before set render start"<<"\n";
     // dynamic schedule for multi chunks    
-    for(int i = 0; i < devNum; i++) 
-        rodent_unload_chunk_data(cur_chk, i); 
+    if(ps->chunk_manager->new_chunk())
+        for(int i = 0; i < devNum; i++) 
+            rodent_unload_chunk_data(cur_chk, i); 
 }
 
 

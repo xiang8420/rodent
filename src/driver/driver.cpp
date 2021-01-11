@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
     float elapsed_ms = 1;  //avoid div 0
    
     bool animation = true;//false; 
-    int frame = 1;
+    int frame = 3;
     for(int i = 0; i < frame; i++) {
         auto ticks = std::chrono::high_resolution_clock::now();
         //camera.rotate(0.4f, 0.0f);
@@ -162,10 +162,14 @@ int main(int argc, char** argv) {
 
     auto inv = 1.0e-6;
     //std::sort(samples_sec.begin(), samples_sec.end());
-    info("# ", samples_sec.front() * inv,
-         "/", samples_sec[samples_sec.size() / 2] * inv,
-         "/", samples_sec.back() * inv,
-         " (min/med/max Msamples/s)");
+    info("run time: ");
+    for(auto& time: samples_sec) 
+        info(" ", time * inv, "/");
+    info("\n");
+//    info("# ", samples_sec.front() * inv,
+//         "/", samples_sec[samples_sec.size() / 2] * inv,
+//         "/", samples_sec.back() * inv,
+//         " (min/med/max Msamples/s)");
     
     cleanup_interface();
     cleanup_distributed_framework(); 

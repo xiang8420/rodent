@@ -582,6 +582,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
     let image = scene.camera.tile;
     let spp = image.spp;
     let num_rays = spp * (image.ymax - image.ymin) * (image.xmax - image.xmin);
+    
 
     let mut primary         : PrimaryStream;
     let mut other_primary   : PrimaryStream;
@@ -594,7 +595,7 @@ fn @gpu_dis_streaming_trace( dev_id: i32
                        , &mut out_primary, &mut out_secondary
                        , &mut gpu_tmp
                        , dev_id);
-
+    
 
     let mut id = 0;
     let mut first_primary = true;
@@ -615,6 +616,8 @@ fn @gpu_dis_streaming_trace( dev_id: i32
         primary.size = primary_size; 
         out_primary.size = out_primary_size;
         
+//        print_size("after transfer", primary.size, " ");
+//        print_size("out primary", out_primary.size, "\n");
         if primary.size == 0 && secondary.size == 0 && id == num_rays { 
             primary.size = rodent_rays_export(dev_id, out_primary.size, out_secondary.size, first_primary, true, 0); 
             out_primary.size = 0;
@@ -698,6 +701,7 @@ fn @gpu_streaming_trace( dev_id: i32
                        , &mut out_primary, &mut out_secondary
                        , &mut gpu_tmp
                        , dev_id);
+    
 
     let mut id = 0;
     let num_rays = spp * film_width * film_height;

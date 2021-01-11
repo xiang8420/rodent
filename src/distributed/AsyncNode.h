@@ -26,64 +26,6 @@ struct RetiredRays {
     }
 };
 
-struct PassRecord {
-    int * data; //(chunk_size + 2) * chunk_size [cur_chk] miss
-    int * reduce_data;
-    int * cur_chk_send;
-    int * cur_chk_recv; //[0] recv 
-    int chunk_size;
-    
-    PassRecord(int chunk_size) 
-        : chunk_size(chunk_size) 
-    {
-        data = new int[(chunk_size + 1) * chunk_size];
-        reduce_data = new int[(chunk_size + 1) * chunk_size]; 
-    }
-
-    ~PassRecord(){
-        delete[] data;
-        delete[] reduce_data;
-    }
-
-    void set_cur_chk(int chk) {
-        cur_chk_send = data + (chunk_size + 1) * chk; 
-        cur_chk_recv = cur_chk_send + chunk_size; 
-    }
-
-    void write_send(float * rays, int size,  bool primary) {
-        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
-        int *iptr = (int*) rays;
-        for(int i = 0; i < size; i++) {
-            int org_chk = iptr[i * width + 10] & 0xFF;;
-            cur_chk_send[org_chk] ++;
-        }
-    }
-
-    void write_recv(int n) {
-        cur_chk_recv[0] += n;
-    }
-
-    void print() {
-        printf("pass record : \n");
-        int col = chunk_size + 1;
-        for(int i = 0; i < chunk_size; i++) {
-            for(int j = 0; j < chunk_size + 1; j++) {
-                printf(" %d |", data[i * col + j]);
-                data[i * col + j] = 0;
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-    
-    
-    void gather() {
-        MPI_Reduce(data, reduce_data, (chunk_size + 1) * chunk_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
-        int* tmp = data;
-        data = reduce_data;
-        reduce_data = tmp;
-    }
-};
 
 // Original Master-Worker mode 
 struct AsyncNode : public Node {

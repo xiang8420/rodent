@@ -360,7 +360,7 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
             for lane in unroll(0, vector_width) {
         		let j = bitcast[i32](rv_extract(bitcast[f32](ray_id), lane));
                 let color = make_color(
-                                rv_extract(hit_color.r, lane), 
+                                rv_extract(hit_color.r, lane),
                                 rv_extract(hit_color.g, lane),
                                 rv_extract(hit_color.b, lane)
                             );
@@ -372,14 +372,14 @@ fn @cpu_shade(geom_id: i32, primary: &PrimaryStream, secondary: &SecondaryStream
             for once() {
                 @@(path_tracer.on_shadow)(ray, hit, &mut state, surf, mat, @ |ray, color| -> ! {
                     write_secondary_ray(i, 0, ray);
+                    secondary.rays.id(i) = ray_id;
+                    secondary.next_chk(i) = scene.cur_chk;
+                    secondary.pri_chk(i) = primary.org_chk(i);
+                    secondary.org_chk(i) = scene.cur_chk;
                     secondary.color_r(i) = color.r;
                     secondary.color_g(i) = color.g;
                     secondary.color_b(i) = color.b;
-                    secondary.rays.id(i) = ray_id;
-                    secondary.next_chk(i) = scene.cur_chk;
-                    //record both secondary origin and its primary origin
-                    secondary.pri_chk(i) = primary.org_chk(i);
-                    secondary.org_chk(i) = scene.cur_chk;
+                    secondary.depth(i)   = primary.depth(i);
                     break()
                 }, @ || -> ! {
                     secondary.rays.id(i) = -1;
@@ -465,29 +465,37 @@ fn @cpu_primary_transfer( primary: PrimaryStream
         let ray = ray_reader(src_id, 0);
         if ray_ids(src_id) != -1 {
             // if 3 4 bounce write to chunk n
-            if scene.rough_trace && depth(src_id) > 1 {
-                write_next_chk(src_id, 0, num_chunks);
-            } else {
+         //   if scene.simple_trace && depth(src_id) > 1 {
+         //       write_next_chk(src_id, 0, num_chunks);
+         //   } else {
                 if next_chks(src_id) == 1022  {
                     if inside_point_bbox(bbox, ray.org){
                         let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
                         write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
-                        write_org_chk(src_id, 0, next_chks(src_id));
+                        write_org_chk(src_id, 0, scene_chunk);
                     } else {
                         let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
                         if t0 <= t1 {
                             let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
                             let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
                             write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
-                            write_org_chk(src_id, 0, next_chks(src_id));
+                            write_org_chk(src_id, 0, scene_chunk);
+
+                            let org_chk   = org_chks(src_id);
+                            let chk_id    = org_chk & 0xFF;
+                            let in_chk_id = (org_chk >> 8) & 0xFFFFF;
+                            let sign = (org_chk >> 28) & 0xF;
+                            let sign_bit = sign * 8;
+                            let chk_hit_id = chk_id * chunk_hit_cap + in_chk_id;
+                            let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;   
+                            if scene.simple_trace && depth(src_id) > 1 /*&& ctrb == 1*/ {
+                                write_next_chk(src_id, 0, num_chunks);
+                            }
                         } else {
                             write_next_chk(src_id, 0, 255);
                         }
                     }
                 } else {
-                    //读取org_chk如果render_chunk_hit 在坐标上不为空则直接将其作为发射目的地 否则才进行判断
-                    //需要看一下周围的 如果周围都是这个值 则可以直接发到目的地   
-                    
                     let org_chk   = org_chks(src_id);
                     let chk_id    = org_chk & 0xFF;
                     let in_chk_id = (org_chk >> 8) & 0xFFFFF;
@@ -495,18 +503,18 @@ fn @cpu_primary_transfer( primary: PrimaryStream
                     let sign_bit = sign * 8;
                     let chk_hit_id = chk_id * chunk_hit_cap + in_chk_id;
                     let dst_chk = ((chunk_hit(chk_hit_id) >> sign_bit) & 0xFF) - 1;
-                    let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;   
-                    if chk_id == scene_chunk && dst_chk < 254 && dst_chk >= 0 && ctrb > 180 {
-                        print_string(" use dst chk ");
-                        print_i32(dst_chk);
-                        write_next_chk(src_id, 0, dst_chk);
-                    } else {
+                    let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;
+                 //   if chk_id == scene_chunk && dst_chk < 254 && dst_chk >= 0 && ctrb > 180 {
+                 //       print_string(" use dst chk ");
+                 //       print_i32(dst_chk);
+                 //       write_next_chk(src_id, 0, dst_chk);
+                 //   } else {
                         let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
                         let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
                         write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
-                    } 
+                 //   }
                 }
-            }
+        //    }
         }
     }
     for i in range(0, primary.size) {
@@ -551,6 +559,7 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
     let cur_chk_offset = scene_chunk * render_chunk_hit.chk_cap;
     let chunk_hit      = render_chunk_hit.its;
     let chunk_hit_ctrb = render_chunk_hit.ctrb;
+    let depth          = secondary.depth;
  
     let res = rodent_chunk_hit_resolution();
     let mut buffer_size = buffer.size;
@@ -572,11 +581,14 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
                 let chk_hit_id = cur_chk_offset + in_chk_id; 
                 let dst_chk = ((chunk_hit(chk_hit_id) >> sign_bit) & 0xFF) - 1;
                 let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;   
-                if dst_chk < 254 && dst_chk >= 0  && ctrb > 128 {
-                    print_string(" use dst chk ");
-                    write_next_chk(src_id, 0, dst_chk);
-                } else {
+           //     if dst_chk < 254 && dst_chk >= 0  && ctrb > 128 {
+           //         print_string(" use dst chk ");
+           //         write_next_chk(src_id, 0, dst_chk);
+           //     } else {
                     write_next_chk(src_id, 0, nchk);
+           //     }
+                if scene.simple_trace && depth(src_id) > 1/* && ctrb == 1*/ {
+                    write_next_chk(src_id, 0, num_chunks);
                 }
                 org_chks(src_id) = ochk; 
             } else {
@@ -587,6 +599,7 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
         }
     }
  
+                        
     for i in range(0, secondary.size) {
         let cid = next_chks(i);
         if cid != scene_chunk && cid != 255 {
@@ -712,6 +725,7 @@ fn @cpu_dis_trace( scene: Scene
             let mut id = 0;
             let num_rays = spp_thread * (ymax - ymin) * (xmax - xmin);
             if !valid_camera { id = num_rays; }
+            
             print_size("thread render start ", tid, "\n");
             while true {
                 print_i32(scene.cur_chk);
@@ -749,17 +763,22 @@ fn @cpu_dis_trace( scene: Scene
                     // Perform (vectorized) shading
                     with cpu_profile(&mut shading_counter) {
                         let mut begin = 0;
+                        //rodent_first_primary_check(-1, primary.size, 1, true);
                         for geom_id in unroll(0, scene.num_geometries) {
                             let end = ray_ends(geom_id);
                             cpu_shade(geom_id, primary, secondary, scene, cur_chk_bbox, record_chunk_hit, path_tracer, accumulate, begin, end, vector_width);
                             begin = end;
                         }
+                        
                         //mark_out_rays(primary, cur_chk_bbox, begin, ray_ends(scene.num_geometries));
                         let geom_id = scene.num_geometries;
                         mark_out_rays(primary, scene.cur_chk, cur_chk_bbox, scene.geometries(geom_id), record_chunk_hit.res, begin, ray_ends(geom_id));
  
                         // Filter terminated rays
                         primary.size   = ray_ends(scene.num_geometries);
+                       // for i in range(0, primary.size) {
+                       //     write_chunk_hit(primary.org_chk(i), make_color(0 as f32, 0 as f32, 0 as f32), scene.cur_chk, record_chunk_hit);
+                       // }
                         primary.size   = cpu_compact_primary(primary, vector_width, vector_compact);
                         // only when secondary size == 0 need recv, it should be compacted? no compact 
                         secondary.size = ray_ends(scene.num_geometries - 1);
@@ -795,13 +814,13 @@ fn @cpu_dis_trace( scene: Scene
                             let j = secondary.rays.id(i);
                             let color = make_color(secondary.color_r(i), secondary.color_g(i), secondary.color_b(i));
                             accumulate(j, color); 
-                            write_chunk_hit(secondary.org_chk(i), color, scene.cur_chk, record_chunk_hit);
-                            //write_chunk_hit(secondary.pri_chk(i), color, secondary.org_chk(i) & 0xFF, record_chunk_hit); //同一个光亮加了两次，不合理
+                            write_chunk_hit(secondary.pri_chk(i), color, scene.cur_chk, record_chunk_hit);
+                            //write_chunk_hit(secondary.pri_chk(i), color, secondary.org_chk(i) & 0xFF, record_chunk_hit); 同一个光亮加了两次，不合理
                         } else if ( !secondary.next_chk(i) == scene.num_geometries) {
                             let j = secondary.rays.id(i);
                             let color = make_color(secondary.color_r(i), secondary.color_g(i), secondary.color_b(i));
-                            write_chunk_hit(secondary.org_chk(i), color /*make_color(0 as f32, 0 as f32, 0 as f32)*/, scene.cur_chk, record_chunk_hit);
-                            //write_chunk_hit(secondary.pri_chk(i), color /*make_color(0 as f32, 0 as f32, 0 as f32)*/, secondary.org_chk(i) & 0xFF, record_chunk_hit);
+                            write_chunk_hit(secondary.org_chk(i), color, scene.cur_chk, record_chunk_hit);
+                            //write_chunk_hit(secondary.pri_chk(i), color, secondary.org_chk(i) & 0xFF, record_chunk_hit);
                         }
                     }
                     out_secondary.size = cpu_secondary_transfer(secondary, out_secondary, render_chunk_hit, min_max, vector_width, id == num_rays, scene, cur_chk_bbox);

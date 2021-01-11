@@ -67,13 +67,15 @@ struct TimeStatistics {
         warn("cant find func fname ", fname, "\n");
     }
     
-    void print(std::ofstream &os) {
+    void print(int frame, int rank) {
+        std::ofstream os = std::ofstream("out/time_"+ std::to_string(frame) + "_" + std::to_string(rank));
         float all_time = duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - app_st).count();
         sort(func.begin(), func.end(), std::greater<FunctionRunTime>());
         os<<"| Statistic : numbers of call, time \n";
         for(int i = 0; i < func.size(); i++) {
             os<<"| "<<func[i].name<<"  ( "<<func[i].times<<" , "<<func[i].time<<" , "<<func[i].time / all_time * 100<<"% )\n";
         }     
+        func.clear();
     } 
 
 };

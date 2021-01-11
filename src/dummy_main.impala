@@ -9,7 +9,7 @@ struct Settings {
     height: f32,
     image_region: Vec4_i32,
     spp_cur: i32,
-    rough_trace: bool
+    simple_trace: bool
 }
 
 extern fn get_spp() -> i32 { 1 }

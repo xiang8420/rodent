@@ -422,8 +422,9 @@ struct Interface {
         printf("unload bvh\n");
         std::string chunk_path = "data/";
         chunk_path  += (chunk > 9 ? "0" : "00") + std::to_string(chunk) + "/";
-        devices[dev].bvh4_tri4.erase(chunk_path + "bvh_sse");
-        devices[dev].bvh8_tri4.erase(chunk_path + "bvh_avx");
+        std::cout<<"unload chunk path "<<chunk_path<<"\n";
+        devices[dev].bvh4_tri4.erase(chunk_path + "bvh_sse.bin");
+        devices[dev].bvh8_tri4.erase(chunk_path + "bvh_avx.bin");
         devices[dev].bvh2_tri1.erase(chunk_path + "bvh_nvvm.bin");
     }
 
@@ -653,6 +654,7 @@ inline void get_secondary_stream(SecondaryStream& secondary, float* ptr, size_t 
     secondary.color_r = ptr + 13 * capacity;
     secondary.color_g = ptr + 14 * capacity;
     secondary.color_b = ptr + 15 * capacity;
+    secondary.depth   = (int*)ptr + 16 * capacity;
     secondary.size = 0;
     secondary.capacity = dfw_stream_logic_capacity();
 }
@@ -758,22 +760,28 @@ uint8_t* rodent_load_buffer(int32_t dev, const char* file) {
 }
 
 void rodent_load_bvh2_tri1(int32_t dev, const char* file, Node2** nodes, Tri1** tris) {
+    dfw_time_start("interface => load bvh");
     auto& bvh = interface->load_bvh2_tri1(dev, file);
     *nodes = const_cast<Node2*>(bvh.nodes.data());
     *tris  = const_cast<Tri1*>(bvh.tris.data());
+    dfw_time_end("interface => load bvh");
 }
 
 void rodent_load_bvh4_tri4(int32_t dev, const char* file, Node4** nodes, Tri4** tris) {
+    dfw_time_start("interface => load bvh");
     auto& bvh = interface->load_bvh4_tri4(dev, file);
     *nodes = const_cast<Node4*>(bvh.nodes.data());
     *tris  = const_cast<Tri4*>(bvh.tris.data());
+    dfw_time_end("interface => load bvh");
 }
 
 void rodent_load_bvh8_tri4(int32_t dev, const char* file, Node8** nodes, Tri4** tris) {
+    dfw_time_start("interface => load bvh");
     auto& bvh = interface->load_bvh8_tri4(dev, file);
     printf("load bvh 8 4\n");
     *nodes = const_cast<Node8*>(bvh.nodes.data());
     *tris  = const_cast<Tri4*>(bvh.tris.data());
+    dfw_time_end("interface => load bvh");
 }
 
 //cpu
@@ -784,7 +792,7 @@ void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* second
                                , int dev, int tid, bool new_camera
                                ) 
 {
-    dfw_time_start("render prepare data");
+    dfw_time_start("interface => prepare data");
     
     int rays_capacity = dfw_stream_store_capacity(); 
     auto& array_primary = interface->cpu_primary_stream(rays_capacity);
@@ -802,7 +810,6 @@ void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* second
 
     auto& array_record_chunk_hit = interface->cpu_record_chunk_hit[tid];
     get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
-    dfw_time_end("render prepare data");
     
     // all thread share
     get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
@@ -812,6 +819,7 @@ void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* second
         std::fill(array_record_chunk_hit.begin(), array_record_chunk_hit.end(), 0);
     }
     
+    dfw_time_end("interface => prepare data");
 }
 
 //gpu
@@ -935,9 +943,24 @@ int its_cmp(int a, int b) {
     return res;
 }
 
+inline int get_ctrb(const int &a, const int &b) {
+    if(a > 1 || b > 1) return a+b > 255 ? 255 : a+b;
+    if(a == 0 && b == 0) return 0;
+    return 1;
+}
+
+int ctrb_cmp(const int &a, const int &b) {
+    int res = 0;
+    res += get_ctrb((a & 0xFF), (b & 0xFF));
+    res += (get_ctrb(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
+    res += (get_ctrb(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
+    res += (get_ctrb(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
+    return res;
+}
+
 void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
     if(dev == -1) {
-        std::lock_guard <std::mutex> lock(interface->mtx); 
+        std::lock_guard <std::mutex> lock(interface->mtx);
         int* array = interface->cpu_record_chunk_hit[tid].data();
         int* host = interface->host_record_chunk_hit.data();
         int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
@@ -947,7 +970,7 @@ void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
             return;
         }
         for (int i = 0; i < size; i++){
-            host[i] += array[i];
+            host[i] = ctrb_cmp(host[i], array[i]);
         }
         int ed = size * 2;
         int chk_size = dfw_chunk_size();

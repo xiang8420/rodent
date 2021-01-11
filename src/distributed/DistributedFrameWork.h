@@ -102,20 +102,21 @@ struct DistributedFrameWork {
         /*block size equels proc size*/
         statistics.start("schedule");
         std::cout<<"run type "<<type<<"\n";
-        if( type == "AllCopy" || type == "Single") {
-            int block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
-            scheduler->split_image_block(camera, block_count, comm->get_rank(), comm->get_size());
-        } else {
-            int block = comm->get_size();
-            scheduler->image_domain_decomposition(camera, block, proc_rank, proc_size, ps->get_simple_trace(), type == "Sync");
-        }
-        scheduler->generate_chunk_manager();
+        
+        int block_count; 
+        if( type == "AllCopy" || type == "Single") 
+            block_count = comm->get_size() == 1 ? 1 : comm->get_size() * 2;
+        else
+            block_count = comm->get_size();
+        
+        scheduler->generate_chunk_manager(camera, block_count, ps->get_simple_trace(), type == "Sync");
         statistics.end("schedule");
 
         statistics.start("run");
         node->run();
+        statistics.end("run");
         
-        statistics.print(comm->os);
+        statistics.print(scheduler->camera->iter, proc_rank);
 
         ps->reset();
     }
@@ -137,10 +138,7 @@ struct DistributedFrameWork {
         comm->reduce(film, reduce_buffer, pixel_num);
         
         std::string out = "picture/" + out_file + "_f_" + std::to_string(fid) + "_w_" + std::to_string(comm->get_size()) + "_g_" + std::to_string(ps->get_chunk_size());
-
-        save_image(film, out + "_rank_" + std::to_string(comm->get_rank()) + ".png", width, height, 1 /* iter*/ );
-        printf("%d end\n", comm->get_rank());  
-
+       // save_image(film, out + "_rank_" + std::to_string(comm->get_rank()) + ".png", width, height, 1 /* iter*/ );
         if (comm->get_rank() == 0 && out_file != "") {
             if(fid == frame)
                 save_image(reduce_buffer, out + ".png", width, height, frame);
@@ -171,10 +169,7 @@ void dfw_save_image(const std::string& out_file, float* film, int fid, int frame
 }
 
 void send_rays(float *rays, size_t size, size_t capacity, bool isPrimary){
-    statistics.start("run => work_thread => send");
-    printf("dfw save rays\n");
     dfw->node->save_outgoing_buffer(rays, size, isPrimary);
-    statistics.end("run => work_thread => send");
 }
 
 int recv_rays(float **rays, bool isPrimary, int thread_id){
@@ -200,5 +195,5 @@ void dfw_print_memory(int i) { return dfw->node->loop_check(i); }
 
 void dfw_time_start(std::string s) { statistics.start(s); }
 
-void dfw_time_end(std::string s) { statistics.start(s); }
+void dfw_time_end(std::string s) { statistics.end(s); }
 

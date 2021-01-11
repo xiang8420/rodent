@@ -10,7 +10,7 @@ struct Scene {
     bbox:       BBox,
     chunk:      Vec3,
     cur_chk:    i32,
-    rough_trace: bool
+    simple_trace: bool
 }
 
 // Rendering device

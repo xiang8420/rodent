@@ -107,10 +107,27 @@ int its_cmp(int a, int b) {
     return res;
 }
 
+inline int get_ctrb(const int &a, const int &b) {
+    if(a > 1 || b > 1) return a+b > 255 ? 255 : a+b;
+    if(a == 0 && b == 0) return 0;
+    return 1;
+}
+
+int ctrb_cmp(const int &a, const int &b) {
+    int res = 0;
+    res += get_ctrb((a & 0xFF), (b & 0xFF));
+    res += (get_ctrb(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
+    res += (get_ctrb(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
+    res += (get_ctrb(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
+    return res;
+}
+
 void Communicator::update_chunk_hit(int *org_buf, int * recv_buf, int buf_size) {
     MPI_Reduce(org_buf, recv_buf, buf_size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
     
+    int * org_ctrb = &org_buf[0];
     int * org_its = &org_buf[buf_size];
+    int * recv_ctrb = &recv_buf[0];
     int * recv_its = &recv_buf[buf_size];
 
     int num = size; // comm size
@@ -121,18 +138,21 @@ void Communicator::update_chunk_hit(int *org_buf, int * recv_buf, int buf_size) 
         int dst = rank % level;
         if(rank == dst) {
             os<<"recv from "<<dst + level<<" level "<<level<<"\n";
-            MPI_Recv(recv_its, buf_size, MPI_INT, dst + level, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-            for(int i = 0; i < buf_size; i++) {
-                org_its[i] = its_cmp(org_its[i], recv_its[i]);
-            }
+            MPI_Recv(recv_buf, buf_size * 2, MPI_INT, dst + level, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            for(int i = 0; i < buf_size; i++) 
+                org_ctrb[i] = ctrb_cmp(org_ctrb[i], recv_ctrb[i]);
+           
+           // for(int i = 0; i < buf_size; i++) 
+           //     org_its[i] = its_cmp(org_its[i], recv_its[i]);
+            
         } else {
             os<<"send to "<<dst<<" level "<<level<<"\n";
-		    MPI_Send(org_its, buf_size, MPI_INT, dst, 0, MPI_COMM_WORLD);
+		    MPI_Send(org_buf, 2 * buf_size, MPI_INT, dst, 0, MPI_COMM_WORLD);
         }
         if(rank >= level) return;
     } while(level > 1);
     if(rank == 0)
-        memcpy(recv_its, org_its, buf_size * sizeof(int));
+        memcpy(recv_buf, org_buf, 2 * buf_size * sizeof(int));
 
     //MPI_Bcast(recv_buf, buf_size * 2, MPI_INT, 0, MPI_COMM_WORLD);
     //MPI_Barrier(MPI_COMM_WORLD);
@@ -252,12 +272,14 @@ bool Communicator::process_message(Message *recv_msg, ProcStatus *ps,
         case ArrayRay: {
             ps->accumulate_recv(recv_msg->get_ray_size());
             //set itself busy
+            //ps->set_proc_busy(rank);
             recv_ray_count++;
             return true; 
         }
         case StreamRay: {
             ps->accumulate_recv(recv_msg->get_ray_size());
             //set itself busy
+            //ps->set_proc_busy(rank);
             recv_ray_count++;
             return true;
         }

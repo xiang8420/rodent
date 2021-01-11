@@ -108,13 +108,13 @@ inline size_t physical_memory_used_by_process() {
 #define MAX_CHUNK 3
 #define MAX_PROC  128
 #define PRIMARY_WIDTH 22
-#define SECONDARY_WIDTH 16
+#define SECONDARY_WIDTH 17
 #define CHUNK_HIT_RES 128
 #define INTERSECT_FIELD_RES 128
 #define INTERSECT_FIELD_RES 128
 #define VIS_CHUNK_HIT true
 #define STREAM_CAPACITY 256 * 256
-#define OUT_BUFFER_CAPACITY 1024 * 1024 
+#define OUT_BUFFER_CAPACITY 1024 * 1024
 #define MIN_SEND_STREAM_SIZE 10
 #define SIMPLE_TRACE true
 

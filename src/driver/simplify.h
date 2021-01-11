@@ -171,7 +171,7 @@ namespace Simplify
         //if(fine_mesh.indices.size() < 4000000) return fine_mesh;
         
         convert_obj_file(obj_file, mtl_lib, 0); 
-        int target_count = 30000;//1000000; 
+        int target_count = Simplify::triangles.size() * 0.1;//1000000; 
        
 		printf("Input: %zu vertices, %zu triangles (target %d)\n", Simplify::vertices.size(), Simplify::triangles.size(), target_count);
 
@@ -268,7 +268,6 @@ namespace Simplify
 
 				loopj(0,3)if(t.err[j]<threshold)
 				{
-
 					int i0=t.v[ j     ]; Vertex &v0 = vertices[i0];
 					int i1=t.v[(j+1)%3]; Vertex &v1 = vertices[i1];
 					// Border check
