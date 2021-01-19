@@ -465,56 +465,41 @@ fn @cpu_primary_transfer( primary: PrimaryStream
         let ray = ray_reader(src_id, 0);
         if ray_ids(src_id) != -1 {
             // if 3 4 bounce write to chunk n
-         //   if scene.simple_trace && depth(src_id) > 1 {
-         //       write_next_chk(src_id, 0, num_chunks);
-         //   } else {
-                if next_chks(src_id) == 1022  {
-                    if inside_point_bbox(bbox, ray.org){
-                        let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
+            if scene.simple_trace && next_chks(src_id) == 1022 && depth(src_id) > 0 {
+                let org_chk   = org_chks(src_id);
+                let chk_id    = org_chk & 0xFF;
+                let in_chk_id = (org_chk >> 8) & 0xFFFFF;
+                let sign = (org_chk >> 28) & 0xF;
+                let sign_bit = sign * 8;
+                let chk_hit_id = chk_id * chunk_hit_cap + in_chk_id;
+                let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;   
+                if ctrb == 1 {
+                    write_next_chk(src_id, 0, num_chunks);
+                }
+            }
+            if next_chks(src_id) == 1022 {
+                if inside_point_bbox(bbox, ray.org){
+                    let c = vec3_mul(vec3_sub(ray.org, bbox.min), inv_step);
+                    write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
+                    write_org_chk(src_id, 0, scene_chunk);
+                } else {
+                    let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
+                    if t0 <= t1 {
+                        let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
+                        let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
                         write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
                         write_org_chk(src_id, 0, scene_chunk);
                     } else {
-                        let (t0, t1) = intersect_ray_box(min_max, false, ray, bbox);
-                        if t0 <= t1 {
-                            let its = vec3_add(vec3_mulf(ray.dir, t0 + 0.0002f), ray.org);
-                            let c = vec3_mul(vec3_sub(its, bbox.min), inv_step);
-                            write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
-                            write_org_chk(src_id, 0, scene_chunk);
-
-                            let org_chk   = org_chks(src_id);
-                            let chk_id    = org_chk & 0xFF;
-                            let in_chk_id = (org_chk >> 8) & 0xFFFFF;
-                            let sign = (org_chk >> 28) & 0xF;
-                            let sign_bit = sign * 8;
-                            let chk_hit_id = chk_id * chunk_hit_cap + in_chk_id;
-                            let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;   
-                            if scene.simple_trace && depth(src_id) > 1 /*&& ctrb == 1*/ {
-                                write_next_chk(src_id, 0, num_chunks);
-                            }
-                        } else {
-                            write_next_chk(src_id, 0, 255);
-                        }
+                        write_next_chk(src_id, 0, 255);
                     }
-                } else {
-                    let org_chk   = org_chks(src_id);
-                    let chk_id    = org_chk & 0xFF;
-                    let in_chk_id = (org_chk >> 8) & 0xFFFFF;
-                    let sign = (org_chk >> 28) & 0xF;
-                    let sign_bit = sign * 8;
-                    let chk_hit_id = chk_id * chunk_hit_cap + in_chk_id;
-                    let dst_chk = ((chunk_hit(chk_hit_id) >> sign_bit) & 0xFF) - 1;
-                    let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;
-                 //   if chk_id == scene_chunk && dst_chk < 254 && dst_chk >= 0 && ctrb > 180 {
-                 //       print_string(" use dst chk ");
-                 //       print_i32(dst_chk);
-                 //       write_next_chk(src_id, 0, dst_chk);
-                 //   } else {
-                        let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
-                        let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
-                        write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
-                 //   }
                 }
-        //    }
+            } else if next_chks(src_id) != num_chunks {
+                let org = vec3_add(ray.org, vec3_mulf(ray.dir, ray.tmin));
+                let c = vec3_mul(vec3_sub(org, bbox.min), inv_step);
+                write_next_chk(src_id, 0, coordinate_compress(c, chunk_scale, bbox.max, cpu_intrinsics));
+            } else {
+                // already set to simple mesh 
+            }
         }
     }
     for i in range(0, primary.size) {
@@ -554,8 +539,6 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
     let ray_reader  = make_ray_stream_reader(secondary.rays, 1);
     let ray_ids     = secondary.rays.id;
     let scene_chunk = scene.cur_chk;
-    let write_next_chk = @ |i, _, id| secondary.next_chk(i) = id;
-    //let write_org_chk  = @ |i, _, id| secondary.org_chk(i) = id;
     let cur_chk_offset = scene_chunk * render_chunk_hit.chk_cap;
     let chunk_hit      = render_chunk_hit.its;
     let chunk_hit_ctrb = render_chunk_hit.ctrb;
@@ -573,29 +556,23 @@ fn @cpu_secondary_transfer( secondary: SecondaryStream
         
         if secondary.next_chk(src_id) == scene.num_geometries && nchk != scene.cur_chk {
             if org_chks(src_id) / 256 == 0 {
-                //根据ochk读render chunk hit 看发送的目的地 
-                // 如果 org_chks(src_id)不为0则说明传过一次，不再做修改
+                org_chks(src_id) = ochk; 
                 let in_chk_id = (ochk >> 8) & 0xFFFFF;
                 let sign = (ochk >> 28) & 0xF;
                 let sign_bit = sign * 8;
                 let chk_hit_id = cur_chk_offset + in_chk_id; 
-                let dst_chk = ((chunk_hit(chk_hit_id) >> sign_bit) & 0xFF) - 1;
-                let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;   
-           //     if dst_chk < 254 && dst_chk >= 0  && ctrb > 128 {
-           //         print_string(" use dst chk ");
-           //         write_next_chk(src_id, 0, dst_chk);
-           //     } else {
-                    write_next_chk(src_id, 0, nchk);
-           //     }
-                if scene.simple_trace && depth(src_id) > 1/* && ctrb == 1*/ {
-                    write_next_chk(src_id, 0, num_chunks);
+                let ctrb = (chunk_hit_ctrb(chk_hit_id) >> sign_bit) & 0xFF;
+
+                if scene.simple_trace && depth(src_id) > 1 && ctrb == 1 {
+                    next_chks(src_id) = num_chunks;
+                } else {
+                    next_chks(src_id) = nchk;
                 }
-                org_chks(src_id) = ochk; 
             } else {
-                write_next_chk(src_id, 0, nchk);
+                next_chks(src_id) = nchk;
             }
         } else {
-            write_next_chk(src_id, 0, 255);
+            next_chks(src_id) = 255;
         }
     }
  

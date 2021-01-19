@@ -23,7 +23,6 @@ private:
     int out_stream_capacity; 
 
     bool simple_trace;
-
 public:    
     ChunkManager * chunk_manager;
 
@@ -44,7 +43,6 @@ public:
 
     void set_thread_idle(int id, bool wait) { thread_idle[id] = wait;}
     bool is_thread_idle(int id) { return thread_idle[id]; }
-    void set_stream_store_capacity(int n){stream_store_capacity = n;}
     int get_stream_logic_capacity(){return stream_logic_capacity; }
     int get_stream_store_capacity(){return stream_store_capacity; }
     int get_out_stream_capacity(){return out_stream_capacity; }
@@ -53,38 +51,37 @@ public:
     void accumulate_recv(int n) { global_rays[proc_rank + proc_size] += n;}
     int* get_status() {return global_rays.data();}
     bool is_proc_idle(){return proc_idle[proc_rank]; }
-    void set_proc_busy(int i){ proc_idle[i] = false; }
     void set_proc_idle(int i){proc_idle[i] = true; }
     void set_proc_idle(){proc_idle[proc_rank] = true; }
     int get_dev_num() {return dev_num;}
+    int  get_chunk_size(){ return chunk_size; }
     void set_exit() {exit = true;}
     void set_working() {exit = false;}
     bool get_simple_trace() {return simple_trace;}
     bool Exit() {return exit;}
     void reset(); 
     
+    void set_proc_busy(int i){ proc_idle[i] = false; }
     void chunk_loaded() { 
         thread_reset(); 
         set_proc_busy(proc_rank); 
         chunk_manager->local_chunks.set_new_loaded(false); 
     }
-    int switch_current_chunk(RayStreamList *outlist) { chunk_manager->switch_current_chunk(outlist); } 
-    int get_next_chunk() { return chunk_manager->get_next_chunk();  }
+    int  switch_current_chunk(RayStreamList *outlist) { chunk_manager->switch_current_chunk(outlist); } 
+    int  get_next_chunk() { return chunk_manager->get_next_chunk();  }
     bool has_new_chunk(){ return chunk_manager->local_chunks.get_new_loaded(); }
-    int get_chunk_size(){ return chunk_manager->chunk_size; }
-    int get_current_chunk(){ return chunk_manager->get_current_chunk(); }
+    int  get_current_chunk(){ return chunk_manager->get_current_chunk(); }
     bool generate_rays(){ return !(simple_trace && chunk_manager->get_current_chunk() == chunk_manager->chunk_size - 1); }
-    int get_proc(int c) { return chunk_manager->get_proc(c); } 
+    int  get_proc(int c) { return chunk_manager->get_proc(c); } 
     bool update_chunk(int* schedule) { chunk_manager->update_chunk(schedule, proc_rank); } 
     bool update_chunk(int cand_proc, int cand_chunk){ chunk_manager->update_chunk(cand_proc, cand_chunk, proc_rank); } 
     bool is_local_chunk(int c) { return chunk_manager->is_local_chunk(c); }
-
 };
 
-ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev) 
-    : proc_rank(proc_rank), proc_size(proc_size), dev_num(dev)
+ProcStatus::ProcStatus(int proc_rank, int proc_size, int csize, int dev) 
+    : proc_rank(proc_rank), proc_size(proc_size), chunk_size(csize), dev_num(dev)
 {
-    work_thread_num = 1;//std::thread::hardware_concurrency();
+    work_thread_num = 16;//std::thread::hardware_concurrency();
     thread_idle.resize(work_thread_num);
     thread_reset();
     proc_reset();
@@ -93,9 +90,9 @@ ProcStatus::ProcStatus(int proc_rank, int proc_size, int cSize, int dev)
 
     //including simple mesh
     
-    stream_logic_capacity = STREAM_CAPACITY; 
+    stream_logic_capacity = STREAM_CAPACITY;
     stream_store_capacity = (stream_logic_capacity & ~((1 << 5) - 1)) + 32; // round to 32
-    out_stream_capacity = OUT_BUFFER_CAPACITY; 
+    out_stream_capacity = OUT_BUFFER_CAPACITY;
     global_rays.resize(proc_size * proc_size);
 
     simple_trace = SIMPLE_TRACE;

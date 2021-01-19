@@ -71,8 +71,6 @@ struct DistributedFrameWork {
         comm          = new Communicator();
         scheduler     = new Scheduler(width, height, spp, comm->get_rank(), comm->get_size());
         ps            = new ProcStatus(comm->get_rank(), comm->get_size(), chunk_size, dev);
-        ps->chunk_manager = scheduler->chunk_manager;
-
 
         // mpi
         if(chunk_size == 1 && comm->get_size() == 1 ) 
@@ -110,6 +108,7 @@ struct DistributedFrameWork {
             block_count = comm->get_size();
         
         scheduler->generate_chunk_manager(camera, block_count, ps->get_simple_trace(), type == "Sync");
+        ps->chunk_manager = scheduler->chunk_manager;
         statistics.end("schedule");
 
         statistics.start("run");
@@ -117,8 +116,13 @@ struct DistributedFrameWork {
         statistics.end("run");
         
         statistics.print(scheduler->camera->iter, proc_rank);
+        scheduler->chunk_manager->print_schedule(scheduler->camera->iter, proc_rank); 
+        printf("end print schedule\n");
+        comm->os<<"end print schedule\n";
 
         ps->reset();
+        printf("end schedule reset\n");
+        comm->os<<"end frame \n";
     }
 
     void gather_image(const std::string& out_file, float* film, int fid, int frame, int width, int height) {

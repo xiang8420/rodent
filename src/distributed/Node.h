@@ -77,7 +77,7 @@ void Node::launch_rodent_render(int devNum, bool generate_rays) {
         thread.join();
     
     comm->os<<comm->get_rank()<<" before set render start"<<"\n";
-    // dynamic schedule for multi chunks    
+    //dynamic schedule for multi chunks    
     if(ps->chunk_manager->new_chunk())
         for(int i = 0; i < devNum; i++) 
             rodent_unload_chunk_data(cur_chk, i); 

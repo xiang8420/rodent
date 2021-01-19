@@ -52,17 +52,18 @@ struct TimeStatistics {
         func.emplace_back(FunctionRunTime(fname, std::chrono::high_resolution_clock::now(), 0.0, 0));
     }
 
-    void end(const std::string &name) {
+    float end(const std::string &name) {
         std::string fname = name;// + " " + std::to_string(gettid());
         std::unique_lock <std::mutex> lock(mtx); 
         int size = func.size();
         int i = 0;
         for(i; i < size; i++) {
             if(func[i].name == fname) {
-                func[i].time += duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func[i].st).count();
+                float t = duration_cast<std::chrono::milliseconds>(high_resolution_clock::now() - func[i].st).count();
+                func[i].time += t; 
                 func[i].times++;
-                return;
-            } 
+                return t;
+            }
         }
         warn("cant find func fname ", fname, "\n");
     }
@@ -76,8 +77,8 @@ struct TimeStatistics {
             os<<"| "<<func[i].name<<"  ( "<<func[i].times<<" , "<<func[i].time<<" , "<<func[i].time / all_time * 100<<"% )\n";
         }     
         func.clear();
+        app_st = std::chrono::high_resolution_clock::now(); 
     } 
-
 };
 
 struct TimeStatistics statistics;

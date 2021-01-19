@@ -1298,7 +1298,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
        << "        simple_trace:    settings.simple_trace\n"
        << "    }\n"
        << "}\n\n";
-    
+     
+    os << "extern fn load_bvh_test() -> () { \n"   
+       << "    let device = make_avx2_device(false); \n"
+       << "    device.load_bvh(make_file_path(1, get_chunk_num()).bvh); \n"
+       << "} \n";
+
     os << "extern fn render(settings: &Settings, iter: i32, dev: i32, chunk: i32, next_chunk: i32, generate_rays: bool) -> () { \n"   
        << "    let renderer = make_path_tracing_renderer( "<<max_path_len<<" /*path length*/, " << spp << " /*spp*/); \n";
     for(int dev_id = 0; dev_id < dev_num; dev_id++){                            

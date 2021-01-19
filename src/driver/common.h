@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <random>
+#include <sys/stat.h>
 
 // Round to the integer above the division.
 inline uint32_t round_up(uint32_t val, uint32_t div) {
@@ -105,6 +106,14 @@ inline size_t physical_memory_used_by_process() {
     return result / 1024;
 }
 
+inline int FileSize(const char* fname)
+{
+    struct stat statbuf;
+    if(stat(fname,&statbuf)==0)
+        return statbuf.st_size;
+    return -1;
+}
+
 #define MAX_CHUNK 3
 #define MAX_PROC  128
 #define PRIMARY_WIDTH 22
@@ -116,6 +125,7 @@ inline size_t physical_memory_used_by_process() {
 #define STREAM_CAPACITY 256 * 256
 #define OUT_BUFFER_CAPACITY 1024 * 1024
 #define MIN_SEND_STREAM_SIZE 10
+#define DYNAMIC_SCHEDULE true //set false, randomly assign chunks to process
 #define SIMPLE_TRACE true
 
 #endif // COMMON_H

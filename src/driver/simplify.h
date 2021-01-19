@@ -168,10 +168,15 @@ namespace Simplify
 	obj::TriMesh simplify(const obj::File& obj_file, const obj::MaterialLib& mtl_lib, float agressiveness=7, bool verbose=false) {
         printf("fine mesh size %ld\n", triangles.size());
 
-        //if(fine_mesh.indices.size() < 4000000) return fine_mesh;
         
         convert_obj_file(obj_file, mtl_lib, 0); 
-        int target_count = Simplify::triangles.size() * 0.1;//1000000; 
+
+        int target_count; 
+        if(Simplify::triangles.size() < 1000)
+            target_count = Simplify::triangles.size(); 
+        else 
+            target_count = Simplify::triangles.size() * 0.1; 
+
        
 		printf("Input: %zu vertices, %zu triangles (target %d)\n", Simplify::vertices.size(), Simplify::triangles.size(), target_count);
 

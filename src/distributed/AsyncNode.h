@@ -64,7 +64,7 @@ struct AsyncNode : public Node {
     RayStreamList * outlist_comm;
     
     RayStreamList inlist_render;  
-    RayStreamList * outlist_render;
+    //RayStreamList * outlist_render;
 
     PassRecord * pass_record;
 
@@ -147,7 +147,6 @@ RayMsg* AsyncNode::export_ray_msg(int cId, int rank, int dst, bool idle, int tag
 
 bool AsyncNode::allList_empty() {
    // std::lock_guard <std::mutex> lock(out_mutex); 
-    int chunk_size = ps->get_chunk_size(); 
     for(int i = 0; i < chunk_size; i++)
         if(!outlist_comm[i].empty()) 
             return false;
@@ -162,7 +161,7 @@ AsyncNode::AsyncNode(Communicator *comm, ProcStatus *ps, Scheduler* scheduler)
     int store_capacity = ps->get_stream_store_capacity();
     int logic_capacity = ps->get_stream_logic_capacity();
    
-    chunk_size = ps->get_chunk_size(); 
+    chunk_size = SIMPLE_TRACE ? ps->get_chunk_size() + 1 : ps->get_chunk_size(); 
     outlist_comm = new RayStreamList[chunk_size];
     for(int i = 0; i < chunk_size; i++)
         outlist_comm[i].set_capacity(logic_capacity, store_capacity);
@@ -202,7 +201,7 @@ int AsyncNode::get_sent_list() {
 
 void AsyncNode::send_message() {
     //comm->os<<"mthread status inlist size "<<inlist_comm.primary_size()<<" "<<inlist_comm.secondary_size()<<" thread wait "<<ps->all_thread_waiting()<<"\n";
-    //comm->os<<"proc idle "<<ps->is_proc_idle() <<"inlist_comm size"<<inlist_comm.size()<<"\n";
+//    comm->os<<"proc idle "<<ps->is_proc_idle() <<"inlist_comm size"<<inlist_comm.size()<<"\n";
     if (ps->is_proc_idle()) {
         if(allList_empty()) {
             if(ps->all_proc_idle() && ps->all_rays_received()) {
@@ -224,7 +223,6 @@ void AsyncNode::send_message() {
             statistics.start("run => message_thread => send_message => switch_chunk");
             ///load new chunk
             ps->switch_current_chunk(outlist_comm);
-          //  ps->switch_current_chunk();
             
             int current_chunk = ps->get_current_chunk();
             copy_to_inlist(current_chunk);
@@ -256,7 +254,6 @@ void AsyncNode::send_message() {
 }
 
 void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
-    statistics.start("run => work_thread => save_outgoing");
 
     RetiredRays *retired_rays = new RetiredRays(rays, size, primary);
     std::lock_guard <std::mutex> thread_lock(retired_mutex); 
@@ -330,7 +327,7 @@ void AsyncNode::compact_retired_rays() {
 
 int AsyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
     //printf("load incoming buffer\n");
-    comm->os<<"rthread load incoming buffer inlist size "<<inlist_comm.size()<<"\n";
+//    comm->os<<"rthread load incoming buffer inlist size "<<inlist_comm.size()<<"\n";
   
     if(ps->has_new_chunk() || inlist_render.empty()) 
         return -2 - ps->get_current_chunk(); 
@@ -354,18 +351,18 @@ int AsyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
     lock.unlock();
     work_thread_lock.unlock();
 
-    statistics.start("run => work_thread => load_incoming_buffer-copy");
+    statistics.start("run => wthread => load_incoming_buffer-copy");
 
     int copy_size = rays_stream->size;
     comm->os<<"all rays chunk "<<ps->get_current_chunk()<<" size "<<copy_size<<"\n";
     int width = rays_stream->width;
     printf("copy primary size %d\n", copy_size);
     memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
-   
+  
     pass_record->write_recv(copy_size);
 
     delete rays_stream;
-    statistics.end("run => work_thread => load_incoming_buffer-copy");
+    statistics.end("run => wthread => load_incoming_buffer-copy");
     return copy_size;
 }
 
@@ -437,6 +434,11 @@ void AsyncNode::run() {
         //load new chunk;
         int current_chunk = ps->get_current_chunk();
         pass_record->set_cur_chk(current_chunk);
+        if(iter == 0) { 
+            int* region = scheduler->get_render_block();
+            int new_rays = scheduler->get_spp() * (region[2] - region[0]) * (region[3] - region[1]);
+            pass_record->write_recv(new_rays);
+        }
 
         comm->os<<"rthread start  " << current_chunk << "\n";
         if(iter != 0) {
@@ -462,21 +464,21 @@ void AsyncNode::run() {
             inlist_render.empty_notify(); //tell mthread inlist size changed 
             ps->set_proc_busy(comm->get_rank());
         }
-
-        statistics.start("run => work_thread => render");
+        statistics.start("run => wthread => render");
         launch_rodent_render(deviceNum, iter==0);
-        statistics.end("run => work_thread => render");
-
+        float t = statistics.end("run => wthread => render");
+        pass_record->write_time(t);
         iter++;
     } while(!ps->Exit());
     comm->os<<" render thread times "<<iter<<"\n";
     mthread.join();
-            
     save_chunk_hit(rodent_get_chunk_hit());
 
-    pass_record->gather();
+    scheduler->chunk_manager->set_render_speed(pass_record->gather());
     if(comm->get_rank() == 0)
         pass_record->print();
+    pass_record->reset();
+
     return;
 }
 

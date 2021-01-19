@@ -122,6 +122,8 @@ public:
     static void read_from_device_buffer(RayStreamList * , float *, size_t , bool, int, int);
     static void swap(RayStreamList &, RayStreamList &); 
 
+    int ray_size(); 
+        
 
 private:
     std::queue<RaysStream *> primary;
@@ -160,6 +162,24 @@ RaysStream* RayStreamList::get_secondary() {
         printf("return get secondary null \n");
         return NULL;
     }
+}
+
+int RayStreamList::ray_size() {
+    int total_rays = 0;
+    int primary_size = primary.size();
+    int secondary_size = secondary.size();
+    for(int i = 0; i < primary_size; i++) {
+        total_rays += primary.front()->get_size();
+        primary.push(primary.front());
+        primary.pop();
+    }
+    for(int i = 0; i < secondary_size; i++) { 
+        total_rays += secondary.front()->get_size();
+        secondary.push(secondary.front());
+        secondary.pop();
+    }
+    printf("primary queue size %d secondary %d total %d\n", primary_size, secondary_size, total_rays);
+    return total_rays; 
 }
 
 // msg_primary_size is rays num 
@@ -201,6 +221,7 @@ void RayStreamList::read_from_array_message(char* src_ptr, int msg_primary_size,
     } 
     os<<"RayStreamList end read from ptr\n"; 
 }
+
 // msg_primary_size is stream num
 void RayStreamList::read_from_stream_message(char* src_ptr, int msg_primary_size, int msg_secondary_size, int rank) {
     statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => new Rays");
@@ -281,7 +302,7 @@ void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_
     for(int i = 0; i < chunk_size; i ++) 
         writeList[i] = NULL; //outList[i].get_free_stream(primary);
     
-    printf("read from divice buffer %d \n", buffer_size); 
+    printf("read from divice buffer %d chunk size %d\n", buffer_size, chunk_size); 
     
     int width   = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
     int* iptr   = (int*)(out_buffer);
@@ -294,8 +315,8 @@ void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_
         } else {
             while(num > 0) {
                 if(writeList[tmp] == NULL || (writeList[tmp]->full() && num > 0)) {
+                    printf("get free stream tmp %d rank %d \n", tmp, rank);
                     writeList[tmp] = outList[tmp].get_free_stream(primary);
-                    printf("get free stream rank %d \n", rank);
                 }
                 int left = std::min(num, writeList[tmp]->logic_capacity - writeList[tmp]->size);
                 printf("before fill left %d st %d  num %d chk %d rank %d \n", left, st,  num, chunk, rank);
