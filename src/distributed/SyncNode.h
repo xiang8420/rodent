@@ -25,7 +25,7 @@ struct SyncNode : public Node{
     
     static void message_thread(void* tmp);
     
-    void run();
+    void run(Camera *);
    
     RayArrayList * outArrayList;
     RayStreamList inList;  
@@ -258,8 +258,10 @@ void SyncNode::synchronize () {
     printf("rthread proc %d after gather inlist size %d\n", comm->get_rank(), inList.size());
 }
 
-void SyncNode::run() {
+void SyncNode::run(Camera *cam) {
     
+    ps->reset();
+    scheduler->preprocess(cam, comm->get_size(), false, true);
     comm->os <<" start run message thread \n";
 
     int deviceNum = ps->get_dev_num();

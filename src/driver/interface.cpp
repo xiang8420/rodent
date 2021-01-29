@@ -259,11 +259,9 @@ struct Interface {
     
     static thread_local anydsl::Array<float> cpu_primary;
     static thread_local anydsl::Array<float> cpu_secondary;
-    static thread_local anydsl::Array<float> cpu_primary_outgoing;
-    static thread_local anydsl::Array<float> cpu_secondary_outgoing;
     anydsl::Array<int32_t> *cpu_record_chunk_hit;
-    anydsl::Array<int32_t> *cpu_pass_record;
-
+    anydsl::Array<float> *cpu_primary_outgoing;
+    anydsl::Array<float> *cpu_secondary_outgoing;
 #ifdef ENABLE_EMBREE_DEVICE
     EmbreeDevice embree_device;
 #endif
@@ -303,13 +301,18 @@ struct Interface {
         
         int thread_num = dfw_thread_num();
         cpu_record_chunk_hit = new anydsl::Array<int32_t>[thread_num];
+        cpu_primary_outgoing = new anydsl::Array<float>[thread_num];
+        cpu_secondary_outgoing = new anydsl::Array<float>[thread_num];
+
+        int out_size = dfw_out_stream_capacity(); 
+        int out_capacity = (out_size & ~((1 << 5) - 1)) + 32; // round to 32
         int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2;
-        cpu_pass_record      = new anydsl::Array<int32_t>[thread_num];
         int pass_record_size = chunk_size * (chunk_size + 3); // chunk_size * (send size of dst chunk, recv and no_hit)
 
         for(int i = 0; i < thread_num; i++) {
             cpu_record_chunk_hit[i] = anydsl::Array<int32_t>(chunk_hit_size);
-            cpu_pass_record[i] = anydsl::Array<int32_t>(pass_record_size);
+            cpu_primary_outgoing[i] = anydsl::Array<float>(primary_width * out_capacity);
+            cpu_secondary_outgoing[i] = anydsl::Array<float>(secondary_width * out_capacity);
         }
         host_record_chunk_hit = anydsl::Array<int32_t>(chunk_hit_size);
         std::fill(host_record_chunk_hit.begin(), host_record_chunk_hit.end(), 0);
@@ -343,19 +346,11 @@ struct Interface {
     anydsl::Array<float>& cpu_primary_stream(size_t size) {
         return resize_array(0, cpu_primary, size, primary_width);
     }
-
-    anydsl::Array<float>& cpu_primary_outgoing_stream(size_t size) {
-        return resize_array(0, cpu_primary_outgoing, size, primary_width);
-    }
     
     anydsl::Array<float>& cpu_secondary_stream(size_t size) {
         return resize_array(0, cpu_secondary, size, secondary_width);
     }
     
-    anydsl::Array<float>& cpu_secondary_outgoing_stream(size_t size) {
-        return resize_array(0, cpu_secondary_outgoing, size, secondary_width);
-    }
-
     //gpu
     void initial_gpu_host_data() {
         auto capacity = dfw_stream_store_capacity();
@@ -585,8 +580,6 @@ struct Interface {
 
 thread_local anydsl::Array<float> Interface::cpu_primary;
 thread_local anydsl::Array<float> Interface::cpu_secondary;
-thread_local anydsl::Array<float> Interface::cpu_primary_outgoing;
-thread_local anydsl::Array<float> Interface::cpu_secondary_outgoing;
 
 static std::unique_ptr<Interface> interface;
 
@@ -670,7 +663,6 @@ inline void get_out_ray_stream(OutRayStream& out, float* ptr, size_t capacity, s
 
 inline void get_chunk_hit(ChunkHit& chunk_hit, int* ptr) {
     chunk_hit.ctrb     = ptr;
-    chunk_hit.its      = ptr + chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
     chunk_hit.res      = chunk_hit_res;
     chunk_hit.chk_cap  = chunk_hit_res * chunk_hit_res * 6;
     chunk_hit.chk_size = dfw_chunk_size();
@@ -803,14 +795,13 @@ void rodent_cpu_get_thread_data( PrimaryStream* primary, SecondaryStream* second
     int out_size = dfw_out_stream_capacity(); 
     int out_capacity = (out_size & ~((1 << 5) - 1)) + 32; // round to 32
     
-    auto& array_out_primary = interface->cpu_primary_outgoing_stream(out_capacity);
+    auto& array_out_primary = interface->cpu_primary_outgoing[tid];
     get_out_ray_stream(*out_primary, array_out_primary.data(), out_size, primary_width);
-    auto& array_out_secondary = interface->cpu_secondary_outgoing_stream(out_capacity);
+    auto& array_out_secondary = interface->cpu_secondary_outgoing[tid];
     get_out_ray_stream(*out_secondary, array_out_secondary.data(), out_size, secondary_width);
 
     auto& array_record_chunk_hit = interface->cpu_record_chunk_hit[tid];
     get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
-    
     // all thread share
     get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
 
@@ -857,8 +848,6 @@ void rodent_gpu_get_data( PrimaryStream* primary, PrimaryStream* other_primary, 
     }
     get_chunk_hit(*record_chunk_hit, array_record_chunk_hit.data()); 
 
-//  should write to dev buffer    
-//    get_chunk_hit(*render_chunk_hit, interface->host_render_chunk_hit.data()); 
     dfw_time_end("render prepare data");
 }
 //embree
@@ -873,7 +862,7 @@ void rodent_cpu_intersect_secondary_embree(SecondaryStream* secondary) {
 #endif
  
 //debug
-void rodent_secondary_check(int32_t dev, int primary_size, int buffer_size, int32_t print_mark, bool is_first_primary) {
+void rodent_secondary_check(int32_t dev, int32_t tid, int primary_size, int buffer_size, int32_t print_mark, bool is_first_primary) {
     SecondaryStream secondary;
     printf("\n rank %d |%d rthread secondary size  %d\n", dfw_mpi_rank(), print_mark, primary_size);
     if (dev == -1) {
@@ -886,7 +875,7 @@ void rodent_secondary_check(int32_t dev, int primary_size, int buffer_size, int3
                     secondary.rays.org_x[i], secondary.rays.org_y[i], secondary.rays.org_z[i],
                     secondary.rays.dir_x[i], secondary.rays.dir_y[i], secondary.rays.dir_z[i]);
     }
-    auto& array = interface->cpu_secondary_outgoing;
+    auto& array = interface->cpu_secondary_outgoing[tid];
     int *data = (int*) array.data();
     float *fptr = (float*) array.data();
     printf("buffer size%d\n", buffer_size);
@@ -928,21 +917,6 @@ int32_t rodent_chunk_hit_resolution() {
     return CHUNK_HIT_RES;
 }
 
-inline int get_its(int a, int b) {
-    if(a == 255) return 255;
-    if(b == 0) return a;
-    return b;
-}
-
-int its_cmp(int a, int b) {
-    int res = 0;
-    res += get_its((a & 0xFF), (b & 0xFF));
-    res += (get_its(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
-    res += (get_its(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
-    res += (get_its(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
-    return res;
-}
-
 inline int get_ctrb(const int &a, const int &b) {
     if(a > 1 || b > 1) return a+b > 255 ? 255 : a+b;
     if(a == 0 && b == 0) return 0;
@@ -965,17 +939,17 @@ void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
         int* host = interface->host_record_chunk_hit.data();
         int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
         if(interface->first_write) {
-            memcpy(host, array, 2 * size * sizeof(int));
+            memcpy(host, array, size * sizeof(int));
             interface->first_write = false;
             return;
         }
-        for (int i = 0; i < size; i++){
-            host[i] = ctrb_cmp(host[i], array[i]);
-        }
-        int ed = size * 2;
-        int chk_size = dfw_chunk_size();
-        for (int i = size; i < ed; i++){
-            host[i] = its_cmp(host[i], array[i]);
+       // for (int i = 0; i < size; i++){
+       //     host[i] = ctrb_cmp(host[i], array[i]);
+       // }
+       // int ed = size * 2;
+       // int chk_size = dfw_chunk_size();
+       // for (int i = size; i < ed; i++){
+       //     host[i] = its_cmp(host[i], array[i]);
 
          //   int its = ((array[i] >> 8) & 0xFF ) - 1;
          //   if(its >= 254 || its == -1) continue; 
@@ -984,7 +958,7 @@ void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
          //           printf("interface error its %d\n", its);
          //       } 
          //   }
-        }
+        //}
        //     host[i] = its_cmp(host[i], array[i]);
        //     int its = host[i] & 0xFF;
        //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
@@ -1007,10 +981,10 @@ int* rodent_get_chunk_hit() {
     interface->host_record_chunk_hit.data();
 }
 
-void rodent_worker_primary_send(int32_t dev, int buffer_size) {
+void rodent_worker_primary_send(int32_t dev, int32_t tid, int buffer_size) {
     if(buffer_size == 0) return;
     if(dev == -1) {
-        auto& array = interface->cpu_primary_outgoing;
+        auto& array = interface->cpu_primary_outgoing[tid];
         send_rays(array.data(), buffer_size, array.size() / primary_width, true);
     } else {
         int capacity = interface->gpu_outgoing_primary(dev) / primary_width;
@@ -1019,10 +993,10 @@ void rodent_worker_primary_send(int32_t dev, int buffer_size) {
     }
 }
 
-void rodent_worker_secondary_send(int32_t dev, int buffer_size) {
+void rodent_worker_secondary_send(int32_t dev, int32_t tid, int buffer_size) {
     if(buffer_size == 0) return;
     if(dev == -1) {
-        auto& array = interface->cpu_secondary_outgoing;
+        auto& array = interface->cpu_secondary_outgoing[tid];
 //            printf("array.size %d buffer size %d\n ", array.size() / secondary_width, buffer_size);
         send_rays(array.data(), buffer_size, array.size() / secondary_width, false);
     } else {
@@ -1033,8 +1007,8 @@ void rodent_worker_secondary_send(int32_t dev, int buffer_size) {
 }
 int rodent_rays_export(int32_t dev, int32_t out_primary_size, int32_t out_secondary_size, bool isFirst, bool primary, int32_t tid) {
     
-    rodent_worker_primary_send(dev, out_primary_size);
-    rodent_worker_secondary_send(dev, out_secondary_size);
+    rodent_worker_primary_send(dev, tid, out_primary_size);
+    rodent_worker_secondary_send(dev, tid,  out_secondary_size);
     
     int size_new = 0;
     
@@ -1073,11 +1047,6 @@ void rodent_update_render_chunk_hit(int32_t* new_chunk_hit, int32_t size) {
 
 int* rodent_get_render_chunk_hit_data() {
     interface->host_render_chunk_hit.data();
-}
-
-void rodent_unload_chunk_data(int32_t chk, int32_t dev ) {
-    printf("rodent unload \n");
-    interface->unload_chunk_data(chk, dev);
 }
 
 void rodent_present(int32_t dev) {

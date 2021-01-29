@@ -7,7 +7,7 @@ struct SingleNode : public Node{
     
     void save_outgoing_buffer(float *, size_t, bool){} ; 
     
-    void run();
+    void run(Camera *);
 
 };
 
@@ -22,8 +22,10 @@ SingleNode::~SingleNode() {
     printf("delete SingleNode\n");
 }
 
-void SingleNode::run() {
+void SingleNode::run(Camera *cam) {
     
+    ps->reset();
+    scheduler->preprocess(cam, 1/*block size*/, false, false);
     comm->os <<" start run message thread \n";
     int deviceNum = ps->get_dev_num();
     int iter = 0; 

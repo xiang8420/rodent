@@ -24,12 +24,12 @@ public:
 
     void launch_rodent_render(int, bool); 
 
-    virtual void run() = 0;
+    virtual void run(Camera *) = 0;
 
     virtual int load_incoming_buffer(float **rays, bool primary, int thread_id) = 0;
     
     virtual void save_outgoing_buffer(float *, size_t, bool) = 0; 
-    
+
     void loop_check(float i); 
 };
 
@@ -40,9 +40,7 @@ Node::Node(Communicator *comm, ProcStatus *ps, Scheduler *scheduler)
     max_used_mem = 0;
 }
 
-Node::~Node() {
-    printf("%d delete Node\n", comm->get_rank());
-}
+Node::~Node() {}
 
 void Node::launch_rodent_render(int devNum, bool generate_rays) {
 
@@ -51,6 +49,7 @@ void Node::launch_rodent_render(int devNum, bool generate_rays) {
     int sppDev = sppProc / devNum;
     int cur_chk = ps->get_current_chunk();
 
+    statistics.start("run => work_thread => render => run");
     // only used for async dynamic schedule
     ps->chunk_loaded(); 
 
@@ -69,6 +68,8 @@ void Node::launch_rodent_render(int devNum, bool generate_rays) {
         };
         int rnd = camera->iter * (comm->get_rank() + 1) * devNum + i;
 
+        printf("region %d %d %d %d\n", region[0], region[1], region[2], region[3]);
+
         workThread.emplace_back(render, &settings, rnd, i, cur_chk, ps->get_next_chunk(), generate_rays);
     }
     render_start.notify_all();
@@ -76,11 +77,13 @@ void Node::launch_rodent_render(int devNum, bool generate_rays) {
     for(auto &thread: workThread)
         thread.join();
     
+    statistics.end("run => work_thread => render => run");
     comm->os<<comm->get_rank()<<" before set render start"<<"\n";
+    
     //dynamic schedule for multi chunks    
-    if(ps->chunk_manager->new_chunk())
-        for(int i = 0; i < devNum; i++) 
-            rodent_unload_chunk_data(cur_chk, i); 
+   // if(ps->chunk_manager->new_chunk())
+   //     for(int i = 0; i < devNum; i++) 
+   //         rodent_unload_chunk_data(cur_chk, i); 
 }
 
 
@@ -88,11 +91,12 @@ void Node::loop_check(float i) {
     if(1) {    
 //        int mem = physical_memory_used_by_process();
 //        if(/*i> 1000 ||*/mem != pre_mem) {
-//            comm->os<<i<<" memory use "<<mem<<"\n"; 
+// //           comm->os<<i<<" memory use "<<mem<<"\n"; 
 //            max_used_mem = std::max(mem, max_used_mem);
 //            pre_mem = mem;
 //        }
-        //printf("%d mark %f\n", comm->get_rank(), i);
+// //       printf("%d mark %f\n", comm->get_rank(), i);
+// //       comm->os<<comm->get_rank()<<" mark "<< i <<"\n";
     }
 }
 

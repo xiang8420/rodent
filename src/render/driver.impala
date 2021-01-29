@@ -89,16 +89,8 @@ struct OutRayStream {
     size: i32
 }
 
-struct PreprocessRecord {
-    its:    &mut[i32],  //chunk * depth
-    time:   &mut[f32],
-    length: i32,
-    chunk:  i32
-}
-
 struct ChunkHit {
     ctrb: &mut[i32],
-    its:  &mut[i32],
     res:  i32,
     chk_cap: i32,
     chk_size: i32

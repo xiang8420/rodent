@@ -23,6 +23,7 @@ private:
     int out_stream_capacity; 
 
     bool simple_trace;
+    int chunk_size;
 public:    
     ChunkManager * chunk_manager;
 
@@ -109,7 +110,8 @@ void ProcStatus::reset() {
 ProcStatus::~ProcStatus() {
     proc_idle.clear();
     global_rays.clear();
-    printf("procstatus delete\n");
+    thread_idle.clear();
+    printf("%d procstatus delete\n", proc_rank);
 }
 
 bool ProcStatus::all_thread_waiting() {

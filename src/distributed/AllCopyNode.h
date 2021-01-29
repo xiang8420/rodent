@@ -17,7 +17,7 @@ struct AllCopyNode : public Node{
     
     int load_incoming_buffer(float **, bool, int) { }; 
     
-    void run();
+    void run(Camera *);
     
 };
 
@@ -78,8 +78,10 @@ void AllCopyNode::message_thread(void* tmp) {
     return;
 } 
 
-void AllCopyNode::run() {
+void AllCopyNode::run(Camera *cam) {
    
+    ps->reset();
+    scheduler->preprocess(cam, 1/*block size*/, false, false);
     comm->os <<" start image decomposition  \n";
     //start rendering with origin tile
     //recv camera
