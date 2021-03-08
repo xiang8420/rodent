@@ -129,10 +129,11 @@ int main(int argc, char** argv) {
     Camera camera(eye, dir, up, fov, width, height);
     // time statistic 
     std::vector<double> samples_sec;
+    std::vector<double> time;
     float elapsed_ms = 1;  //avoid div 0
    
     bool animation = true;//false; 
-    int frame = 3;
+    int frame = 1;
     for(int i = 0; i < frame; i++) {
         auto ticks = std::chrono::high_resolution_clock::now();
         //camera.rotate(0.4f, 0.0f);
@@ -143,6 +144,7 @@ int main(int argc, char** argv) {
 
         elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         samples_sec.emplace_back(1000.0 * double(spp * width * height) / double(elapsed_ms));
+        time.emplace_back(elapsed_ms / 1000);
         
         float total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ticks).count();
         printf("end reduce process time %f",  float(elapsed_ms));
@@ -151,6 +153,7 @@ int main(int argc, char** argv) {
             auto film = get_pixels();
             dfw_save_image(out_file, film, i, frame, width, height);
             clear_pixels();
+            camera.rotate(0.02f, 0.0f);
             //camera.rotate(0.1f, 0.0f);
         }
         camera.iter++;
@@ -163,8 +166,10 @@ int main(int argc, char** argv) {
     auto inv = 1.0e-6;
     //std::sort(samples_sec.begin(), samples_sec.end());
     info("run time: ");
-    for(auto& time: samples_sec) 
-        info(" ", time * inv, "/");
+    for(auto& t: samples_sec) 
+        info(" ", t * inv, "/");
+    for(auto& t: time) 
+        info(" ", t, "/");
     info("\n");
 //    info("# ", samples_sec.front() * inv,
 //         "/", samples_sec[samples_sec.size() / 2] * inv,

@@ -116,7 +116,9 @@ int RaysArray::check_capacity(int num) {
         
         float *new_data = new float[capacity * store_width]; 
         if(size > 0) {
+            printf("before memcpy check size %d num %d  width %d capacity %d \n", size, num, store_width, capacity);
             memcpy((char*)new_data, (char*)data, size * store_width * sizeof(float));
+            printf("after memcpy check size %d num %d  width %d capacity %d \n", size, num, store_width, capacity);
        
             printf("check capacity: \n"); 
             int* ids = (int*)(data);
@@ -137,6 +139,7 @@ int RaysArray::check_capacity(int num) {
         //printf("store width %d capacity %d\n", capacity, store_width);
         //printf("after rays resize %ld kb %ld mb\n", memory, memory / 1024);
     }
+    printf("after check size %d num %d capacity %d \n", size, num, capacity);
     //statistics.end("run => message_thread => RayArrayList => check_capacity");
     return capacity;
 }
@@ -146,6 +149,8 @@ void RaysArray::read_device_buffer(float *rays, int src, int num) {
     for(int i = 0; i < num; i++) {
         int k = 0;
         for(int j = 0; j < logic_width; j++) {
+        //    if(j < 5)
+        //        printf("| %d %d %d", (size + i) * store_width + k, (src + i) * logic_width + j, data.size(), num);
             data[(size + i) * store_width + k]  = rays[(src + i) * logic_width + j];
             k++; 
         }
@@ -158,6 +163,7 @@ void RaysArray::read_from_ptr(char *src_ptr, int copy_size) {
 
     char* dst_ptr = (char*)get_data() + size * store_width * sizeof(float);
     int copy_length = copy_size * store_width * sizeof(float);
+    printf("RaysArray read from copy size %d length %d \n",  copy_size, copy_length);
     memcpy(dst_ptr, src_ptr, copy_length);
     size += copy_size; 
 }

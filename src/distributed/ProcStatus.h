@@ -74,8 +74,7 @@ public:
     int  get_current_chunk(){ return chunk_manager->get_current_chunk(); }
     bool generate_rays(){ return !(simple_trace && chunk_manager->get_current_chunk() == chunk_manager->chunk_size - 1); }
     int  get_proc(int c) { return chunk_manager->get_proc(c); } 
-    bool update_chunk(int* schedule) { chunk_manager->update_chunk(schedule, proc_rank); } 
-    bool update_chunk(int cand_proc, int cand_chunk){ chunk_manager->update_chunk(cand_proc, cand_chunk, proc_rank); } 
+    bool update_chunk(int cand_chunk, int cand_proc){ chunk_manager->update_chunk(cand_chunk, cand_proc); } 
     bool is_local_chunk(int c) { return chunk_manager->is_local_chunk(c); }
 };
 

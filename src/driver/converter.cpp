@@ -23,6 +23,11 @@
 #include <sys/stat.h>
 #define create_directory(d) { umask(0); mkdir(d, 0777); }
 #endif
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include "../distributed/statistic.h"
+
 
 enum class Target : uint32_t {
     GENERIC = 0,
@@ -599,6 +604,7 @@ static size_t cleanup_mtl(obj::MaterialLib& mtl_lib) {
 
 void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export, std::string &data_path, std::string &chunk_path) 
 {
+    printf("write bvh\n");
     if (target == Target::NVVM_STREAMING   || target == Target::NVVM_MEGAKERNEL ||
         target == Target::AMDGPU_STREAMING || target == Target::AMDGPU_MEGAKERNEL) {
         printf("nvvm\n");
@@ -617,10 +623,6 @@ void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export
             create_directory((data_path + "cpu/").c_str());
             std::vector<typename BvhNTriM<4, 4>::Node> nodes;
             std::vector<typename BvhNTriM<4, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-            if (embree_bvh) build_embree_bvh<4>(tri_mesh, nodes, tris);
-            else
-#endif
             build_bvh<4, 4>(tri_mesh, nodes, tris);
             write_bvh_buffer(nodes, tris, chunk_path + "bvh_sse.bin");
             bvh_export += 2;
@@ -628,15 +630,16 @@ void write_bvh(obj::TriMesh &tri_mesh, Target target, unsigned short &bvh_export
     } else {
         printf("avx \n");
         if(!(bvh_export&4)){
+            std::cout<<"path :" + data_path + "cpu/" + " " + chunk_path + "bvh_avx.bin";
             create_directory((data_path + "cpu/").c_str());
             std::vector<typename BvhNTriM<8, 4>::Node> nodes;
             std::vector<typename BvhNTriM<8, 4>::Tri> tris;
-#ifdef ENABLE_EMBREE_BVH
-            if (embree_bvh) build_embree_bvh<8>(tri_mesh, nodes, tris);
-            else
-#endif
+            statistics.start("build bvh");
             build_bvh<8, 4>(tri_mesh, nodes, tris);
+            statistics.end("build bvh");
+            statistics.start("write bvh");
             write_bvh_buffer(nodes, tris, chunk_path + "bvh_avx.bin");
+            statistics.end("write bvh");
             bvh_export += 4;
         }
     }
@@ -762,7 +765,11 @@ void mpi_gather_light( std::vector<int>   &light_ids
     int n = 0;
     printf("num lights %ld\n", num_lights.size());
     for(int i = 0; i < num_lights.size(); i++) {
-        std::string light_ids_path = (i > 9 ? "data/0" : "data/00") + std::to_string(i) + "/light_ids.bin";
+        std::string light_ids_path = "data/";
+        if (i < 100) light_ids_path += "0";
+        if (i < 10) light_ids_path += "0";
+        light_ids_path += std::to_string(i) + "/light_ids.bin";
+
         printf("light ids chunk %d tris %d lights %d\n\n", i, num_tris[i], num_lights[i]);
         std::vector<int> tri_light_ids(num_tris[i]);
 
@@ -835,8 +842,10 @@ bool convert_simple_mesh(const obj::ScenePath& obj_file_paths, obj::MaterialLib 
     ticks = std::chrono::high_resolution_clock::now();
 
     std::string data_path  = "data/"; 
-    std::string chunk_str = (chunk_size > 9 ? "0" : "00") + std::to_string(chunk_size) + "/";
-    std::string simple_mesh_path = "data/" + chunk_str ;
+    std::string simple_mesh_path = "data/";
+    if (chunk_size < 100) simple_mesh_path += "0";
+    if (chunk_size < 10) simple_mesh_path += "0";
+    simple_mesh_path += std::to_string(chunk_size) + "/";
 
     create_directory(simple_mesh_path.c_str());
     unsigned short t = 0; 
@@ -871,7 +880,7 @@ bool convert_simple_mesh(const obj::ScenePath& obj_file_paths, obj::MaterialLib 
     // only proc 0 process the left part
     printf("convert simplify time %f\n", elapsed_ms);
 
-    obj::write_obj(simple_mesh, mtl_lib, chunk_size); 
+    //obj::write_obj(simple_mesh, mtl_lib, chunk_size); 
     return true;
 }
 
@@ -916,6 +925,14 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             return false;
         }
     }
+    for(int i = 0; i < obj_file_paths.simple.size(); i ++) {
+        auto mtl_name = obj_file_paths.simple[i] + ".mtl";
+        std::cout<<"read mtl "<<mtl_name <<" ";
+        if (!obj::load_mtl(mtl_name, mtl_lib)) {
+            error("Invalid MTL file '", mtl_name, "'");
+            return false;
+        }
+    }
     std::cout<<"\n";
     
     size_t num_mats = cleanup_mtl(mtl_lib);
@@ -942,7 +959,6 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
 
     std::vector<int> num_tris(chunk_size);
     std::fill(num_tris.begin(), num_tris.end(), 0);
-    
     std::vector<int> tri_lights;
 
     // Record if triangles in a chunk is light, 
@@ -963,26 +979,32 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
     MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
    
     MeshChunk *chunks;
-    if(proc_size != chunk_size && proc_size != 1) 
-        error("chunk size must equals to proc size\n");
+   // if(proc_size != chunk_size && proc_size != 1) 
+   //     error("chunk size must equals to proc size\n");
 
-    obj::TriMesh tri_mesh;
+    printf("rank %d size %d chunk size %d:\n", proc_rank, proc_size, chunk_size);
     for(int i = proc_rank; i < chunk_size; i+=proc_size) {
         int &chunk_num_lights = num_lights[i]; 
         int &chunk_num_tris = num_tris[i]; 
         
+        obj::TriMesh tri_mesh;
         std::string chunk_path = data_path;
-        chunk_path += (i > 9 ? "0" : "00") + std::to_string(i) + "/";
+        if (i < 100) chunk_path += "0";
+        if (i < 10) chunk_path += "0";
+        chunk_path += std::to_string(i) + "/";
+
         create_directory(chunk_path.c_str());
         
         for(int j = 0; j < obj_file_paths.mesh.size(); j ++) {
             obj::File obj_file;
             std::string file_name =  obj_file_paths.mesh[j] + ".obj";
+            statistics.start("load obj");
             if (!obj::load_obj(file_name, obj_file, mtl_lib)) {
                 error("Invalid OBJ file '", file_name, "'");
                 return false;
             }
-            
+            statistics.end("load obj");
+            statistics.start("compute tri mesh");
             if(j == 0) {
                 chunks = new MeshChunk(obj_file.bbox, chunk_size);
                 tri_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunks->list[i], true);
@@ -990,33 +1012,45 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 auto sub_mesh = compute_tri_mesh(obj_file, mtl_lib, 0, chunks->list[i], false);
                 obj::mesh_add(tri_mesh, sub_mesh);
             }
-            printf(" chunk %d obj %d tri mesh num %ld \n", i, j, tri_mesh.indices.size() / 4);
+            statistics.end("compute tri mesh");
+            printf("rank %d chunk %d obj %d tri mesh num %ld \n", proc_rank, i, j, tri_mesh.indices.size() / 4);
             //if chunk is empty ??
         }
         
+        printf("trimesh v %d tri %d nor %d face %d tex %d\n", tri_mesh.vertices.size()
+                , tri_mesh.indices.size(), tri_mesh.normals.size(), tri_mesh.face_normals.size(), tri_mesh.texcoords.size());
+
+        statistics.start("write tri mesh");
         write_tri_mesh(chunk_path, tri_mesh, padding_flag);
+        statistics.end("write tri mesh");
         
-        printf("after write tri mesh\n");
+        printf("after write tri mesh proc %d %d\n", proc_rank, i);
         
+        //MPI_Barrier(MPI_COMM_WORLD);
         //build and write bvh
+        printf("dev num %d \n", dev_num);
         unsigned short bvh_export = 0;
         for(int dev_id = 0; dev_id < dev_num; dev_id++) {
+            printf("target %d \n", dev_id);
             Target target = target_list[dev_id];
             info("Generating BVH for '", file_name, "'");
+            //obj::write_obj(tri_mesh, mtl_lib, i);
             write_bvh(tri_mesh, target, bvh_export, data_path, chunk_path);
         }
         printf("light\n"); 
-        
+        //MPI_Barrier(MPI_COMM_WORLD);
+         
         //Local chunk Light data, light id
         
         printf("tri mesh size %ld\n", tri_mesh.indices.size() / 4);
         
+        statistics.start("write light");
         for (size_t i = 0; i < tri_mesh.indices.size(); i += 4) {
             // Do not leave this array undefined, even if this triangle is not a light
             //if virtual portal continue
             //std::cout<<"tri idx "<<tri_mesh.indices[i]<<" "<<tri_mesh.indices[i + 1]<<" "<<tri_mesh.indices[i + 2]<< "mtl idx "<<tri_mesh.indices[i + 3]<<"\n";
             if(tri_mesh.indices[i + 3] >= num_mats)
-               continue; 
+               continue;
            
             auto& mtl_name = mtl_lib.list[tri_mesh.indices[i + 3]];
        //     std::cout<<"mtl "<<mtl_name<<"\n";
@@ -1036,17 +1070,17 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
             chunk_num_lights++;
 
             if (has_map_ke) {
-                os << "    let light" << i << " = make_triangle_light(\n"
-                   << "        math,\n"
-                   << "        make_vec3(" << light.verts[i * 3].x << "f, " << light.verts[i * 3].y << "f, " << light.verts[i * 3].z << "f),\n"
-                   << "        make_vec3(" << light.verts[i * 3 + 1].x << "f, " << light.verts[i * 3 + 1].y << "f, " << light.verts[i * 3 + 1].z << "f),\n"
-                   << "        make_vec3(" << light.verts[i * 3 + 2].x << "f, " << light.verts[i * 3 + 2].y << "f, " << light.verts[i * 3 + 2].z << "f),\n";
-                if (light.mats[i].map_ke != "") {
-                    os << "         make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[light.mats[i].map_ke]]) <<")\n";
-                } else { 
-                    os << "         make_color(" << light.colors[i].x << "f, " << light.colors[i].y << "f, " << light.colors[i].z << "f)\n";
-                } 
-                os << "        );\n";
+            //    os << "    let light" << i << " = make_triangle_light(\n"
+            //       << "        math,\n"
+            //       << "        make_vec3(" << light.verts[i * 3].x << "f, " << light.verts[i * 3].y << "f, " << light.verts[i * 3].z << "f),\n"
+            //       << "        make_vec3(" << light.verts[i * 3 + 1].x << "f, " << light.verts[i * 3 + 1].y << "f, " << light.verts[i * 3 + 1].z << "f),\n"
+            //       << "        make_vec3(" << light.verts[i * 3 + 2].x << "f, " << light.verts[i * 3 + 2].y << "f, " << light.verts[i * 3 + 2].z << "f),\n";
+            //    if (light.mats[i].map_ke != "") {
+            //        os << "         make_texture(math, make_repeat_border(), make_bilinear_filter(), image_" << make_id(image_names[images[light.mats[i].map_ke]]) <<")\n";
+            //    } else { 
+            //        os << "         make_color(" << light.colors[i].x << "f, " << light.colors[i].y << "f, " << light.colors[i].z << "f)\n";
+            //    } 
+            //    os << "        );\n";
             } else {
                 auto n = cross(v1 - v0, v2 - v0);
                 auto inv_area = 1.0f / (0.5f * length(n));
@@ -1059,9 +1093,12 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
                 light.colors.emplace_back(mat.ke);
             }
         }
-        obj::write_obj(tri_mesh, mtl_lib, i);
+        statistics.end("write light");
+        //obj::write_obj(tri_mesh, mtl_lib, i);
         chunk_num_tris = tri_mesh.indices.size() / 4;
     }
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
     mpi_gather_light(tri_lights, num_lights, num_tris, light.verts, light.norms, light.areas, light.colors, proc_rank, proc_size);
     printf("%d after mpi gather %ld\n", proc_rank, light.areas.size());
     
@@ -1205,6 +1242,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         } else {
             os << "    dummy_image; // Cannot determine image type for " << name << "\n";
         }
+        printf("after copy\n");
     }
 
     // Generate shaders
@@ -1360,6 +1398,7 @@ static bool convert_obj(const std::string& file_name, size_t dev_num, Target* ta
         convert_simple_mesh(obj_file_paths, mtl_lib, light, dev_num, target_list, dev_list, chunk_size, padding_flag); 
 
     info("Scene was converted successfully");
+    statistics.print(0, 0);
     return true;
 }
 
@@ -1487,7 +1526,9 @@ int main(int argc, char** argv) {
     }
 
     std::ofstream of("main.impala");
-    if (!convert_obj(obj_file, dev_num, target, dev, max_path_len, spp, embree_bvh, of, chunk))
-        return 1;
+    convert_obj(obj_file, dev_num, target, dev, max_path_len, spp, embree_bvh, of, chunk);
+    int rank = -1;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    printf("%d finish\n", rank);
     return 0;
 }

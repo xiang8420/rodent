@@ -118,14 +118,13 @@ inline int FileSize(const char* fname)
 #define MAX_PROC  128
 #define PRIMARY_WIDTH 22
 #define SECONDARY_WIDTH 17
-#define CHUNK_HIT_RES 128
-#define INTERSECT_FIELD_RES 128
-#define INTERSECT_FIELD_RES 128
+#define CHUNK_HIT_RES 32 
 #define VIS_CHUNK_HIT true
 #define STREAM_CAPACITY 256 * 256
 #define OUT_BUFFER_CAPACITY 1024 * 1024
 #define MIN_SEND_STREAM_SIZE 10
-#define DYNAMIC_SCHEDULE true //set false, randomly assign chunks to process
-#define SIMPLE_TRACE true
+#define SIMPLE_TRACE false //true 
+#define CACHE_RATE 1 
+#define PRELOAD  true 
 
 #endif // COMMON_H

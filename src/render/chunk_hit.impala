@@ -24,7 +24,11 @@ fn @get_sign(a: f32) -> i32 {
 
 fn @get_uv_coord(bbox: BBox, its: Vec3, res: i32, dir: Vec3, axit: i32, math: Intrinsics) -> (i32, i32, i32) {
     fn @get_sign_code (a : f32, b: f32) -> i32 { 
-        get_sign(a) * 2 + get_sign(b) 
+        if a > b {
+            get_sign(a) * 4 + get_sign(b) * 2 + 0
+        } else {
+            get_sign(a) * 4 + get_sign(b) * 2 + 1
+        } 
     }
     let mut u: f32;
     let mut v: f32;
@@ -79,16 +83,26 @@ fn write_chunk_hit(org_chk: i32, color: Color, cur_chk:i32, chunk_hit: ChunkHit)
     if in_chk_id == 0 || chk_id == cur_chk { return () }
 
     let sign = (org_chk >> 28) & 0xF;
-    let sign_bit = sign * 8;
+    let sign_bit = sign * 4;
     let chunk_hit_id = chk_id * chunk_hit.chk_cap + in_chk_id;
+    let ctrb = (chunk_hit.ctrb(chunk_hit_id) >> sign_bit) & 0xF;
+    
     let lu = color_luminance(color);
-    let lu_i32 = (lu * 255 as f32) as i32; 
-    let ctrb = (chunk_hit.ctrb(chunk_hit_id) >> sign_bit) & 0xFF;
-    let new_ctrb = if lu > 0.5f {
-        if ctrb + 2 > 255 { 255 } else { ctrb + 2 }
+    let lu_i32 = if lu >= 1.0f { 15 } 
+                 else if lu < 0.7f { 1 }
+                 else { (lu * 16.0f) as i32 };
+    if ctrb == 0 && lu_i32 != 0 {
+        chunk_hit.ctrb(chunk_hit_id) += (lu_i32 << sign_bit);
     } else {
-        if ctrb == 0 { 1 } else { 0 }
-    };
-    chunk_hit.ctrb(chunk_hit_id) += (new_ctrb << sign_bit);
+        if lu_i32 > ctrb {
+            let diff = lu_i32 - ctrb;        
+            chunk_hit.ctrb(chunk_hit_id) += (diff << sign_bit);
+        }
+
+      //  if lu_i32 < ctrb && lu_i32 > 0 {
+      //      let diff = ctrb - lu_i32;        
+      //      chunk_hit.ctrb(chunk_hit_id) -= (diff << sign_bit);
+      //  }
+    }
 }
 

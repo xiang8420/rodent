@@ -134,6 +134,7 @@ class RayMsg : public Message{
 
 public:
     RayMsg(RayArrayList* List, int src, int dst, int chunk_size, bool idle, int tag) {
+        statistics.start("new RayMSG 0");
         std::ofstream os; 
         os.open("out/proc_buffer_worker", std::ios::out | std::ios::app ); 
         
@@ -168,8 +169,10 @@ public:
                 out.clear();
             } 
         }
+        statistics.end("new RayMSG 0");
     }
     RayMsg(RayArrayList &outList, int src, int dst, int chunk, bool idle, int tag) {
+        statistics.start("new RayMSG 1");
         printf("construct message ray\n");
         header = new MessageHeader(-1, src, dst, MsgType::ArrayRay, false, 0, idle, chunk, tag);
         
@@ -207,6 +210,7 @@ public:
         header->content_size = primary_length + secondary_length; 
         
         outList.clear();
+        statistics.end("new RayMSG 1");
     //    printf("outlist clear src %d dst %d\n", src, dst);
     }
 
@@ -258,6 +262,7 @@ class RecvMsg : public Message {
 public:
     //recv msg
     RecvMsg(MPI_Status &status, MPI_Comm comm) {
+        
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
         MPI_Status s0;
@@ -276,11 +281,10 @@ public:
 
     //recv message, if it's ray msg load it to list 
     RecvMsg(RayStreamList * outStream, RayStreamList *inList, const int local_chunk, MPI_Status &status) {
-        statistics.start("run => message_thread => recv_message => RecvMsg => new RecvMsg");
+        statistics.start("new RecvMSG");
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         
-        statistics.start("run => message_thread => recv_message => RecvMsg => main");
         
         int count;
         MPI_Get_count(&status, MPI_UNSIGNED_CHAR, &count);
@@ -306,7 +310,6 @@ public:
                     std::unique_lock <std::mutex> lock(outStream[0].mutex); 
                     outStream[cur_chk].read_from_stream_message((char*)buffer+sizeof(MessageHeader), header->primary, header->secondary, rank); 
                 } else {
-                    
                     std::unique_lock <std::mutex> lock(inList->mutex); 
                     statistics.start("run => message_thread => recv_message => RecvMsg => read_from_message => empty cond");
                     while (inList->full()) {
@@ -320,7 +323,7 @@ public:
             }
             free(buffer);
         }
-        statistics.end("run => message_thread => recv_message => RecvMsg => main");
+        statistics.end("new RecvMSG");
     }
 
     ~RecvMsg() { 

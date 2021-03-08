@@ -1,13 +1,28 @@
-inline void splat(size_t n, float* grid, int d) {
+int get_max_length(float* length, int d) {
+    float max = 0;
+    int id = -1;
+    for(int i = 0; i < d; i++) { 
+        //debug
+        if( i==1 ) continue;
+        if(length[i] > max) { 
+            id = i;
+            max = length[i];
+        }
+    }
+    return id;
+}
+
+void splat(size_t n, float* grid, float* length, int d) {
     for(int i = 0; i < d; i++) 
         grid[i] = 1; 
 
-    int axit = 0;
+    int axit = get_max_length(length, d);
     int cur_n = n;
     //choose longest axit splat
     while(cur_n != 1){
         grid[axit] *= 2;
-        axit = ++axit % d;
+        length[axit] /= 2;
+        axit = get_max_length(length, d);
         cur_n /= 2;
     }
 }
@@ -22,7 +37,10 @@ struct MeshChunk{
     int                    size;
 
     MeshChunk(BBox bbox, int grid_num):bbox(bbox) {
-        splat(grid_num, &scale[0], 3);
+        float length[] = { bbox.max.x - bbox.min.x
+                         , bbox.max.y - bbox.min.y
+                         , bbox.max.z - bbox.min.z} ;
+        splat(grid_num, &scale[0], &length[0], 3);
         chunk_division();
         size = scale[0] * scale[1] * scale[2];
     }

@@ -1,31 +1,4 @@
-struct RetiredRays {
-    float* data;
-    int size;
-    bool primary;
-    int width;
-
-    RetiredRays(float* rays, int size, bool primary)
-        :size(size), primary(primary) 
-    {
-        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
-        int capacity = size * width;
-        data = new float[capacity]; 
-        printf("new retired ray size %d width %d \n", size, width);
-        memcpy((char*)data, (char*)rays, capacity * sizeof(float));
-    }
-    RetiredRays(int size, bool primary)
-        :size(size), primary(primary) 
-    {
-        int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
-        int capacity = size * width;
-        data = new float[capacity]; 
-    }
-
-    ~RetiredRays() {
-        delete[] data;
-    }
-};
-
+#include <cmath>
 
 // Original Master-Worker mode 
 struct AsyncNode : public Node {
@@ -35,37 +8,22 @@ struct AsyncNode : public Node {
     ~AsyncNode();
 
     int get_sent_list(); 
-    
     void send_message(); 
-
     void save_outgoing_buffer(float *, size_t, bool); 
-
-    void clear_retired_rays(); 
-    
-    void compact_retired_rays(); 
-    
     void copy_to_inlist(int current_chunk);
-
     RayMsg* export_ray_msg(int, int, int, bool, int); 
-
     static void message_thread(void* tmp);
-    
     int load_incoming_buffer(float **, bool, int); 
-    
+    void process_chunk_hit(int*, int); 
     void postprocess(int); 
-    
     void run(Camera *);
-
     bool outList_empty(); 
-
     bool allList_empty();
-
+    
     RayStreamList  inlist_comm;  
     RayStreamList * outlist_comm;
-    
     RayStreamList inlist_render;  
     //RayStreamList * outlist_render;
-
     std::vector<RetiredRays*> retiredRays; 
     std::mutex retired_mutex;
     std::condition_variable retired_cond_full; 
@@ -80,52 +38,6 @@ bool AsyncNode::outList_empty() {
         if(!outlist_comm[i].empty() && !ps->is_local_chunk(i)) 
             return false;
     return true;//retiredRays.empty();
-}
-
-void swap_array(float *rays, int k, int j, int width) {
-    int *tmp = new int[width];
-    memcpy(tmp, &rays[width * k], width * sizeof(float));
-    memcpy(&rays[width * k], &rays[width * j], width * sizeof(float));
-    memcpy(&rays[width * j], tmp, width * sizeof(float));
-    delete[] tmp; 
-}
-    
-void sort_ray_array(float* rays, int size, int chunk_size, bool primary){
-    int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
-    std::vector<int> end;
-    std::vector<int> begin;
-
-    for(int i = 0; i < chunk_size; i++) { 
-        begin.emplace_back(0);
-        end.emplace_back(0);
-    }
-    int * iptr = (int*) rays;
-    for(int i = 0; i < size; i++) { 
-        int chunk = iptr[i * width + 9];
-        end[chunk]++;
-    }
-    
-    int n = 0;
-    for(int i = 0; i < chunk_size; i++) { 
-        begin[i] = n;
-        n += end[i];
-        end[i] = n;
-    }
-
-    for(int i = 0; i < chunk_size; i++) {
-        int st = begin[i];
-        int ed = end[i];
-        int j = st;
-        while ( j < ed) {
-            int cid = iptr[j * width + 9]; 
-            if (cid != i) {
-                int k = begin[cid]++;
-                swap_array(rays, k, j, width);                
-            } else {
-                j++;
-            }
-        }
-    }
 }
 
     
@@ -215,6 +127,7 @@ void AsyncNode::send_message() {
                 comm->os<<"mthread send status\n";
                 wait_respond = true;
             }
+            //return;
         } else if (outList_empty()) {
             statistics.start("run => message_thread => send_message => switch_chunk");
             ///load new chunk
@@ -222,12 +135,17 @@ void AsyncNode::send_message() {
             
             int current_chunk = ps->get_current_chunk();
             copy_to_inlist(current_chunk);
+                
             inlist_comm.cond_full.notify_all();
             inlist_render.cond_full.notify_all();
+            
+            statistics.end("run => message_thread => send_message => switch_chunk");
+           // return;
         } else {
             //outlist need to send
         }
     }
+    
     int cId = get_sent_list();
     do {
         if(cId >= 0) {
@@ -251,7 +169,11 @@ void AsyncNode::send_message() {
 
 void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
 
+    statistics.start("run => wthread => thread_save_outgoing");
     RetiredRays *retired_rays = new RetiredRays(rays, size, primary);
+    statistics.end("run => wthread => thread_save_outgoing");
+
+    statistics.start("run => wthread => lock_write_outgoing");
     std::lock_guard <std::mutex> thread_lock(retired_mutex); 
     
     scheduler->pass_record->write_send(rays, size, primary, scheduler->chunk_manager->local_chunks.current); 
@@ -259,66 +181,9 @@ void AsyncNode::save_outgoing_buffer(float *rays, size_t size, bool primary) {
     retiredRays.emplace_back(retired_rays);
 
     if(retiredRays.size() > 10)
-        clear_retired_rays();
-}
+        RetiredRays::clear_retired_rays(retiredRays, outlist_comm, chunk_size, comm->get_rank());
 
-void AsyncNode::clear_retired_rays() {
-    statistics.start("run => message_thread => clear_retired => get mutex");
-    compact_retired_rays();       
-    std::unique_lock <std::mutex> lock(outlist_comm[0].mutex); 
-    while(!retiredRays.empty()) {
-        RetiredRays* rays = retiredRays.back();
-        comm->os<<"retired ray size "<<rays->size<<"\n"; 
-        retiredRays.pop_back();
-        statistics.start("run => message_thread => clear_retired => read_from_device");
-        RayStreamList::read_from_device_buffer(outlist_comm, rays->data, rays->size, rays->primary, chunk_size, comm->get_rank());
-        statistics.end("run => message_thread => clear_retired => read_from_device");
-        delete rays;
-    }
-}
-
-void AsyncNode::compact_retired_rays() {
-
-    int primary_size = 0;    
-    int secondary_size = 0;    
-    for(int i = 0; i < retiredRays.size(); i++) {
-        if(retiredRays[i]->primary) 
-            primary_size += retiredRays[i]->size;
-        else
-            secondary_size += retiredRays[i]->size;
-    }
-    RetiredRays* retired_primary = new RetiredRays(primary_size, true);
-    RetiredRays* retired_secondary = new RetiredRays(secondary_size, false);
-    
-    float *primary_ptr = retired_primary->data;
-    float *secondary_ptr = retired_secondary->data;
-    for(int i = 0; i < retiredRays.size(); i++) {
-        if(retiredRays[i]->primary) { 
-            int copy_size = retiredRays[i]->size * PRIMARY_WIDTH;
-            memcpy(primary_ptr, retiredRays[i]->data, copy_size * sizeof(float));
-            primary_ptr += copy_size;
-        } else {
-            int copy_size = retiredRays[i]->size * SECONDARY_WIDTH;
-            memcpy(secondary_ptr, retiredRays[i]->data, copy_size * sizeof(float));
-            secondary_ptr += copy_size;
-        }
-    }
-
-    while(!retiredRays.empty()) {
-        RetiredRays* rays = retiredRays.back();
-        retiredRays.pop_back();
-        delete rays;
-    }
-
-    sort_ray_array(retired_primary->data, primary_size, chunk_size, true);
-    sort_ray_array(retired_secondary->data, secondary_size, chunk_size, false);
-
-    retiredRays.emplace_back(retired_primary);
-    retiredRays.emplace_back(retired_secondary);
-
-    //clear retired rays
-    //copy priamry and secondary to retired ryas
-
+    statistics.end("run => wthread => lock_write_outgoing");
 }
 
 int AsyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
@@ -355,6 +220,8 @@ int AsyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
     printf("copy primary size %d\n", copy_size);
     memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
   
+    //scheduler->chunk_manager->local_chunks.recv_rays(copy_size);
+
     scheduler->pass_record->write_recv(copy_size, scheduler->chunk_manager->local_chunks.current);
 
     delete rays_stream;
@@ -392,7 +259,9 @@ void AsyncNode::message_thread(void* tmp) {
 
         statistics.end("run => message_thread => inlist not empty");
         wk->loop_check(3);
-        usleep(500);
+        statistics.start("run => message_thread => sleep");
+        usleep(600);
+        statistics.end("run => message_thread => sleep");
 
         if(ps->Exit()) break;
         
@@ -421,7 +290,7 @@ void AsyncNode::message_thread(void* tmp) {
 void AsyncNode::run(Camera *cam) {
     
     ps->reset();
-    scheduler->preprocess(cam, comm->get_size(), SIMPLE_TRACE, false);
+    scheduler->preprocess(cam, comm->get_size(), false);
     
     comm->os <<" start run message thread \n";
 
@@ -429,6 +298,7 @@ void AsyncNode::run(Camera *cam) {
     int iter = 0;
   
     std::thread mthread(message_thread, this);
+        
     do {
         //load new chunk;
         int current_chunk = ps->get_current_chunk();
@@ -440,11 +310,11 @@ void AsyncNode::run(Camera *cam) {
 
         comm->os<<"rthread start  " << current_chunk << "\n";
         if(iter != 0) {
+            statistics.start("run => wthread => wait ");
             std::unique_lock <std::mutex> inlock(inlist_comm.mutex); 
             
-            if(!retiredRays.empty()) {
-                clear_retired_rays();
-            }
+            if(!retiredRays.empty()) 
+                RetiredRays::clear_retired_rays(retiredRays, outlist_comm, chunk_size, comm->get_rank());
             
             if(inlist_comm.empty()) {
                 ps->set_proc_idle();
@@ -453,6 +323,7 @@ void AsyncNode::run(Camera *cam) {
                     inlist_comm.cond_full.wait(inlock);
                 }
                 if(ps->Exit()) {
+                    statistics.end("run => wthread => wait ");
                     break;
                 }
             }
@@ -460,6 +331,7 @@ void AsyncNode::run(Camera *cam) {
             inlist_comm.empty_notify(); //tell mthread inlist size changed 
             inlist_render.empty_notify(); //tell mthread inlist size changed 
             ps->set_proc_busy(comm->get_rank());
+            statistics.end("run => wthread => wait ");
         }
         statistics.start("run => wthread => render");
         launch_rodent_render(deviceNum, iter==0);
@@ -468,27 +340,80 @@ void AsyncNode::run(Camera *cam) {
         iter++;
     } while(!ps->Exit());
     comm->os<<" render thread times "<<iter<<"\n";
-    mthread.join();
-    if(SIMPLE_TRACE /* && cam->iter > 1*/)
+    mthread.join();        
+    if(SIMPLE_TRACE  && cam->iter == 0)
         postprocess(cam->iter);
     return;
+}
+
+int median(int a, int b, int c){
+    if(a > b) {
+        if(b > c) return b;
+        else if(a > c)  return c;
+        else return a;
+    } else {
+        if(b < c) return b;
+        else if(a > c)  return c;
+        else return a;
+    }
+}
+
+int average(int a, int b, int c) {
+    return (a + b + c) / 3; 
+}
+
+void AsyncNode::process_chunk_hit(int* chunk_hit, int size) {
+    int res = CHUNK_HIT_RES;
+    int all_face_size = res * res * 6;
+    int face_size = res * res;
+
+    for(int i = 0; i < size; i++) {
+        int lu = chunk_hit[i];
+        //int lu = reduce_buffer[all_face_size * i + face_size * j + (res - 1 - v) * res + u];
+        
+        int gradient = 0;
+        int res = 0;
+        int lu_pre = (lu >> 28) & 0xF;
+        int lu_cur = lu & 0xF;
+        int lu_next;
+        for(int k = 0; k < 8; k++) {
+            int bit_next = (k == 7 ? 1 : k + 1) * 4;
+            lu_next = (lu >> bit_next) & 0xF;
+            
+           // if(lu_cur >= 13) {
+           //     res += lu_cur << (k * 4);
+           // } else {
+           //     
+           //     gradient = std::abs(lu_next - lu_cur) + std::abs(lu_pre - lu_cur);
+           //     //if(lu_next != 0 && lu_cur != 0)
+           //     //    gradient += std::abs(lu_next - lu_cur);
+           //     if(gradient > 30)   
+           //         res += lu_cur << (k * 4);
+           // }
+           // res += ((lu_next + lu_cur + lu_pre) / 3) << (k*4);
+            res += average(lu_next, lu_cur, lu_pre) << (k*4);
+            lu_pre = lu_cur;
+            lu_cur = lu_next;
+        }
+        // if(gradient < 100)
+        //     chunk_hit[all_face_size * i + face_size * j + u * res + v] = 0;
+        chunk_hit[i] = res;
+    }
 }
 
 void AsyncNode::postprocess(int iter) {
     int * chunk_hit = rodent_get_chunk_hit();
     int size = CHUNK_HIT_RES * CHUNK_HIT_RES * 6 * ps->get_chunk_size();
-    int *reduce_buffer = new int[size];
     printf("start reduce %d\n", comm->get_rank());
     {
         statistics.start("run => light field => bcast ");
-    //    comm->update_chunk_hit(chunk_hit, reduce_buffer, size);
-        MPI_Reduce(chunk_hit, reduce_buffer, size, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD); 
-        MPI_Bcast(reduce_buffer, size, MPI_INT, 0, MPI_COMM_WORLD);
+        comm->update_chunk_hit(chunk_hit, size);
         statistics.end("run => light field => bcast ");
     }
     
     //updata render light field
-    rodent_update_render_chunk_hit(reduce_buffer, size);
+    process_chunk_hit(chunk_hit, size); 
+    rodent_update_render_chunk_hit(chunk_hit, size);
     //reduce ctib 存在了reduce 里
     statistics.start("run => light field => save img  ");
     if(comm->get_rank() == 0 && VIS_CHUNK_HIT) { 
@@ -498,6 +423,5 @@ void AsyncNode::postprocess(int iter) {
     statistics.end("run => light field => save img  ");
     
     //pass_record get chunk speed
-    scheduler->set_load_chunk_hit(); 
-    delete[] reduce_buffer;
+    //scheduler->set_load_chunk_hit(); 
 }

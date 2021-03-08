@@ -24,7 +24,7 @@ struct RaysStream {
         :logic_capacity(lcap), store_capacity(scap), width(width) 
     {
         if(copy_size > logic_capacity)
-            error("RaysStream copy size  > logic_capacity \n", copy_size, " ", logic_capacity);
+            error("RaysStream copy size  > logic_capacity ", copy_size, " ", logic_capacity);
 
         data = new float[store_capacity * width];
         if(stream) {
@@ -319,9 +319,7 @@ void RayStreamList::read_from_device_buffer(RayStreamList * outList, float *out_
                     writeList[tmp] = outList[tmp].get_free_stream(primary);
                 }
                 int left = std::min(num, writeList[tmp]->logic_capacity - writeList[tmp]->size);
-                printf("before fill left %d st %d  num %d chk %d rank %d \n", left, st,  num, chunk, rank);
                 writeList[tmp]->fill_array(out_buffer, st, left, rank);
-                printf("after fill left %d st %d  num %d rank %d \n", left, st,  num, rank);
                 
                 st += left;
                 num -= left;

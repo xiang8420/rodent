@@ -297,7 +297,7 @@ struct Interface {
        
         int chunk_size = dfw_chunk_size();
         host_primary_num = anydsl::Array<int32_t>(128);
-        printf("light field size %d\n", chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2);
+        printf("light field size %d\n", chunk_hit_res * chunk_hit_res * 6 * chunk_size);
         
         int thread_num = dfw_thread_num();
         cpu_record_chunk_hit = new anydsl::Array<int32_t>[thread_num];
@@ -306,11 +306,12 @@ struct Interface {
 
         int out_size = dfw_out_stream_capacity(); 
         int out_capacity = (out_size & ~((1 << 5) - 1)) + 32; // round to 32
-        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * chunk_size * 2;
+        int chunk_hit_size = chunk_hit_res * chunk_hit_res * 6 * chunk_size;
         int pass_record_size = chunk_size * (chunk_size + 3); // chunk_size * (send size of dst chunk, recv and no_hit)
 
         for(int i = 0; i < thread_num; i++) {
             cpu_record_chunk_hit[i] = anydsl::Array<int32_t>(chunk_hit_size);
+            std::fill(cpu_record_chunk_hit[i].begin(), cpu_record_chunk_hit[i].end(), 0);
             cpu_primary_outgoing[i] = anydsl::Array<float>(primary_width * out_capacity);
             cpu_secondary_outgoing[i] = anydsl::Array<float>(secondary_width * out_capacity);
         }
@@ -323,7 +324,7 @@ struct Interface {
         host_pass_record = anydsl::Array<int32_t>(pass_record_size);
         std::fill(host_pass_record.begin(), host_pass_record.end(), 0);
 
-        os = std::ofstream("mem_check");
+        os = std::ofstream("interface.log");
     }
 
     template <typename T>
@@ -917,57 +918,39 @@ int32_t rodent_chunk_hit_resolution() {
     return CHUNK_HIT_RES;
 }
 
-inline int get_ctrb(const int &a, const int &b) {
-    if(a > 1 || b > 1) return a+b > 255 ? 255 : a+b;
-    if(a == 0 && b == 0) return 0;
-    return 1;
-}
-
-int ctrb_cmp(const int &a, const int &b) {
+inline int ctrb_cmp(const int &a, const int &b) {
     int res = 0;
-    res += get_ctrb((a & 0xFF), (b & 0xFF));
-    res += (get_ctrb(((a >> 8) & 0xFF), ((b >> 8) & 0xFF)) << 8);
-    res += (get_ctrb(((a >> 16) & 0xFF), ((b >> 16) & 0xFF)) << 16); 
-    res += (get_ctrb(((a >> 24) & 0xFF), ((b >> 24) & 0xFF)) << 24); 
+    for(int i = 0; i < 8; i++) {
+        int bit = i * 4;
+        //res += (std::min(((a >> bit) & 0xF), ((b >> bit) & 0xF)) << bit);  
+        res += (std::max(((a >> bit) & 0xF), ((b >> bit) & 0xF)) << bit);  
+        //if((a >> bit) & 0xF == 0 )
+        //    res += (((b >> bit) & 0xF) << bit);  
+    }
     return res;
 }
 
 void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
+    interface->os<<"chunk hit from thread "<<tid<<"\n";
     if(dev == -1) {
         std::lock_guard <std::mutex> lock(interface->mtx);
         int* array = interface->cpu_record_chunk_hit[tid].data();
-        int* host = interface->host_record_chunk_hit.data();
-        int size = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
+        int* host  = interface->host_record_chunk_hit.data();
+        int  size  = chunk_hit_res * chunk_hit_res * 6 * dfw_chunk_size();
         if(interface->first_write) {
             memcpy(host, array, size * sizeof(int));
             interface->first_write = false;
             return;
         }
-       // for (int i = 0; i < size; i++){
-       //     host[i] = ctrb_cmp(host[i], array[i]);
-       // }
-       // int ed = size * 2;
-       // int chk_size = dfw_chunk_size();
-       // for (int i = size; i < ed; i++){
-       //     host[i] = its_cmp(host[i], array[i]);
-
-         //   int its = ((array[i] >> 8) & 0xFF ) - 1;
-         //   if(its >= 254 || its == -1) continue; 
-         //   else { 
-         //       if(its < 0|| its > chk_size - 1) {
-         //           printf("interface error its %d\n", its);
-         //       } 
-         //   }
-        //}
-       //     host[i] = its_cmp(host[i], array[i]);
-       //     int its = host[i] & 0xFF;
-       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-       //     its = (host[i] >> 8) & 0xFF;
-       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-       //     its = (host[i] >> 16) & 0xFF;
-       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
-       //     its = (host[i] >> 24) & 0xFF;
-       //     if(its < 0|| its > chk_size && its != 255) printf("error0 its %d %d\n", its, array[i]&0xFF);
+        for (int i = 0; i < size; i++){
+            //interface->os<<host[i]<<" "<<array[i]<<" ";
+            if(array[i] == 0) continue;
+            if(host[i] == 0)
+                host[i] = array[i];
+            else 
+                host[i] = ctrb_cmp(host[i], array[i]);
+            //interface->os<<host[i]<<"\n";
+        }
     } else {
         error("only cpu");
     }
@@ -976,9 +959,11 @@ void rodent_save_chunk_hit(int32_t dev, int32_t tid) {
 int* rodent_get_chunk_hit() {
     //only save cpu data!!
     int thread_num = dfw_thread_num();
-    for(int i = 0; i < thread_num; i++) 
-        rodent_save_chunk_hit(-1, 0); 
-    interface->host_record_chunk_hit.data();
+    for(int i = 0; i < thread_num; i++) { 
+        rodent_save_chunk_hit(-1, i); 
+        std::fill(interface->cpu_record_chunk_hit[i].begin(), interface->cpu_record_chunk_hit[i].end(), 0);
+    }
+    return interface->host_record_chunk_hit.data();
 }
 
 void rodent_worker_primary_send(int32_t dev, int32_t tid, int buffer_size) {
@@ -1044,6 +1029,10 @@ void rodent_memory_check(int32_t tag) {
 void rodent_update_render_chunk_hit(int32_t* new_chunk_hit, int32_t size) {
     memcpy(interface->host_render_chunk_hit.data(), new_chunk_hit, size * sizeof(int));
 }
+
+void rodent_unload_chunk_data(int32_t chunk, int32_t dev) {   
+    interface->unload_chunk_data(chunk, dev);
+} 
 
 int* rodent_get_render_chunk_hit_data() {
     interface->host_render_chunk_hit.data();

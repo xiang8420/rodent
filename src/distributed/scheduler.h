@@ -56,10 +56,20 @@ static void save_image_ctrb(int* reduce_buffer, int chunk_size, int iter) {
     int face_size = res * res;
     int inv_spp = 1;//5 / spp;
 
+    rgb col1_1(0, 100, 25); 
+    rgb col1_2(20, 80, 25); 
+    rgb col1_3(40, 60, 25); 
+    rgb col1_4(60, 40, 25); 
+    rgb col1_5(80, 20, 25); 
+    rgb col1_6(100, 0, 25); 
+
     rgb col1(0, 125, 125); 
     rgb col2(255, 0, 0); 
     rgb col3(0, 0, 0); 
-
+    rgb col4(8, 8, 8); 
+    //rgb col4(15, 15, 15); 
+    int test = 0x1 << 4;
+    printf("test %d \n", test );
     for(int i = 0; i < chunk_size; i++) {
         int h_st = res * i; 
         for(int j = 0; j < 6; j++) {
@@ -70,25 +80,27 @@ static void save_image_ctrb(int* reduce_buffer, int chunk_size, int iter) {
                     int pv = h_st + v;
                     
                     int lu = reduce_buffer[all_face_size * i + face_size * j + (res - 1 - v) * res + u];
-                    int lu_q0 = lu & 0xFF;
-                    int lu_q1 = lu >> 8  & 0xFF;
-                    int lu_q2 = lu >> 16 & 0xFF;
-                    int lu_q3 = lu >> 24 & 0xFF;
+                    int max_lu = 0;
+                    int gradient = 0;
+                    int last = 0;
+                    for(int k = 0; k < 8; k++) {
+                        //if(k < 2) continue;
+                        int bit_cur = k * 4;
+                        int lu_cur = (lu >> bit_cur) & 0xF;
+                        int lu_dir = lu_cur;//median(lu_pre, lu_cur, lu_next); 
 
-                    int lu_q = lu_q0;// + lu_q1 + lu_q2 + lu_q3; 
-                    rgb *col; 
-                    if(lu_q == 1) col = &col1;
-                    else if(lu_q > 1) col = &col2;
-                    else col = &col3;
+                        max_lu = std::max(max_lu, lu_dir);
+                        gradient += std::abs(lu_dir - last);
+                        last = lu_dir > 0 ? lu_dir : last;
+                    }
+                    //int t = gradient;//(gradient + max_lu) / 2;
+                    int t = max_lu;
+                    rgb *col = &col4;
 
-                    img.pixels[4 * (pv * width + pu) + 0] = col->x;
-                    img.pixels[4 * (pv * width + pu) + 1] = col->y;
-                    img.pixels[4 * (pv * width + pu) + 2] = col->z;
+                    img.pixels[4 * (pv * width + pu) + 0] = col->x * t;
+                    img.pixels[4 * (pv * width + pu) + 1] = col->y * t;
+                    img.pixels[4 * (pv * width + pu) + 2] = col->z * t;
                     img.pixels[4 * (pv * width + pu) + 3] = 255;
-                //    img.pixels[4 * (pv * width + pu) + 0] = lu_q; // (lu_q >> 4) * inv_spp; 
-                //    img.pixels[4 * (pv * width + pu) + 1] = lu_q; // ((lu_q >> 2) & 0x3) * inv_spp;
-                //    img.pixels[4 * (pv * width + pu) + 2] = lu_q; // (lu_q & 0x3) * inv_spp;
-                //    img.pixels[4 * (pv * width + pu) + 3] = 255;
                     if(v == res - 1 || u == res - 1) {
                         img.pixels[4 * (pv * width + pu) + 0] = 255;
                         img.pixels[4 * (pv * width + pu) + 1] = 0;
@@ -239,9 +251,9 @@ struct PassRecord {
 int64_t get_chunk_storage_size(int chunk) {
     struct stat statbuf;
     std::string path = "data/"; 
-                path += ((chunk > 9) ? "0" : "00") 
-                     + std::to_string(chunk) + "/"
-                     + "bvh_avx.bin";
+                if (chunk < 100) path += "0";
+                if (chunk < 10) path += "0";
+                path += std::to_string(chunk) + "/" + "bvh_avx.bin";
                 std::cout<<path<<"\n";
     long size = 0;  
     if(stat(path.data(),&statbuf)==0)
@@ -267,15 +279,14 @@ struct LocalChunks {
         Chunk(int id, float weight, int64_t storge, int64_t load_time) 
             :id(id), weight(weight), storge(storge), load_time(load_time) 
         {
-            printf("chunk %d load_time %ld\n", id, load_time);
+            printf("chunk %d load_time %ld storge %ld\n", id, load_time, storge);
         }
     };
     
+    int max_cache_num; 
     std::vector<Chunk> chunks;
     long load_speed;  //b / ms
     float render_speed; //ray msgs / ms
-    int64_t max_storge;
-    int max_chk_num;
     std::queue<int> history;
     
     bool first_frame;
@@ -290,9 +301,8 @@ struct LocalChunks {
         load_speed = 0;
         render_speed = 0;
         first_frame = true;
-        max_chk_num = 3;
         frame_schedule = false;
-        //max_storage = ;
+        max_cache_num = 1;
     }
 
     void reset(int simple_chunk) {
@@ -316,10 +326,10 @@ struct LocalChunks {
         }
     }
 
-    void insert(int chk, float weight, int64_t chunk_size) { 
+    void insert(int chk, float weight, int64_t chunk_data_size) { 
         //get chunk storage size
         if(load_speed != 0) 
-            chunks.push_back(Chunk(chk, weight, chunk_size, chunk_size / load_speed)); 
+            chunks.push_back(Chunk(chk, weight, chunk_data_size, chunk_data_size / load_speed)); 
         else
             chunks.push_back(Chunk(chk, weight)); 
     }
@@ -344,12 +354,6 @@ struct LocalChunks {
         chunks[i].other_send_left -= size;
     }
 
-    void record_history() {
-        if(history.size() >= chunks.size()) 
-            history.pop();
-        history.push(current); 
-    }
-    
     float max_load_time() {
         float max = 0;
         for(auto& chk : chunks)
@@ -385,11 +389,11 @@ struct LocalChunks {
                  //   printf("chunk ray size %d, next size %d recv_rate %f, other left %d  "
                  //           , outlist[chk.id].ray_size(), outlist[cur_chk].ray_size(), chk.recv_rate[cur_chk], chk.recv_rate[cur_chk], chunks[i].other_send_left);
                  //   printf(" chunk %d get priority %f\n", chk.id, priority);
+                    chk.priority *= chk.weight;
                 } else {
                     int cur_size = outlist[chk.id].ray_size();
                     chk.priority = cur_size;
                 }
-                chk.priority *= chk.weight;
             }
             if(chk.priority > max) {
                 next_chk = chk.id;
@@ -435,14 +439,14 @@ struct LocalChunks {
         if(next == -1) { 
             printf("before schedule1  c %d n %d\n", current, next);
             current = get_max_priority_chunk(current, outlist); 
-            next = get_max_priority_chunk(current, outlist); 
+            next = PRELOAD ? get_max_priority_chunk(current, outlist) : -1;
             printf("schedule1  c %d n %d\n", current, next);
         } else {
-            if(outlist[next].size() > 0) 
+            if(outlist[next].size() > 0)
                 current = next;
             else 
                 current = get_max_priority_chunk(current, outlist);
-            next = get_max_priority_chunk(current, outlist); 
+            next = PRELOAD ? get_max_priority_chunk(current, outlist) : -1;
             printf("schedule2 c %d n %d\n", current, next);
         }
         
@@ -455,17 +459,17 @@ struct LocalChunks {
         new_loaded = true;
         if(!first_frame)
             printf("select current %d rays %d next %d rays %d \n", current, outlist[current].size(), next, outlist[next].size());
-        
+
         int loaded_num;
         int64_t loaded_size;
         loaded_chunk_size(loaded_num, loaded_size);
         printf("loaded num %d\n", loaded_num);
-        while(/*loaded_size > max_storge ||*/ loaded_num > max_chk_num) {
+        while(loaded_num > max_cache_num) {
             int local_idx = min_priority_loaded();
             if(local_idx >= 0) {
                 int chk_id = chunks[local_idx].id; 
                 //for(int i = 0; i < devNum; i++) 
-                //rodent_unload_chunk_data(chk_id, 0); 
+                rodent_unload_chunk_data(chk_id, 0); 
                 printf("unload chunk %d loaded chunk num %d\n", chk_id, loaded_num);
                 chunks[local_idx].loaded = false;
             } else {
@@ -475,23 +479,59 @@ struct LocalChunks {
         }
     }
 
-    void init() {
-        current = chunks[0].id;
-        next    = chunks[1].id;
-        chunks[0].loaded = true;
-        chunks[1].loaded = true;
+    void FIFO_clear() {
+        int queue_size = history.size();
+        printf("clear history :");
+        for(int i = 0; i < queue_size; i++) {
+            printf("%d ", history.front()); 
+            rodent_unload_chunk_data(history.front(), 0); 
+            history.pop();
+        }
+        printf("\n");
+    }
 
-        printf("init current %d weight %f  next %d weight %f\n "
-                , current, chunks[0].weight, next, chunks[1].weight);
-        record_history(); 
+    void FIFO() {
+        int queue_size = history.size();
+        printf("fifo history size %d :", history.size());
+        for(int i = 0; i < queue_size; i++) {
+            printf("%d ", history.front()); 
+            if(history.front() == current) 
+                return;
+            history.push(history.front());
+            history.pop();
+        }
+        
+        if(queue_size > max_cache_num) {
+            int unload_chunk = history.front();
+            history.pop(); 
+            
+            rodent_unload_chunk_data(unload_chunk, 0); 
+            printf("unload %d ", unload_chunk);
+        }
+        history.push(current);
+        printf("\n");
+    }
+
+    void init(bool sync) {
+        current = chunks[0].id;
+        chunks[0].loaded = true;
+        if(chunks.size() > 1) {
+            next    = SIMPLE_TRACE ? chunks[1].id : -1;
+            chunks[1].loaded = true;
+        }
         new_loaded = true;
+        if(sync) 
+            FIFO();
     }
     
     bool new_chunk() { return next != current && next != -1; }
     void clear() {
-        //for(auto& chunk: chunks)
-            //rodent_unload_chunk_data(chunk.id, 0); 
-        //chunks.clear(); 
+        for(auto& chunk: chunks) {
+            printf("clear chunk %d %d\n", chunks.size(), chunk.id);
+            //for(int i = 0; i < devNum; i++) 
+            rodent_unload_chunk_data(chunk.id, 0); 
+        }
+        chunks.clear(); 
     }
 };
 
@@ -521,10 +561,15 @@ struct ChunkManager {
     int64_t chunk_size;
     std::vector<int> scheduler_history; //current, next
 
-    ChunkManager(int size) : chunk_size(size) {
+    ChunkManager(int size, int proc_size) : chunk_size(size) {
         chunk_list = new ChunkProcs[chunk_size + 1]; //+1 for simple mesh
         for(int i = 0; i < chunk_size; i++)
             chunk_list[i].storage = get_chunk_storage_size(i);
+        //cache n% assigned chunks 
+        local_chunks.max_cache_num = CACHE_RATE * chunk_size / proc_size;
+        if(SIMPLE_TRACE) 
+            local_chunks.max_cache_num++;
+        printf("cache size = %d\n", local_chunks.max_cache_num);
     }
     ~ChunkManager() { }
 
@@ -537,10 +582,9 @@ struct ChunkManager {
     bool is_local_chunk(int c) { return local_chunks.find(c) >= 0; }
 
     int get_proc(int c) {
-        if(c >= chunk_size) { 
-            warn(c, " chunk not loaded");
+        if(c >= chunk_size || chunk_list[c].size() == 0) 
             return -1;
-        }
+
         printf("before get chunk %d\n ", chunk_list[c].proc_list.size());
         printf("get chunk %d  proc %d \n", c, chunk_list[c].get_proc());
         return chunk_list[c].get_proc();
@@ -551,16 +595,8 @@ struct ChunkManager {
         local_chunks.render_speed = speed; 
     }
 
-    bool update_chunk(int* schedule, int proc_rank) { error("function update chunk not implement"); }
-
-    bool update_chunk(int candidate_proc, int candidate_chunk, int proc_rank) {
-        error("check function update chunk first.");
-//        chunk_list[candidate_chunk].set_proc(candidate_proc);
-//        if(candidate_proc == proc_rank) {
-//            local_chunks.insert(candidate_chunk, 1/*priority*/);
-//            local_chunks.set_new_loaded(true);
-//        }
-//        return local_chunks.get_new_loaded();
+    bool update_chunk(int chunk, int proc) {
+        chunk_list[chunk].set_proc(proc);
     }
 
     void update_local_chunks(int proc_rank) {
@@ -568,13 +604,16 @@ struct ChunkManager {
         // set proc load speed
         for(int i = 0; i < chunk_size + 1; i++) {
             ChunkProcs &chk = chunk_list[i];
-            for(auto& proc : chk.proc_list)
+            for(auto& proc : chk.proc_list) {
+                printf("chunk manager insert %d %d\n", i, proc);
                 if(proc == proc_rank) {
                     local_chunks.insert(i, weight, chunk_list[i].storage);
                     weight *= 0.8;
                 }
+            }
         }
-        
+        if(local_chunks.size() == 0)            
+            local_chunks.insert(proc_rank, 1, chunk_list[proc_rank].storage);
     }
 
     void insert(int chk, int proc) { 
@@ -607,7 +646,6 @@ struct ChunkManager {
         scheduler_history.clear();
     }
 
-    void get_start_chunk() {local_chunks.init(); printf("init %d %d\n", local_chunks.current, local_chunks.next);}
     int get_next_chunk() {return local_chunks.next;}
     int get_current_chunk() {return local_chunks.current;}
     bool new_chunk(){return local_chunks.new_chunk();}
@@ -620,13 +658,13 @@ public:
     ImageBlock project_cube_to_image(Camera *camera, BBox box, int chunk, bool Record, ImageBlock image);
 
     void get_neighbor(int chk_id); 
-    void get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image); 
-    void fill_local_chunks(int, bool, bool);
-    void data_distributed(bool simple_mesh, bool sync);
+    void get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image, bool sync); 
+    void fill_local_chunks(int, bool);
+    void data_distributed(bool sync);
     void allcopy(); 
     int  get_most_unloaded_chunk(int *block, int chunk_size);
     
-    void preprocess(Camera *, int, bool, bool);    
+    void preprocess(Camera *, int, bool);    
 
     int* get_render_block() { return &render_block[0]; }
     void set_render_block(int i) { render_block = blockList[i]; }
@@ -670,7 +708,7 @@ Scheduler::Scheduler( int width, int height, int spp, int prank, int psize)
     int chunk_size = chunks.size;
     load_chunk_hit = false;
     int all_chunk_size = SIMPLE_TRACE ? chunk_size + 1 : chunk_size;
-    chunk_manager = new ChunkManager(all_chunk_size);
+    chunk_manager = new ChunkManager(all_chunk_size, proc_size);
     pass_record = new PassRecord(all_chunk_size);
 }
 
@@ -684,7 +722,7 @@ int Scheduler::get_most_unloaded_chunk(int *block, int chunk_size) {
     for(int i = 0; i< chunk_size; i++)
         chunks[i] = 0;
     for(int y = block[1]; y < block[3]; y++) {
-        for(int x = block[0]; x < block[2]; x ++) {
+        for(int x = block[0]; x < block[2]; x++) {
             if(domain[y * width + x] >= 0)
                 chunks[domain[y * width + x]] ++;
         }
@@ -692,11 +730,9 @@ int Scheduler::get_most_unloaded_chunk(int *block, int chunk_size) {
     int max = 0, c = -1;
     int unloaded = -1;
     for(int i = 0; i < chunk_size; i++) {
-        if(!chunk_manager->chunk_list[i].loaded()) {
-            if(chunks[i] > max ) {
-                max = chunks[i];
-                c = i;
-            }
+        if(chunks[i] > max ) {
+            max = chunks[i];
+            c = i;
         }
     }
     return c;
@@ -710,7 +746,10 @@ void Scheduler::allcopy() {
     ImageBlock gblock = project_cube_to_image(camera, BBox(get_bbox()), 0, false, image);
     int split_image = false;
     if(split_image) {
-        splat(block_count, &scale[0], 2);
+        
+        float length[] = { float(gblock.xmax - gblock.xmin)
+                         , float(gblock.ymax - gblock.ymin)} ;
+        splat(block_count, &scale[0], &length[0], 2);
         //global available block 
         int step_width = (gblock.xmax - gblock.xmin) / scale[0];
         int step_height = (gblock.ymax - gblock.ymin) / scale[1];   
@@ -738,7 +777,7 @@ bool load_speed_cmp(const std::pair<int, int64_t> a, const std::pair<int, int64_
     return a.second > b.second;
 }
 
-void Scheduler::preprocess(Camera *cam, int block, bool simple_trace, bool sync) {    
+void Scheduler::preprocess(Camera *cam, int block, bool sync) {    
     chunk_manager->clear_local_chunks();
     
     if(load_chunk_hit)
@@ -750,107 +789,103 @@ void Scheduler::preprocess(Camera *cam, int block, bool simple_trace, bool sync)
     if(chunk_size == 1)
         allcopy();
     else  
-        data_distributed(simple_trace, sync);
+        data_distributed(sync);
     
     printf("generate chunk manager: ");
     LocalChunks &local_chunks = chunk_manager->local_chunks; 
-    if(!sync) {    
+    if(sync || !load_chunk_hit) {
+        chunk_manager->update_local_chunks(proc_rank);
+    } else {
         local_chunks.reset(SIMPLE_TRACE ? chunk_size-1 : chunk_size);
         int64_t load_speed = local_chunks.load_speed;
         //get local chunk scheduler info: other left, proc_recv..
-        if(!load_chunk_hit) {
-            chunk_manager->update_local_chunks(proc_rank);
-        } else {
-            // remap chunk procs by load speed
-            std::vector<int64_t> proc_load_speed(proc_size);
-            MPI_Allgather(&load_speed, 1, MPI_LONG, proc_load_speed.data(), 1, MPI_LONG, MPI_COMM_WORLD);
-            std::vector<std::pair<int, int64_t>> load_speed_map;
-            for(int i = 0; i < proc_size; i ++) 
-                load_speed_map.emplace_back(std::make_pair(i, proc_load_speed[i]));
-            
-            sort(load_speed_map.begin(), load_speed_map.end(), load_speed_cmp);
-            if(proc_rank == 0)
-                for(int i = 0; i < chunk_size + 1; i++) {
-                    printf(" chunk %d old loaded by: ", i);
-                    for(auto& proc: chunk_manager->chunk_list[i].proc_list)
-                        printf("%d ", proc);
-                    printf("\n");
-                }
-            
-            ChunkProcs* old_chunk_list = new ChunkProcs[chunk_size + 1];
-            for(int i = 0; i < chunk_size + 1; i++) {
-                old_chunk_list[i] = chunk_manager->chunk_list[i];
-            }
-            for(int p = 0; p < proc_size; p++) {
-                int old_proc = load_speed_map[p].first;
-                for(int i = 0 ; i < chunk_size + 1; i++) {
-                    ChunkProcs &chk = old_chunk_list[i];
-                    for(int j = 0; j < chk.proc_list.size(); j++) {
-                        if(chk.proc_list[j] == old_proc) 
-                            chunk_manager->chunk_list[i].proc_list[j] = p;
-                    }
-                }
-            }
-            delete[] old_chunk_list;
-            local_chunks.chunks.clear();
-            chunk_manager->update_local_chunks(proc_rank);
+        // remap chunk procs by load speed
+        std::vector<int64_t> proc_load_speed(proc_size);
+        MPI_Allgather(&load_speed, 1, MPI_LONG, proc_load_speed.data(), 1, MPI_LONG, MPI_COMM_WORLD);
+        std::vector<std::pair<int, int64_t>> load_speed_map;
+        for(int i = 0; i < proc_size; i ++) 
+            load_speed_map.emplace_back(std::make_pair(i, proc_load_speed[i]));
 
-            printf("\nlocal chunks: \n");
-            for(int i = 0; i < chunk_size; i++) {
-                chunk_manager->chunk_list[i].recv = pass_record->get_recv(i); //recv size
-            }
-
-            //
-            printf("write local chunk recv rate: ");
-            for(auto& chunk : chunk_manager->local_chunks.chunks) {
-                int cur_chk = chunk.id;
-                printf(" %d : \n", cur_chk);
-                chunk.recv_rate.clear();
-                chunk.recv_rate.resize(chunk_size + 2);
-                chunk.other_send_left = 0;
-                for(int i = 0; i < chunk_size; i++) {
-                    if(i == cur_chk) continue;
-                    printf("| i %d |\n", i);
-                    if(chunk_manager->local_chunks.find(i) < 0) {
-                        chunk.other_send_left += pass_record->get_send(i, cur_chk); //chunk i send to cur_chk
-                        printf("* %d (%d  %d) %f *\n", i, pass_record->get_send(i, cur_chk), chunk_manager->chunk_list[i].recv, chunk.recv_rate[i]);
-                    } else {
-                        if(chunk_manager->chunk_list[i].recv > 0)
-                            chunk.recv_rate[i] = pass_record->get_send(i, cur_chk) / chunk_manager->chunk_list[i].recv;
-                        printf("| %d (%d  %d) %f |\n", i, pass_record->get_send(i, cur_chk), chunk_manager->chunk_list[i].recv, chunk.recv_rate[i]);
-                    }
-                }
-                printf("other send left %d \n", chunk.other_send_left);
-            }
+        sort(load_speed_map.begin(), load_speed_map.end(), load_speed_cmp);
+        if(proc_rank == 0)
             for(int i = 0; i < chunk_size + 1; i++) {
-                printf("chunk %d loaded by: ", i);
+                printf(" chunk %d old loaded by: ", i);
                 for(auto& proc: chunk_manager->chunk_list[i].proc_list)
                     printf("%d ", proc);
                 printf("\n");
             }
-            printf("local chunk  : ");
-            for(auto& chunk : chunk_manager->local_chunks.chunks) {
-                printf(" %d recv rate :", chunk.id);
-                for(int i = 0; i < chunk_size; i++) {
-                    printf(" %f |", chunk.recv_rate[i]);
+
+        ChunkProcs* old_chunk_list = new ChunkProcs[chunk_size + 1];
+        for(int i = 0; i < chunk_size + 1; i++) 
+            old_chunk_list[i] = chunk_manager->chunk_list[i];
+
+        for(int p = 0; p < proc_size; p++) {
+            int old_proc = load_speed_map[p].first;
+            for(int i = 0 ; i < chunk_size + 1; i++) {
+                ChunkProcs &chk = old_chunk_list[i];
+                for(int j = 0; j < chk.proc_list.size(); j++) {
+                    if(chk.proc_list[j] == old_proc) 
+                        chunk_manager->chunk_list[i].proc_list[j] = p;
                 }
-                printf("\n");
+            }
+        }
+        delete[] old_chunk_list;
+        local_chunks.chunks.clear();
+        chunk_manager->update_local_chunks(proc_rank);
+        chunk_manager->local_chunks.chunks.back().weight = 0.01;
+
+        printf("\nlocal chunks: \n");
+        for(int i = 0; i < chunk_size; i++) {
+            chunk_manager->chunk_list[i].recv = pass_record->get_recv(i); //recv size
+        }
+
+        //
+        printf("write local chunk recv rate: ");
+        for(auto& chunk : chunk_manager->local_chunks.chunks) {
+            int cur_chk = chunk.id;
+            printf(" %d : \n", cur_chk);
+            chunk.recv_rate.clear();
+            chunk.recv_rate.resize(chunk_size + 2);
+            chunk.other_send_left = 0;
+            for(int i = 0; i < chunk_size; i++) {
+                if(i == cur_chk) continue;
+                printf("| i %d |\n", i);
+                if(chunk_manager->local_chunks.find(i) < 0) {
+                    chunk.other_send_left += pass_record->get_send(i, cur_chk); //chunk i send to cur_chk
+                    printf("* %d (%d  %d) %f *\n", i, pass_record->get_send(i, cur_chk), chunk_manager->chunk_list[i].recv, chunk.recv_rate[i]);
+                } else {
+                    if(chunk_manager->chunk_list[i].recv > 0)
+                        chunk.recv_rate[i] = pass_record->get_send(i, cur_chk) / chunk_manager->chunk_list[i].recv;
+                    printf("| %d (%d  %d) %f |\n", i, pass_record->get_send(i, cur_chk), chunk_manager->chunk_list[i].recv, chunk.recv_rate[i]);
+                }
+            }
+            printf("other send left %d \n", chunk.other_send_left);
+        }
+        for(int i = 0; i < chunk_size + 1; i++) {
+            printf("chunk %d loaded by: ", i);
+            for(auto& proc: chunk_manager->chunk_list[i].proc_list)
+                printf("%d ", proc);
+            printf("\n");
+        }
+        printf("local chunk  : ");
+        for(auto& chunk : chunk_manager->local_chunks.chunks) {
+            printf(" %d recv rate :", chunk.id);
+            for(int i = 0; i < chunk_size; i++) {
+                printf(" %f |", chunk.recv_rate[i]);
             }
             printf("\n");
         }
-    } else {
-        //初始化 加载出时chunk
+        printf("\n");
     }
 
     pass_record->reset();
-    chunk_manager->get_start_chunk(); 
+    chunk_manager->local_chunks.init(false /*sync*/); 
 }
 
-void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image) {
+void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& image, bool sync) {
     int chunk_size = chunks.size; 
     for(int i = 0; i < width * height; i++)
         domain[i] = -1;
-    splat(proc_size, &scale[0], 2);
     for(int i = 0; i < chunk_size; i++) {
         printf("chunks list %f %f %f max %f %f %f\n", chunks.list[i].min.x, chunks.list[i].min.y, chunks.list[i].min.z
                                                     , chunks.list[i].max.x, chunks.list[i].max.y, chunks.list[i].max.z);
@@ -858,7 +893,11 @@ void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& im
     }
    
     //global available block
-    ImageBlock gblock = project_cube_to_image(camera, chunks.bbox, 0, false, image);
+    ImageBlock gblock = project_cube_to_image(camera, chunks.bbox, -1, false, image);
+    float length[] = { float(gblock.xmax - gblock.xmin)
+                     , float(gblock.ymax - gblock.ymin)} ;
+    splat(proc_size, &scale[0], &length[0], 2);
+    
     int step_width  = (gblock.xmax - gblock.xmin) / scale[0];
     int step_height = (gblock.ymax - gblock.ymin) / scale[1];
 
@@ -877,7 +916,11 @@ void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& im
         if(chunk_size == proc_size) {
             chunk = i;
         } else if(chunk_size > proc_size) {
-            chunk = get_most_unloaded_chunk(&block[0], chunks.size); 
+            if(sync || SIMPLE_TRACE)
+                chunk = get_most_unloaded_chunk(&block[0], chunks.size); 
+            else 
+                chunk = -1;
+            printf("%d most unload chunk %d\n", proc_rank, chunk);
         } else if(chunk_size == 1) {
             chunk = 0;
         } else {
@@ -916,13 +959,13 @@ bool id_greater_mark(const ChunkHitInfo& a, const ChunkHitInfo& b) {
     return a.id < b.id;
 }
 
-void Scheduler::fill_local_chunks(int proc_size, bool sync, bool simple_trace) {
+void Scheduler::fill_local_chunks(int proc_size, bool sync) {
     int chunk_size = chunks.size; 
     if(chunk_manager->all_assigned()) return;
     
     ChunkProcs * chunk_list = chunk_manager->chunk_list;
     if(proc_rank == 0)
-        pass_record->print(1); 
+        pass_record->print(1);
     //load_chunk_hit = false; 
     // put left chunk to proc
     if(!sync && load_chunk_hit) {
@@ -1030,7 +1073,6 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync, bool simple_trace) {
             }
         }
     } else {
-
         // find unloaded chunk 
         if(!sync) {
             int proc = 0;
@@ -1042,7 +1084,7 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync, bool simple_trace) {
                     chunk_manager->insert(i, proc++ % proc_size);
         }
     }
-    if(simple_trace) {
+    if(SIMPLE_TRACE) {
         // Every proc will load simple mesh 
         for(int i = 0; i < proc_size; i++)
             chunk_manager->insert(chunk_size, i);
@@ -1055,14 +1097,16 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync, bool simple_trace) {
     }
 }
 
-void Scheduler::data_distributed(bool simple_mesh, bool sync) {
+void Scheduler::data_distributed(bool sync) {
     ImageBlock image(width, height);
     int chunk_size = chunks.size;
     chunk_manager->reset_chunk_list();
+  
+    get_projected_chunk(proc_rank, proc_size, image, sync);
     
-    get_projected_chunk(proc_rank, proc_size, image);
     //put other not projected chunks to procs 
-    fill_local_chunks(proc_size, sync, simple_mesh);
+    fill_local_chunks(proc_size, sync);
+
     //write_project_result(width, height, domain.data()); 
 }
 
@@ -1070,8 +1114,10 @@ ImageBlock Scheduler::project_cube_to_image(Camera *camera, BBox box, int chunk,
     if(box.is_inside(camera->eye)) {
         int num_pixels = width * height;
         for(int i = 0; i < num_pixels; i++) {
-            domain[i] = chunk;
-            depth[i] = 0;
+            if(chunk >=0) {
+                domain[i] = chunk;
+                depth[i] = 0;
+            }
         }
         return image;
     }
@@ -1106,7 +1152,7 @@ ImageBlock Scheduler::project_cube_to_image(Camera *camera, BBox box, int chunk,
         for(int y = block.ymin; y < block.ymax; y++) {
             for(int x = block.xmin; x < block.xmax; x++) {
                 int id = y * width + x;
-                if(domain[id] == -1 || p_min.z < depth[id]) {
+                if((domain[id] == -1 || p_min.z < depth[id]) && chunk >= 0) {
                     domain[id] = chunk;
                     depth[id] = p_min.z;
                 }

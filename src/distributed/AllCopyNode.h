@@ -81,7 +81,7 @@ void AllCopyNode::message_thread(void* tmp) {
 void AllCopyNode::run(Camera *cam) {
    
     ps->reset();
-    scheduler->preprocess(cam, 1/*block size*/, false, false);
+    scheduler->preprocess(cam, 1/*block size*/, false);
     comm->os <<" start image decomposition  \n";
     //start rendering with origin tile
     //recv camera

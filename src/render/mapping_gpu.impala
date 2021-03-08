@@ -424,7 +424,7 @@ fn @gpu_primary_transfer( primary: PrimaryStream
      
     // if buffer full 
     if size(0) + buffer.size >= buffer.capacity {
-        rodent_worker_primary_send(dev_id, buffer.size);
+        rodent_worker_primary_send(dev_id, 0, buffer.size);
         size(1) = 0;
     }
     size(0) = 0;
@@ -537,7 +537,7 @@ fn @gpu_secondary_transfer( secondary: SecondaryStream
     if size(0) + buffer.size >= buffer.capacity {
 //        print_string("send buffer2 size: ");
 //        print_i32(buffer.size);
-        rodent_worker_secondary_send(dev_id, buffer.size);
+        rodent_worker_secondary_send(dev_id, 0, buffer.size);
         size(1) = 0;
     }
     size(0) = 0;

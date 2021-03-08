@@ -24,8 +24,8 @@ extern "C" {
     fn rodent_cpu_thread_num() -> i32;
     fn rodent_chunk_hit_resolution() -> i32;
 
-    fn rodent_worker_primary_send(i32, i32) -> ();    
-    fn rodent_worker_secondary_send(i32, i32) -> ();    
+    fn rodent_worker_primary_send(i32, i32, i32) -> ();    
+    fn rodent_worker_secondary_send(i32, i32, i32) -> ();    
     fn rodent_rays_export(i32, i32, i32, bool, bool, i32) -> i32; 
     
     fn rodent_first_primary_check(i32, i32, i32, bool) -> ();

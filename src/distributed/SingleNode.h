@@ -25,7 +25,7 @@ SingleNode::~SingleNode() {
 void SingleNode::run(Camera *cam) {
     
     ps->reset();
-    scheduler->preprocess(cam, 1/*block size*/, false, false);
+    scheduler->preprocess(cam, 1/*block size*/, false);
     comm->os <<" start run message thread \n";
     int deviceNum = ps->get_dev_num();
     int iter = 0; 

@@ -238,8 +238,8 @@ static bool parse_obj(std::istream& stream, obj::File& file, obj::MaterialLib& m
             ptr = strip_text(ptr);
 
             const std::string mtl_name(base, ptr);
+            std::cout<<"cur usemtl "<<mtl_name<<" "<<cur_mtl<<"\n";
             cur_mtl = mtl_lib.ids.find(mtl_name)->second;// std::find(mtl_lib.list.begin(), mtl_lib.list.end(), mtl_name) - mtl_lib.list.begin();
-           // std::cout<<"cur mtl "<<mtl_name<<" "<<cur_mtl<<"\n";
             if (cur_mtl == (int)mtl_lib.list.size()) {
                 warn("Load Unknown material'", mtl_name, " set to dummy ' (line ", cur_line, ").");
                 cur_mtl = std::find(mtl_lib.list.begin(), mtl_lib.list.end(), "") - mtl_lib.list.begin();
@@ -256,6 +256,8 @@ static bool parse_obj(std::istream& stream, obj::File& file, obj::MaterialLib& m
             file.mtl_libs.push_back(lib_name);
         } else if (*ptr == 's' && std::isspace(ptr[1])) {
             // Ignore smooth commands
+        } else if (*ptr == 'l' && std::isspace(ptr[1])) {
+            // Ignore line commands
         } else {
             error("Unknown command '", ptr, "' (line ", cur_line, ").");
             err_count++;
@@ -378,8 +380,6 @@ static bool parse_mtl(std::istream& stream, obj::MaterialLib& mtl_lib) {
             warn("Unknown command '", ptr, "' (line ", cur_line , ").");
         }
     }
-
-
     return (err_count == 0);
 }
 
@@ -412,18 +412,18 @@ void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 						<< tri_mesh.vertices[i].z<<std::endl; 
 	}
 
-	for(int i = 0; i < vtx_size; i++) {
-		outfile << "vn " <<std::fixed<<std::setprecision(4) 
-						<< tri_mesh.normals[i].x << " " 
-						<< tri_mesh.normals[i].y << " " 
-						<< tri_mesh.normals[i].z<<std::endl; 
-	}
-	for(int i = 0; i < vtx_size; i++) {
-		outfile << "vt " <<std::fixed<<std::setprecision(4) 
-						<< tri_mesh.texcoords[i].x << " " 
-						<< tri_mesh.texcoords[i].y << " "
-						<< 0.0 << std::endl; 
-	}
+//	for(int i = 0; i < vtx_size; i++) {
+//		outfile << "vn " <<std::fixed<<std::setprecision(4) 
+//						<< tri_mesh.normals[i].x << " " 
+//						<< tri_mesh.normals[i].y << " " 
+//						<< tri_mesh.normals[i].z<<std::endl; 
+//	}
+//	for(int i = 0; i < vtx_size; i++) {
+//		outfile << "vt " <<std::fixed<<std::setprecision(4) 
+//						<< tri_mesh.texcoords[i].x << " " 
+//						<< tri_mesh.texcoords[i].y << " "
+//						<< 0.0 << std::endl; 
+//	}
 
     int cur_mtl = -1;    
 	for(int i = 0; i < trx_size; i++){
@@ -434,15 +434,19 @@ void write_obj(const TriMesh &tri_mesh, const MaterialLib& mtl_lib , int c) {
 //		}
 //		else
 //		{
+            if(cur_mtl != tri_mesh.indices[i * 4 + 3]) {
+			    cur_mtl = tri_mesh.indices[i * 4 + 3];
+                printf("new mtl %d %d \n", cur_mtl, mtl_lib.list.size());
+                if(cur_mtl >= mtl_lib.list.size())
+                    outfile << "mtl " <<cur_mtl<<" none \n";
+                else
+                    outfile << "mtl " <<cur_mtl<<" "<< mtl_lib.list[cur_mtl] <<"\n";
+                 
+            }
 			outfile << "f " << tri_mesh.indices[i * 4] + 1 <<" "
 					        << tri_mesh.indices[i * 4 + 1] + 1 <<" "
 							<< tri_mesh.indices[i * 4 + 2] + 1<<std::endl;
         
-            if(cur_mtl != tri_mesh.indices[i * 4 + 3]) {
-			    cur_mtl = tri_mesh.indices[i * 4 + 3];
-                outfile << "mtl " <<cur_mtl<<" "<< mtl_lib.list[cur_mtl] <<"\n";
-                 
-            }
             
 //		}
 		//fprintf(file, "f %d// %d// %d//\n", triangles[i].v[0]+1, triangles[i].v[1]+1, triangles[i].v[2]+1); //more compact: remove trailing zeros
@@ -639,6 +643,8 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
                     if (map == mapping.end()) {
                         has_normals |= (face.indices[i].n != 0);
                         has_texcoords |= (face.indices[i].t != 0);
+                        
+                        //printf(" |%d %d %d| ", face.indices[i].v, face.indices[i].t, face.indices[i].n);
                         mapping.insert(std::make_pair(face.indices[i], mapping.size()));
                     }
                 }
@@ -662,7 +668,11 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
                 }
             }
         }
+        std::cout<<"has normal "<<has_normals<<"has uv "<<has_texcoords<<"\n";
+        
         if (triangles.size() == 0) continue;
+
+        printf("vtx mapping size %ld\n", mapping.size());
 
         // Add this object to the mesh
         auto vtx_offset = tri_mesh.vertices.size();
@@ -692,7 +702,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
                 tri_mesh.texcoords[vtx_offset + p.second] = obj_file.texcoords[p.first.t];
             }
         } else {
-            warn("No texture coordinates are present, using default value.");
+            //warn("No texture coordinates are present, using default value.");
             std::fill(tri_mesh.texcoords.begin() + vtx_offset, tri_mesh.texcoords.end(), float2(0.0f));
         }
 
@@ -708,7 +718,7 @@ TriMesh compute_tri_mesh(const File& obj_file, const MaterialLib& mtl_lib, size_
             }
         } else {
             // Recompute normals
-            warn("No normals are present, recomputing smooth normals from geometry.");
+            //warn("No normals are present, recomputing smooth normals from geometry.");
             std::fill(tri_mesh.normals.begin() + vtx_offset, tri_mesh.normals.end(), float3(0.0f));
             compute_vertex_normals(tri_mesh.indices, tri_mesh.face_normals, tri_mesh.normals, idx_offset);
         }
