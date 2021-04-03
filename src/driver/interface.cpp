@@ -465,7 +465,7 @@ struct Interface {
     }
 
     const anydsl::Array<uint8_t>& load_buffer(int32_t dev, const std::string& filename) {
-        info("Prepare Load buffer '", filename, "'");
+        //info("Prepare Load buffer '", filename, "'");
         auto& buffers = devices[dev].buffers;
         auto it = buffers.find(filename);
         if (it != buffers.end())
@@ -475,9 +475,9 @@ struct Interface {
             error("Cannot open buffer '", filename, "'");
         std::vector<uint8_t> vector;
         read_buffer(is, vector);
-        info("Loaded buffer '", filename, "'");
+        //info("Loaded buffer '", filename, "'");
         buffers[filename] = std::move(copy_to_device(dev, vector));
-        info("after buffer copy'", filename, "'");
+        //info("after buffer copy'", filename, "'");
         return buffers[filename];
     }
 
@@ -771,7 +771,6 @@ void rodent_load_bvh4_tri4(int32_t dev, const char* file, Node4** nodes, Tri4** 
 void rodent_load_bvh8_tri4(int32_t dev, const char* file, Node8** nodes, Tri4** tris) {
     dfw_time_start("interface => load bvh");
     auto& bvh = interface->load_bvh8_tri4(dev, file);
-    printf("load bvh 8 4\n");
     *nodes = const_cast<Node8*>(bvh.nodes.data());
     *tris  = const_cast<Tri4*>(bvh.tris.data());
     dfw_time_end("interface => load bvh");

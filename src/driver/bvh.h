@@ -241,7 +241,6 @@ public:
         auto time_end = std::chrono::high_resolution_clock::now();
         total_time_ += std::chrono::duration_cast<std::chrono::milliseconds>(time_end - time_start);
 #endif
-
         mem_pool_.cleanup();
     }
 

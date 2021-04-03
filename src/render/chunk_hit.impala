@@ -88,9 +88,11 @@ fn write_chunk_hit(org_chk: i32, color: Color, cur_chk:i32, chunk_hit: ChunkHit)
     let ctrb = (chunk_hit.ctrb(chunk_hit_id) >> sign_bit) & 0xF;
     
     let lu = color_luminance(color);
+    //if lu < 0.5f { return() }    
     let lu_i32 = if lu >= 1.0f { 15 } 
                  else if lu < 0.7f { 1 }
                  else { (lu * 16.0f) as i32 };
+        
     if ctrb == 0 && lu_i32 != 0 {
         chunk_hit.ctrb(chunk_hit_id) += (lu_i32 << sign_bit);
     } else {

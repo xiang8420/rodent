@@ -36,6 +36,7 @@ fn int_to_string(i: i32) -> [u8 * 5]{
     str(4) = '\0';
     str
 }
+
 struct File_path{
     bvh: [u8 * 99],
 //tri mesh
@@ -55,6 +56,7 @@ struct File_path{
     simple_ks: [u8 * 99],
     simple_ns: [u8 * 99]
 }
+
 fn make_file_path(dev_type: i32, chunk_rank: i32/*, chunk_size: i32*/) -> File_path {
     let data = "data/\0";
 

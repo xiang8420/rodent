@@ -131,9 +131,15 @@ void AsyncNode::send_message() {
         } else if (outList_empty()) {
             statistics.start("run => message_thread => send_message => switch_chunk");
             ///load new chunk
+            comm->os<<"before switch: ";
+            for(int i = 0;i < chunk_size; i++) {
+                comm->os<<outlist_comm[i].size()<<" ";
+            }
+            comm->os<<"\n";
             ps->switch_current_chunk(outlist_comm);
             
             int current_chunk = ps->get_current_chunk();
+            comm->os<<"mthread copy new chunk " << current_chunk << "\n";
             copy_to_inlist(current_chunk);
                 
             inlist_comm.cond_full.notify_all();
@@ -149,15 +155,20 @@ void AsyncNode::send_message() {
     int cId = get_sent_list();
     do {
         if(cId >= 0) {
+            comm->os<<"mthread outlist "<<cId<<" size  "<<outlist_comm[cId].size()<<"\n";
             int dst_proc = ps->get_proc(cId);
+            comm->os<<"chunk "<<cId<<" get proc "<<dst_proc<<"\n";
             if(dst_proc >= 0) {
                 ps->set_proc_busy(dst_proc);
                 statistics.start("run => message_thread => send_message => new RayMsg");
+                comm->os<<"mthread construct msg\n";
                 RayMsg *ray_msg = export_ray_msg(cId, comm->get_rank(), dst_proc, false, comm->get_tag()); 
+                comm->os<<"mthread get new msg\n";
                 statistics.end("run => message_thread => send_message => new RayMsg");
                 statistics.start("run => message_thread => send_message => comm->send");
                 comm->send_message(ray_msg, ps);
                 statistics.end("run => message_thread => send_message => comm->send");
+                comm->os<<"send over\n";
                 delete ray_msg;
             } else {
                 error("ray msg");
@@ -217,7 +228,7 @@ int AsyncNode::load_incoming_buffer(float **rays, bool primary, int thread_id) {
     int copy_size = rays_stream->size;
     comm->os<<"all rays chunk "<<ps->get_current_chunk()<<" size "<<copy_size<<"\n";
     int width = rays_stream->width;
-    printf("copy primary size %d\n", copy_size);
+    //printf("copy primary size %d\n", copy_size);
     memcpy(*rays, rays_stream->get_data(), ps->get_stream_store_capacity() * width * sizeof(float)); 
   
     //scheduler->chunk_manager->local_chunks.recv_rays(copy_size);

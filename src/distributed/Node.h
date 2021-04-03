@@ -67,9 +67,8 @@ void Node::launch_rodent_render(int devNum, bool generate_rays) {
         };
         int rnd = camera->iter * (comm->get_rank() + 1) * devNum + i;
 
-        printf("region %d %d %d %d\n", region[0], region[1], region[2], region[3]);
-
-        printf("launch render chunk %d %d\n", ps->get_current_chunk(), ps->get_next_chunk());
+        //printf("region %d %d %d %d\n", region[0], region[1], region[2], region[3]);
+        //printf("launch render chunk %d %d\n", ps->get_current_chunk(), ps->get_next_chunk());
         workThread.emplace_back(render, &settings, rnd, i, ps->get_current_chunk(), ps->get_next_chunk(), generate_rays);
     }
     render_start.notify_all();
@@ -153,7 +152,7 @@ struct RetiredRays {
         int width = primary ? PRIMARY_WIDTH : SECONDARY_WIDTH;
         int capacity = size * width;
         data = new float[capacity]; 
-        printf("new retired ray size %d width %d \n", size, width);
+        //printf("new retired ray size %d width %d \n", size, width);
         memcpy((char*)data, (char*)rays, capacity * sizeof(float));
     }
     
@@ -213,14 +212,12 @@ struct RetiredRays {
     }
     
     static void clear_retired_rays(std::vector<RetiredRays*> &retiredRays, RayStreamList * outlist, int chunk_size, int proc_rank) {
-        printf("clear retired rays %d \n", retiredRays.size());
-        for(auto& rays: retiredRays) 
-            printf("%d \n", rays->size);
+        //printf("clear retired rays %d \n", retiredRays.size());
+       // for(auto& rays: retiredRays) 
+       //     printf("%d \n", rays->size);
         
         statistics.start("run => message_thread => clear_retired => get mutex");
         compact_retired_rays(retiredRays, chunk_size);       
-        for(auto& rays: retiredRays) 
-            printf("after compact%d \n", rays->size);
         std::unique_lock <std::mutex> lock(outlist[0].mutex); 
         while(!retiredRays.empty()) {
             RetiredRays* rays = retiredRays.back();

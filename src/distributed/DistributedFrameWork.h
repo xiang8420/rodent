@@ -101,9 +101,9 @@ struct DistributedFrameWork {
         statistics.start("schedule");
         std::cout<<"run type "<<type<<"\n";
         
-            statistics.start("run");
+        statistics.start("run");
         node->run(camera);
-            statistics.end("run");
+        statistics.end("run");
         
         statistics.print(scheduler->camera->iter, proc_rank);
         scheduler->chunk_manager->print_schedule(scheduler->camera->iter, proc_rank); 
@@ -135,7 +135,6 @@ struct DistributedFrameWork {
         }
         delete[] reduce_buffer;
     }
-
 };
 
 static std::unique_ptr<DistributedFrameWork> dfw;

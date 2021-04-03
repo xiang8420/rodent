@@ -114,17 +114,16 @@ inline int FileSize(const char* fname)
     return -1;
 }
 
-#define MAX_CHUNK 3
-#define MAX_PROC  128
-#define PRIMARY_WIDTH 22
-#define SECONDARY_WIDTH 17
-#define CHUNK_HIT_RES 32 
-#define VIS_CHUNK_HIT true
-#define STREAM_CAPACITY 256 * 256
-#define OUT_BUFFER_CAPACITY 1024 * 1024
-#define MIN_SEND_STREAM_SIZE 10
-#define SIMPLE_TRACE false //true 
-#define CACHE_RATE 1 
-#define PRELOAD  true 
+static int PRIMARY_WIDTH = 22;
+static int SECONDARY_WIDTH = 17;
+static bool PRELOAD = true;
+static int MAX_PROC = 128;
+static int CHUNK_HIT_RES = 32;
+static bool VIS_CHUNK_HIT = true;
+static int STREAM_CAPACITY = 256 * 256;
+static int OUT_BUFFER_CAPACITY = 1024 * 1024;
+static int MIN_SEND_STREAM_SIZE = 10;
+static bool SIMPLE_TRACE = false; //true 
+static int CACHE_RATE = 1; 
 
 #endif // COMMON_H

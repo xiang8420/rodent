@@ -21,7 +21,6 @@
 #include <x86intrin.h>
 #endif
 
-
 void setup_interface(size_t, size_t);
 float* get_pixels();
 void clear_pixels();

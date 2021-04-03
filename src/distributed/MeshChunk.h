@@ -2,7 +2,6 @@ int get_max_length(float* length, int d) {
     float max = 0;
     int id = -1;
     for(int i = 0; i < d; i++) { 
-        //debug
         if( i==1 ) continue;
         if(length[i] > max) { 
             id = i;

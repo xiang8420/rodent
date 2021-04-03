@@ -173,13 +173,12 @@ public:
     }
     RayMsg(RayArrayList &outList, int src, int dst, int chunk, bool idle, int tag) {
         statistics.start("new RayMSG 1");
-        printf("construct message ray\n");
         header = new MessageHeader(-1, src, dst, MsgType::ArrayRay, false, 0, idle, chunk, tag);
         
         RaysArray &primary = outList.get_primary(); 
         int width = primary.get_store_width(); 
         int* ids = (int*)(primary.get_data());
-        printf(" dst %d ray msg raylist primary size %d width %d %d : ", dst, primary.get_size(), width, primary.get_store_width());
+        //printf(" dst %d ray msg raylist primary size %d width %d %d : ", dst, primary.get_size(), width, primary.get_store_width());
         for(int i = 0; i < std::min(5, primary.get_size()); i ++) {
             printf(" %d %d$", ids[i*width], ids[i*width + 9]);
         }
@@ -215,7 +214,8 @@ public:
     }
 
     RayMsg(RayStreamList &outList, int src, int dst, int chunk, bool idle, int tag) {
-        printf("construct message ray\n");
+        statistics.start("new RayMSG 2");
+        //printf("construct message ray\n");
         header = new MessageHeader(-1, src, dst, MsgType::StreamRay, false, 0, idle, chunk, tag);
 
         header->primary = outList.primary_size(); 
@@ -233,28 +233,31 @@ public:
             int * iptr = (int*) ptr;
             struct RaysStream *primary = outList.get_primary();
             iptr[0] = primary->get_size();
-            printf("primary size %d :", iptr[0]);
+            //printf("primary size %d :", iptr[0]);
             ptr += sizeof(int);
             int length = PRIMARY_WIDTH * outList.get_store_capacity() * sizeof(float);
             memcpy(ptr, primary->get_data(), length);
             delete primary;
             ptr += length;
         } 
-            printf("end primary size\n");
+        //printf("end primary size\n");
         int secondary_size = outList.secondary_size();
         for(int i = 0; i < secondary_size; i++) {
             int * iptr = (int*) ptr;
             struct RaysStream *secondary = outList.get_secondary();
             iptr[0] = secondary->get_size();
-            printf("primary size %d :", iptr[0]);
+            //printf("primary size %d :", iptr[0]);
             ptr += sizeof(int);
             int length = SECONDARY_WIDTH * outList.get_store_capacity() * sizeof(float);
             memcpy(ptr, secondary->get_data(), length);
             delete secondary;
             ptr += length;
         } 
+        statistics.end("new RayMSG 2");
     }
-    ~RayMsg() { delete[] content; }
+    ~RayMsg() { 
+        delete[] content; 
+    }
 };
 
 class RecvMsg : public Message {
@@ -343,7 +346,8 @@ class StatusMsg : public Message {
 
 public:
     StatusMsg(int src, int dst, int* status, int chunk, int proc_size, int tag) {
-        printf("construct message status src %d\n", src);
+        statistics.start("new status MSG");
+        //printf("construct message status src %d\n", src);
         if(dst == -1) 
             header = new MessageHeader(src, -1, dst, MsgType::Status, false, 0, true, chunk, tag);
         else 
@@ -355,6 +359,7 @@ public:
         header->content_size = length;
         
         printf("new Message root %d collective %d\n", header->root, header->collective);
+        statistics.end("new status MSG");
     }
 };
 
@@ -363,7 +368,7 @@ class ScheduleMsg : public Message {
 public:
     //broad cast schedule
     ScheduleMsg(int src, int* chunkStatus, int chunk, int chunk_size, int tag) {
-        printf(" construct message schedule src %d\n", src);
+        //printf(" construct message schedule src %d\n", src);
         header = new MessageHeader(src, -1, -1, MsgType::Schedule, false, 0, false, chunk, tag);
         int length = chunk_size * sizeof(int);
         content = new char[length];

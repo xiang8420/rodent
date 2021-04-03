@@ -170,7 +170,7 @@ namespace Simplify
 
         
         convert_obj_file(obj_file, mtl_lib, 0); 
-
+        
         int target_count; 
         if(Simplify::triangles.size() < 1000)
             target_count = Simplify::triangles.size(); 

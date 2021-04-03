@@ -24,8 +24,8 @@ fn @cpu_parallel_tiles( image: Tile
     let width  = image.xmax - image.xmin;
     let height = image.ymax - image.ymin;
     let num_cores = rodent_cpu_thread_num(); 
-    print_string("rodent num_cores");
-    print_i32(num_cores);
+    //print_string("rodent num_cores");
+    //print_i32(num_cores);
     let (tile_width, tile_height) = match fixed_tile {
         true => (tile_size, tile_size), 
         _ => cpu_get_tile(width, height, num_cores)
@@ -35,6 +35,15 @@ fn @cpu_parallel_tiles( image: Tile
    //  for i in parallel(num_cores, 0, num_cores) {
    //      @@body(image.xmin, image.ymin, image.xmax, image.ymax, spp_thread, i)
    //  }
+    //print_string("w ");
+    //print_i32(width);
+    //print_string(" h ");
+    //print_i32(width);
+    //print_string(" num ");
+    //print_i32(tile_width);
+    //print_string(" ");
+    //print_i32(tile_height);
+
     let num_tiles_x = round_up(width as i32, tile_width)  / tile_width;
     let num_tiles_y = round_up(height as i32, tile_height) / tile_height;
     let num_tiles = num_tiles_x * num_tiles_y;
@@ -458,8 +467,8 @@ fn @cpu_primary_transfer( primary: PrimaryStream
         let ray = ray_reader(src_id, 0);
         if ray_ids(src_id) != -1 {
             // if 3 4 bounce write to chunk n
-            if scene.simple_trace && next_chks(src_id) == 1022 && depth(src_id) > 0 {
-                if depth(src_id) > 1 {
+            if scene.simple_trace && next_chks(src_id) == 1022 && depth(src_id) > 2 {
+                if depth(src_id) > 2 {
                     write_next_chk(src_id, 0, num_chunks);
                 } else {
                     let org_chk   = org_chks(src_id);
@@ -683,7 +692,7 @@ fn @cpu_dis_trace( scene: Scene
 
     let valid_camera = scene.camera.valid; 
     let cur_chk_bbox = get_chunk_bbox(scene, cpu_intrinsics);
-    print_string("start rendering\n");   
+    //print_string("start rendering\n");   
     for xmin, ymin, xmax, ymax, spp_thread, tid in cpu_parallel_tiles(scene.camera.tile, 0, false) {
         with cpu_profile(&mut total_counter) {
             // Get ray streams/states from the CPU driver
@@ -703,9 +712,9 @@ fn @cpu_dis_trace( scene: Scene
             let num_rays = spp_thread * (ymax - ymin) * (xmax - xmin);
             if !valid_camera { id = num_rays; }
             
-            print_size("thread render start ", tid, "\n");
+            //print_size("thread render start ", tid, "\n");
             while true {
-                print_i32(scene.cur_chk);
+                //print_i32(scene.cur_chk);
                 let first = (id == 0);
                 // (Re-)generate primary rays
                 if primary.size < primary.capacity && id < num_rays && valid_camera {
@@ -805,24 +814,24 @@ fn @cpu_dis_trace( scene: Scene
             }
         }
     }
-    if cpu_profiling_enabled {
-        fn print_counter(counter: i64, total: i64, name: &[u8]) -> () {
-            print_size("chunk: ", scene.cur_chk, " ");
-            print_string(name);
-            print_string(": ");
-            print_i64(counter);
-            print_string(" (");
-            print_i64(counter * 100i64 / total);
-            print_string("%)\n");
-        }
-        print_counter(primary_counter, total_counter, "primary");
-        print_counter(bounces_counter, total_counter, "bounces");
-        print_counter(shadow_counter,  total_counter, "shadow");
-        print_counter(shading_counter, total_counter, "shade");
-        print_counter(transfer_counter, total_counter, "transfer");
-        print_counter(sendrecv_counter, total_counter, "sendrecv");
-        print_counter(total_counter,   total_counter, "total");
-    }
+   // if cpu_profiling_enabled {
+   //     fn print_counter(counter: i64, total: i64, name: &[u8]) -> () {
+   //         print_size("chunk: ", scene.cur_chk, " ");
+   //         print_string(name);
+   //         print_string(": ");
+   //         print_i64(counter);
+   //         print_string(" (");
+   //         print_i64(counter * 100i64 / total);
+   //         print_string("%)\n");
+   //     }
+   //     print_counter(primary_counter, total_counter, "primary");
+   //     print_counter(bounces_counter, total_counter, "bounces");
+   //     print_counter(shadow_counter,  total_counter, "shadow");
+   //     print_counter(shading_counter, total_counter, "shade");
+   //     print_counter(transfer_counter, total_counter, "transfer");
+   //     print_counter(sendrecv_counter, total_counter, "sendrecv");
+   //     print_counter(total_counter,   total_counter, "total");
+   // }
 }
 
 // CPU device ----------------------------------------------------------------------

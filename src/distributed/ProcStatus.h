@@ -122,7 +122,7 @@ bool ProcStatus::all_thread_waiting() {
 }
 
 void ProcStatus::thread_reset() {
-    printf("\ncpu thread num %d\n", work_thread_num);
+    //printf("\ncpu thread num %d\n", work_thread_num);
     for(int i = 0; i < work_thread_num; i++) 
         thread_idle[i] = false;
 }

@@ -103,7 +103,7 @@ find_package(TBB REQUIRED)
 find_package(LZ4 REQUIRED)
 
 add_executable(converter ${CONVERTER_SRCS})
-target_include_directories(converter PUBLIC ${LZ4_INCLUDE_DIR})
+target_include_directories(converter PUBLIC ${LZ4_INCLUDE_DIR} )
 target_link_libraries(converter ${LZ4_LIBRARY} ${MPI_LIBRARIES} )
 target_compile_definitions(converter PUBLIC -DCPUINFO_PATH="${CPUINFO_PATH}")
 target_compile_features(converter PRIVATE cxx_std_14)

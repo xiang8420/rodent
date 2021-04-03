@@ -370,7 +370,7 @@ struct LocalChunks {
             if(chk.id == cur_chk || outlist[chk.id].ray_size() == 0) { 
                 chk.priority = min_priority; 
             } else {
-                printf("chk %d : ", chk.id);
+                //printf("chk %d : ", chk.id);
                 if(SIMPLE_TRACE && !first_frame && frame_schedule) {
                     int predict_ray_size = outlist[chk.id].ray_size() 
                                          + chk.other_send_left / local_size;
@@ -447,7 +447,7 @@ struct LocalChunks {
             else 
                 current = get_max_priority_chunk(current, outlist);
             next = PRELOAD ? get_max_priority_chunk(current, outlist) : -1;
-            printf("schedule2 c %d n %d\n", current, next);
+            //printf("schedule2 c %d n %d\n", current, next);
         }
         
         if(next == -1 && current == -1) {
@@ -463,7 +463,7 @@ struct LocalChunks {
         int loaded_num;
         int64_t loaded_size;
         loaded_chunk_size(loaded_num, loaded_size);
-        printf("loaded num %d\n", loaded_num);
+        //printf("loaded num %d\n", loaded_num);
         while(loaded_num > max_cache_num) {
             int local_idx = min_priority_loaded();
             if(local_idx >= 0) {
@@ -585,8 +585,8 @@ struct ChunkManager {
         if(c >= chunk_size || chunk_list[c].size() == 0) 
             return -1;
 
-        printf("before get chunk %d\n ", chunk_list[c].proc_list.size());
-        printf("get chunk %d  proc %d \n", c, chunk_list[c].get_proc());
+        //printf("before get chunk %d\n ", chunk_list[c].proc_list.size());
+        //printf("get chunk %d  proc %d \n", c, chunk_list[c].get_proc());
         return chunk_list[c].get_proc();
     }
 
@@ -782,10 +782,11 @@ void Scheduler::preprocess(Camera *cam, int block, bool sync) {
     
     if(load_chunk_hit)
         chunk_manager->set_render_speed(pass_record->gather());
-    
     camera = cam;
     block_count = block;
+    
     int chunk_size = chunks.size;
+    //
     if(chunk_size == 1)
         allcopy();
     else  
@@ -887,8 +888,8 @@ void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& im
     for(int i = 0; i < width * height; i++)
         domain[i] = -1;
     for(int i = 0; i < chunk_size; i++) {
-        printf("chunks list %f %f %f max %f %f %f\n", chunks.list[i].min.x, chunks.list[i].min.y, chunks.list[i].min.z
-                                                    , chunks.list[i].max.x, chunks.list[i].max.y, chunks.list[i].max.z);
+       // printf("chunks list %f %f %f max %f %f %f\n", chunks.list[i].min.x, chunks.list[i].min.y, chunks.list[i].min.z
+       //                                             , chunks.list[i].max.x, chunks.list[i].max.y, chunks.list[i].max.z);
         project_cube_to_image(camera, chunks.list[i], i, true, image);
     }
    
@@ -920,7 +921,7 @@ void Scheduler::get_projected_chunk(int proc_rank, int proc_size, ImageBlock& im
                 chunk = get_most_unloaded_chunk(&block[0], chunks.size); 
             else 
                 chunk = -1;
-            printf("%d most unload chunk %d\n", proc_rank, chunk);
+            //printf("%d most unload chunk %d\n", proc_rank, chunk);
         } else if(chunk_size == 1) {
             chunk = 0;
         } else {
@@ -946,7 +947,6 @@ struct ChunkHitInfo {
     int center;
     //int divergence_rank;
 };
-
 bool send_greater_mark(const ChunkHitInfo& a, const ChunkHitInfo& b) {
     return a.send_count > b.send_count;
 }
@@ -959,6 +959,43 @@ bool id_greater_mark(const ChunkHitInfo& a, const ChunkHitInfo& b) {
     return a.id < b.id;
 }
 
+struct ChunkHitInfoList {
+    std::vector<ChunkHitInfo> list;
+    
+    ChunkHitInfoList(PassRecord *pass_record, ChunkProcs * chunk_list, int chunk_size) {
+        
+        list.resize(chunk_size);
+        memset(list.data(), 0, sizeof(ChunkHitInfo) * chunk_size);
+        //get recv / send, 
+        for(int i = 0; i < chunk_size; i++) {
+            list[i].id = i;
+            list[i].center = -1;
+            for(int j = 0; j < chunk_size; j ++) {
+                list[i].send_count += pass_record->get_send(i, j); 
+            }
+            list[i].recv_count = pass_record->get_recv(i);
+        }
+        sort(list.begin(), list.end(), recv_greater_mark);
+        for(int i = 0; i < chunk_size; i++)
+            list[i].recv_rank = i;
+
+        sort(list.begin(), list.end(), send_greater_mark);
+        for(int i = 0; i < chunk_size; i++)
+            list[i].send_rank = i;
+        
+        sort(list.begin(), list.end(), id_greater_mark);
+        //Get cluster center
+        std::vector<int> center;
+        for(int i = 0; i < chunk_size; i++) {
+            if(chunk_list[i].size() > 0) {
+                list[i].center = i;
+                center.emplace_back(i);
+            }
+        }
+    }
+};
+
+
 void Scheduler::fill_local_chunks(int proc_size, bool sync) {
     int chunk_size = chunks.size; 
     if(chunk_manager->all_assigned()) return;
@@ -970,33 +1007,13 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync) {
     // put left chunk to proc
     if(!sync && load_chunk_hit) {
         printf(" process left chunk second frame\n");
-        std::vector<ChunkHitInfo> chunk_hit_info;
-        chunk_hit_info.resize(chunk_size);
-        memset(chunk_hit_info.data(), 0, sizeof(ChunkHitInfo) * chunk_size);
-        //get recv / send, 
-        for(int i = 0; i < chunk_size; i++) {
-            chunk_hit_info[i].id = i;
-            chunk_hit_info[i].center = -1;
-            for(int j = 0; j < chunk_size; j ++) {
-                chunk_hit_info[i].send_count += pass_record->get_send(i, j); 
-            }
-            chunk_hit_info[i].recv_count = pass_record->get_recv(i);
-        }
         
-        sort(chunk_hit_info.begin(), chunk_hit_info.end(), recv_greater_mark);
-        for(int i = 0; i < chunk_size; i++)
-            chunk_hit_info[i].recv_rank = i;
-
-        sort(chunk_hit_info.begin(), chunk_hit_info.end(), send_greater_mark);
-        for(int i = 0; i < chunk_size; i++)
-            chunk_hit_info[i].send_rank = i;
-        
-        sort(chunk_hit_info.begin(), chunk_hit_info.end(), id_greater_mark);
-        //Get cluster center
+        ChunkHitInfoList chil(pass_record, chunk_list, chunk_size); 
+      //  //Get cluster center
         std::vector<int> center;
         for(int i = 0; i < chunk_size; i++) {
             if(chunk_list[i].size() > 0) {
-                chunk_hit_info[i].center = i;
+                chil.list[i].center = i;
                 center.emplace_back(i);
             }
         }
@@ -1025,7 +1042,7 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync) {
             }
             printf("\n");
             center.emplace_back(cand_chk);
-            chunk_hit_info[cand_chk].center = cand_chk;
+            chil.list[cand_chk].center = cand_chk;
         }
         for(auto& chk : center) 
             printf("cluster center %d\n", chk);
@@ -1044,9 +1061,9 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync) {
                 int cand_chk = -1;
                 for(int chk = 0; chk < chunk_size; chk ++) {
                     int dist = 0; 
-                    if(chunk_hit_info[chk].center != -1) continue;
+                    if(chil.list[chk].center != -1) continue;
                     for(int cluster_chk = 0; cluster_chk < chunk_size; cluster_chk ++) {
-                        if(chunk_hit_info[cluster_chk].center == cent_chk) {
+                        if(chil.list[cluster_chk].center == cent_chk) {
                             dist += pass_record->get_send(chk, cluster_chk) + pass_record->get_send(cluster_chk, chk);
                         } 
                     }
@@ -1057,7 +1074,7 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync) {
                     }
                 }
                 cluster_size[st % proc_size] ++;
-                chunk_hit_info[cand_chk].center = cent_chk;
+                chil.list[cand_chk].center = cent_chk;
             }
             st++;
         }
@@ -1066,7 +1083,7 @@ void Scheduler::fill_local_chunks(int proc_size, bool sync) {
         chunk_list = chunk_manager->chunk_list;
         for(int i = 0; i < center.size(); i++) {
             int cent_chk = center[i];
-            for(auto& chk: chunk_hit_info) {
+            for(auto& chk: chil.list) {
                 if(chk.center == cent_chk) {
                     chunk_manager->insert(chk.id, i);
                 }
@@ -1101,7 +1118,8 @@ void Scheduler::data_distributed(bool sync) {
     ImageBlock image(width, height);
     int chunk_size = chunks.size;
     chunk_manager->reset_chunk_list();
-  
+
+    //project domains to screen
     get_projected_chunk(proc_rank, proc_size, image, sync);
     
     //put other not projected chunks to procs 
